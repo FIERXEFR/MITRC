@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "1082138200445",
+    "project_id": "mitrc-69",
+    "storage_bucket": "mitrc-69.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1082138200445:android:85489090c9a98774c06414",
+        "android_client_info": {
+          "package_name": "com.mitrc.ac.in"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1082138200445-1vu7auemqaaqjjg0b57i65k2u5n09g65.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mitrc.ac.in",
+            "certificate_hash": "3a0d4ae0631880f28755bf300c508fe8a8cbf599"
+          }
+        },
+        {
+          "client_id": "1082138200445-ssl4m35h2c7r69lf9do4jjlfdnn0dnv3.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBuIDpQ8m4AAOTmgwYIUF3gHzRhUSl0wUA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1082138200445-ssl4m35h2c7r69lf9do4jjlfdnn0dnv3.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

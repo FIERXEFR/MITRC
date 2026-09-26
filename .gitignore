@@ -1,0 +1,35 @@
+# Gradle
+.gradle/
+build/
+.kotlin/
+local.properties
+
+# Android Studio / IDE
+.idea/
+.vscode/
+*.iml
+captures/
+
+# Native build artifacts
+.externalNativeBuild/
+.cxx/
+
+# Build outputs (never push)
+*.apk
+*.aab
+*.ap_
+app/release/
+
+# Signing keystores (create locally, never commit)
+*.jks
+*.keystore
+
+# Supabase local CLI
+supabase/.temp/
+supabase/.env
+supabase/config.toml
+
+# OS junk
+.DS_Store
+Thumbs.db
+*.log
