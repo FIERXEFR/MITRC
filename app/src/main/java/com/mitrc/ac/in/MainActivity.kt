@@ -9,8 +9,10 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.mitrc.ac.`in`.data.OnboardingStore
 import com.mitrc.ac.`in`.ui.screens.HomeScreen
 import com.mitrc.ac.`in`.ui.screens.LoginScreen
+import com.mitrc.ac.`in`.ui.screens.OnboardingScreen
 import com.mitrc.ac.`in`.ui.theme.MITRCTheme
 
 class MainActivity : ComponentActivity() {
@@ -18,30 +20,46 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val startLoggedIn = intent.getBooleanExtra(EXTRA_START_LOGGED_IN, false)
+        val requestedStart = intent.getStringExtra(EXTRA_START_DESTINATION)
+        val startDestination =
+            if (requestedStart != null && requestedStart in validRoutes) requestedStart
+            else ROUTE_LOGIN
         setContent {
             MITRCTheme {
-                MitrcRoot(startLoggedIn = startLoggedIn)
+                MitrcRoot(startDestination = startDestination)
             }
         }
     }
 
     companion object {
-        const val EXTRA_START_LOGGED_IN = "extra_start_logged_in"
+        const val EXTRA_START_DESTINATION = "extra_start_destination"
+        const val ROUTE_ONBOARDING = "onboarding"
         const val ROUTE_LOGIN = "login"
         const val ROUTE_HOME = "home"
+
+        private val validRoutes = setOf(ROUTE_ONBOARDING, ROUTE_LOGIN, ROUTE_HOME)
     }
 }
 
 @Composable
 fun MitrcRoot(
-    startLoggedIn: Boolean,
+    startDestination: String,
     navController: NavHostController = rememberNavController()
 ) {
     NavHost(
         navController = navController,
-        startDestination = if (startLoggedIn) MainActivity.ROUTE_HOME else MainActivity.ROUTE_LOGIN
+        startDestination = startDestination
     ) {
+        composable(MainActivity.ROUTE_ONBOARDING) {
+            OnboardingScreen(
+                onFinished = {
+                    OnboardingStore.markCompleted()
+                    navController.navigate(MainActivity.ROUTE_LOGIN) {
+                        popUpTo(MainActivity.ROUTE_ONBOARDING) { inclusive = true }
+                    }
+                }
+            )
+        }
         composable(MainActivity.ROUTE_LOGIN) {
             LoginScreen(
                 onLoggedIn = {

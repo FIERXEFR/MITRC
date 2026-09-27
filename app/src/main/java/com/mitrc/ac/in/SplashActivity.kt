@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.mitrc.ac.`in`.auth.AuthRepository
+import com.mitrc.ac.`in`.data.OnboardingStore
 import com.mitrc.ac.`in`.ui.screens.SplashContent
 import com.mitrc.ac.`in`.ui.theme.MITRCTheme
 
@@ -28,9 +29,14 @@ class SplashActivity : ComponentActivity() {
         } catch (error: Throwable) {
             false
         }
+        val startDestination = when {
+            loggedIn -> MainActivity.ROUTE_HOME
+            OnboardingStore.isCompleted -> MainActivity.ROUTE_LOGIN
+            else -> MainActivity.ROUTE_ONBOARDING
+        }
         startActivity(
             Intent(this, MainActivity::class.java).apply {
-                putExtra(MainActivity.EXTRA_START_LOGGED_IN, loggedIn)
+                putExtra(MainActivity.EXTRA_START_DESTINATION, startDestination)
             }
         )
         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
