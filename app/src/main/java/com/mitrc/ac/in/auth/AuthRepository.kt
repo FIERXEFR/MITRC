@@ -2,10 +2,7 @@ package com.mitrc.ac.`in`.auth
 
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
-import com.mitrc.ac.`in`.data.SupabaseManager
-import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.tasks.await
 import kotlin.coroutines.resume
 
 object AuthRepository {
@@ -20,7 +17,7 @@ object AuthRepository {
         get() = auth.currentUser != null
 
     suspend fun signIn(email: String, password: String): Result<FirebaseUser> {
-        val result = suspendCancellableCoroutine<Result<FirebaseUser>> { continuation ->
+        return suspendCancellableCoroutine { continuation ->
             try {
                 auth.signInWithEmailAndPassword(email.trim(), password)
                     .addOnSuccessListener { response ->
@@ -38,11 +35,6 @@ object AuthRepository {
                 continuation.resume(Result.failure(error))
             }
         }
-
-        if (result.isSuccess) {
-            runCatching { importSessionToSupabase() }
-        }
-        return result
     }
 
     suspend fun sendPasswordReset(email: String): Result<Unit> {
@@ -58,7 +50,6 @@ object AuthRepository {
     }
 
     suspend fun signOut() {
-        runCatching { SupabaseManager.requireClient().auth.signOut() }
         auth.signOut()
     }
 
@@ -83,12 +74,5 @@ object AuthRepository {
 
             else -> error.localizedMessage ?: "Sign-in failed. Please try again"
         }
-    }
-
-    private suspend fun importSessionToSupabase() {
-        if (!SupabaseManager.isConfigured) return
-        val user = auth.currentUser ?: return
-        val token = user.getIdToken(false).await().token ?: return
-        SupabaseManager.requireClient().auth.importAuthToken(token)
     }
 }

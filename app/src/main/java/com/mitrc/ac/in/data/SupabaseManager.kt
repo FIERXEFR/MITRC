@@ -1,12 +1,13 @@
 package com.mitrc.ac.`in`.data
 
+import com.google.firebase.auth.FirebaseAuth
 import com.mitrc.ac.`in`.utils.NativeUtils
 import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.storage.Storage
 import io.ktor.client.engine.okhttp.OkHttp
+import kotlinx.coroutines.tasks.await
 
 object SupabaseManager {
 
@@ -25,8 +26,12 @@ object SupabaseManager {
             if (url.startsWith("https://PROJECT-REF") || anonKey.startsWith("PASTE_")) return
 
             client = createSupabaseClient(supabaseUrl = url, supabaseKey = anonKey) {
+                accessToken = {
+                    runCatching {
+                        FirebaseAuth.getInstance().currentUser?.getIdToken(false)?.await()?.token
+                    }.getOrNull()
+                }
                 install(Postgrest)
-                install(Auth)
                 install(Storage)
                 httpEngine = OkHttp.create()
             }
