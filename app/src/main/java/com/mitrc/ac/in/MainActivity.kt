@@ -4,12 +4,15 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
 import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.mitrc.ac.`in`.data.OnboardingStore
 import com.mitrc.ac.`in`.ui.screens.HomeScreen
 import com.mitrc.ac.`in`.ui.screens.LoginScreen
 import com.mitrc.ac.`in`.ui.screens.OnboardingScreen
@@ -50,17 +53,25 @@ fun MitrcRoot(
         navController = navController,
         startDestination = startDestination
     ) {
-        composable(MainActivity.ROUTE_ONBOARDING) {
+        composable(
+            route = MainActivity.ROUTE_ONBOARDING,
+            // Keep the navy backdrop fully visible while the next screen fades in over it.
+            exitTransition = { ExitTransition.None }
+        ) {
             OnboardingScreen(
                 onFinished = {
-                    OnboardingStore.markCompleted()
                     navController.navigate(MainActivity.ROUTE_LOGIN) {
                         popUpTo(MainActivity.ROUTE_ONBOARDING) { inclusive = true }
                     }
                 }
             )
         }
-        composable(MainActivity.ROUTE_LOGIN) {
+        composable(
+            route = MainActivity.ROUTE_LOGIN,
+            enterTransition = {
+                fadeIn(tween(450, easing = FastOutSlowInEasing))
+            }
+        ) {
             LoginScreen(
                 onLoggedIn = {
                     navController.navigate(MainActivity.ROUTE_HOME) {

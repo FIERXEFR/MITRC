@@ -4,8 +4,11 @@ import android.content.Context
 import android.content.SharedPreferences
 
 /**
- * Remembers whether the first-run onboarding flow has already been seen,
- * so it only ever shows once (until the app data is cleared).
+ * Remembers whether the user has ever completed a login.
+ *
+ * Onboarding keeps showing on **every** app launch while this is false, so a student who only
+ * taps Skip still gets the introduction next time. The first successful sign-in sets it, after
+ * which onboarding is never shown again (even if the user signs out later).
  */
 object OnboardingStore {
 

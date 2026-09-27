@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mitrc.ac.`in`.R
 import com.mitrc.ac.`in`.auth.AuthRepository
+import com.mitrc.ac.`in`.data.OnboardingStore
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
 import com.mitrc.ac.`in`.ui.theme.ErrorRed
 import com.mitrc.ac.`in`.ui.theme.Gold
@@ -111,7 +112,10 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
             val result = AuthRepository.signIn(mail, password)
             loading = false
             result.fold(
-                onSuccess = { onLoggedIn() },
+                onSuccess = {
+                    OnboardingStore.markCompleted()
+                    onLoggedIn()
+                },
                 onFailure = { error = AuthRepository.friendlyMessage(it) }
             )
         }

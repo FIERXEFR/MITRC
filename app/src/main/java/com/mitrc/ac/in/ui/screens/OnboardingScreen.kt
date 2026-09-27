@@ -1,7 +1,11 @@
 package com.mitrc.ac.`in`.ui.screens
 
 import androidx.annotation.DrawableRes
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,18 +44,26 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mitrc.ac.`in`.R
@@ -62,7 +75,12 @@ import com.mitrc.ac.`in`.ui.theme.NavySoft
 import com.mitrc.ac.`in`.ui.theme.SurfaceWhite
 import com.mitrc.ac.`in`.ui.theme.TextPrimary
 import com.mitrc.ac.`in`.ui.theme.TextSecondary
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.abs
+
+private const val EXIT_DURATION_MS = 400
+private const val EXIT_NAV_DELAY_MS = 380
 
 private sealed interface OnboardingMedia {
     data class Photo(@param:DrawableRes val res: Int) : OnboardingMedia
@@ -103,6 +121,11 @@ private val onboardingPages = listOf(
     )
 )
 
+/**
+ * First-run introduction. Shown on every launch until the user has logged in at least once.
+ *
+ * @param onFinished invoked after the exit fade completes, when the user taps Skip or Get Started.
+ */
 @Composable
 fun OnboardingScreen(onFinished: () -> Unit) {
     val scope = rememberCoroutineScope()
@@ -110,95 +133,156 @@ fun OnboardingScreen(onFinished: () -> Unit) {
     val currentPage = pagerState.currentPage
     val isLastPage = currentPage == onboardingPages.lastIndex
 
+    // ---- Exit fade (Skip / Get Started) -------------------------------------------------
+    var exiting by remember { mutableStateOf(false) }
+
+    fun finish() {
+        if (exiting) return
+        exiting = true
+    }
+
+    val exitAlpha by animateFloatAsState(
+        targetValue = if (exiting) 0f else 1f,
+        animationSpec = tween(EXIT_DURATION_MS, easing = FastOutSlowInEasing),
+        label = "exitAlpha"
+    )
+    val exitScale by animateFloatAsState(
+        targetValue = if (exiting) 0.96f else 1f,
+        animationSpec = tween(EXIT_DURATION_MS, easing = FastOutSlowInEasing),
+        label = "exitScale"
+    )
+
+    // Navigate only once the exit fade has fully covered the screen.
+    LaunchedEffect(exiting) {
+        if (exiting) {
+            delay(EXIT_NAV_DELAY_MS.toLong())
+            onFinished()
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Brush.verticalGradient(listOf(NavyDeep, Navy, NavySoft)))
     ) {
-        // Decorative circles, same as the splash screen
+        // Everything except the gradient fades out, so we end on a clean navy frame.
         Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .size(280.dp)
-                .offset(x = 100.dp, y = (-90).dp)
-                .background(Gold.copy(alpha = 0.07f), CircleShape)
-        )
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .size(220.dp)
-                .offset(x = (-80).dp, y = 60.dp)
-                .background(Color.White.copy(alpha = 0.05f), CircleShape)
-        )
-
-        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 24.dp)
+                .graphicsLayer {
+                    alpha = exitAlpha
+                    scaleX = exitScale
+                    scaleY = exitScale
+                }
         ) {
-            // Skip - top right corner
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
-            ) {
-                SkipButton(onClick = onFinished)
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            HorizontalPager(
-                state = pagerState,
+            // Decorative circles, same as the splash screen
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-            ) { page ->
-                OnboardingPageView(
-                    page = onboardingPages[page],
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            Spacer(Modifier.height(22.dp))
-
-            PageIndicator(
-                pageCount = onboardingPages.size,
-                currentPage = currentPage
+                    .align(Alignment.TopEnd)
+                    .size(280.dp)
+                    .offset(x = 100.dp, y = (-90).dp)
+                    .background(Gold.copy(alpha = 0.07f), CircleShape)
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .size(220.dp)
+                    .offset(x = (-80).dp, y = 60.dp)
+                    .background(Color.White.copy(alpha = 0.05f), CircleShape)
             )
 
-            Spacer(Modifier.height(26.dp))
-
-            Button(
-                onClick = {
-                    if (isLastPage) {
-                        onFinished()
-                    } else {
-                        scope.launch { pagerState.animateScrollToPage(currentPage + 1) }
-                    }
-                },
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Gold,
-                    contentColor = NavyDeep,
-                    disabledContainerColor = Gold.copy(alpha = 0.55f),
-                    disabledContentColor = NavyDeep.copy(alpha = 0.7f)
-                )
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(top = 12.dp, bottom = 24.dp)
             ) {
-                Text(
-                    text = if (isLastPage) "Get Started" else "Next",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(Modifier.width(10.dp))
-                Icon(
-                    imageVector = if (isLastPage) Icons.AutoMirrored.Outlined.Login else Icons.AutoMirrored.Outlined.ArrowForward,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp)
-                )
+                // Skip - top right corner
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    SkipButton(onClick = { finish() })
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    // Pre-compose the neighbouring slide so swipes never hitch on first reveal.
+                    beyondViewportPageCount = 1,
+                    userScrollEnabled = !exiting
+                ) { page ->
+                    OnboardingPageView(
+                        page = onboardingPages[page],
+                        pagerState = pagerState,
+                        pageIndex = page,
+                        // Each card sits inside its page, leaving room for its shadow and a
+                        // clear gutter between cards while swiping.
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 20.dp, vertical = 16.dp)
+                    )
+                }
+
+                Spacer(Modifier.height(22.dp))
+
+                PageIndicator(pagerState = pagerState, pageCount = onboardingPages.size)
+
+                Spacer(Modifier.height(26.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            if (isLastPage) {
+                                finish()
+                            } else {
+                                scope.launch {
+                                    pagerState.animateScrollToPage(
+                                        page = currentPage + 1,
+                                        animationSpec = tween(560, easing = FastOutSlowInEasing)
+                                    )
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Gold,
+                            contentColor = NavyDeep,
+                            disabledContainerColor = Gold.copy(alpha = 0.55f),
+                            disabledContentColor = NavyDeep.copy(alpha = 0.7f)
+                        )
+                    ) {
+                        Text(
+                            text = if (isLastPage) "Get Started" else "Next",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Icon(
+                            imageVector = if (isLastPage) {
+                                Icons.AutoMirrored.Outlined.Login
+                            } else {
+                                Icons.AutoMirrored.Outlined.ArrowForward
+                            },
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -232,34 +316,83 @@ private fun SkipButton(onClick: () -> Unit) {
 }
 
 @Composable
-private fun PageIndicator(pageCount: Int, currentPage: Int) {
+private fun PageIndicator(pagerState: PagerState, pageCount: Int) {
+    // Read in composition on purpose: only this small row re-layouts while swiping.
+    val progress = pagerState.currentPage + pagerState.currentPageOffsetFraction
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
         repeat(pageCount) { index ->
-            val width by animateDpAsState(
-                targetValue = if (index == currentPage) 26.dp else 8.dp,
-                label = "indicatorWidth"
-            )
+            val active = (1f - abs(index - progress)).coerceIn(0f, 1f)
             Box(
                 modifier = Modifier
                     .padding(horizontal = 4.dp)
                     .height(8.dp)
-                    .width(width)
+                    .width(8.dp + 18.dp * active)
                     .clip(CircleShape)
-                    .background(
-                        if (index == currentPage) Gold
-                        else Color.White.copy(alpha = 0.30f)
-                    )
+                    .background(lerp(Color.White.copy(alpha = 0.30f), Gold, active))
             )
         }
     }
 }
 
+/**
+ * Staggered entrance + scroll-linked cross-fade. All State is read inside the layer block,
+ * so swiping only redraws layers instead of recomposing the slide.
+ */
+private fun Modifier.staggerIn(
+    progress: Animatable<Float, AnimationVector1D>,
+    pagerState: PagerState,
+    pageIndex: Int,
+    rise: Dp = 26.dp,
+    drift: Dp = 10.dp,
+    crossFade: Float = 1.7f
+): Modifier = graphicsLayer {
+    val pageOffset = (pageIndex - pagerState.currentPage) + pagerState.currentPageOffsetFraction
+    val scrollFade = (1f - abs(pageOffset) * crossFade).coerceIn(0f, 1f)
+    alpha = progress.value * scrollFade
+    translationY = (1f - progress.value) * rise.toPx()
+    translationX = pageOffset * drift.toPx()
+}
+
 @Composable
-private fun OnboardingPageView(page: OnboardingPage, modifier: Modifier = Modifier) {
+private fun OnboardingPageView(
+    page: OnboardingPage,
+    pagerState: PagerState,
+    pageIndex: Int,
+    modifier: Modifier = Modifier
+) {
+    val mediaProgress = remember { Animatable(0f) }
+    val ruleProgress = remember { Animatable(0f) }
+    val eyebrowProgress = remember { Animatable(0f) }
+    val titleProgress = remember { Animatable(0f) }
+    val descriptionProgress = remember { Animatable(0f) }
+    val mediaZoom = remember { Animatable(1.14f) }
+
+    LaunchedEffect(page) {
+        launch {
+            mediaZoom.animateTo(1f, tween(1600, easing = FastOutSlowInEasing))
+        }
+        launch {
+            mediaProgress.animateTo(1f, tween(700, easing = FastOutSlowInEasing))
+        }
+        launch {
+            ruleProgress.animateTo(1f, tween(560, 60, easing = FastOutSlowInEasing))
+        }
+        launch {
+            eyebrowProgress.animateTo(1f, tween(540, 200, easing = FastOutSlowInEasing))
+        }
+        launch {
+            titleProgress.animateTo(1f, tween(660, 320, easing = FastOutSlowInEasing))
+        }
+        launch {
+            descriptionProgress.animateTo(1f, tween(660, 470, easing = FastOutSlowInEasing))
+        }
+    }
+
     Card(
         modifier = modifier,
         shape = RoundedCornerShape(28.dp),
@@ -272,6 +405,12 @@ private fun OnboardingPageView(page: OnboardingPage, modifier: Modifier = Modifi
                     .fillMaxWidth()
                     .weight(1f)
                     .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                    .graphicsLayer {
+                        val pageOffset =
+                            (pageIndex - pagerState.currentPage) + pagerState.currentPageOffsetFraction
+                        val scroll = abs(pageOffset).coerceIn(0f, 1f)
+                        alpha = mediaProgress.value * (1f - scroll * 0.45f)
+                    }
             ) {
                 when (val media = page.media) {
                     is OnboardingMedia.Photo -> {
@@ -279,7 +418,18 @@ private fun OnboardingPageView(page: OnboardingPage, modifier: Modifier = Modifi
                             painter = painterResource(media.res),
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    val pageOffset =
+                                        (pageIndex - pagerState.currentPage) + pagerState.currentPageOffsetFraction
+                                    val scroll = abs(pageOffset).coerceIn(0f, 1f)
+                                    // Always >= 1 so the parallax can never expose an edge.
+                                    scaleX = mediaZoom.value * 1.12f
+                                    scaleY = mediaZoom.value
+                                    alpha = 1f - scroll * 0.30f
+                                    translationX = -pageOffset * 22.dp.toPx()
+                                }
                         )
                         Box(
                             modifier = Modifier
@@ -306,6 +456,15 @@ private fun OnboardingPageView(page: OnboardingPage, modifier: Modifier = Modifi
                     modifier = Modifier
                         .width(44.dp)
                         .height(4.dp)
+                        .graphicsLayer {
+                            val pageOffset =
+                                (pageIndex - pagerState.currentPage) + pagerState.currentPageOffsetFraction
+                            val scrollFade = (1f - abs(pageOffset) * 1.7f).coerceIn(0f, 1f)
+                            alpha = ruleProgress.value * scrollFade
+                            scaleX = ruleProgress.value
+                            transformOrigin = TransformOrigin(0f, 0.5f)
+                            translationX = pageOffset * 6.dp.toPx()
+                        }
                         .background(
                             Brush.horizontalGradient(listOf(Gold, GoldLight, Gold)),
                             RoundedCornerShape(50)
@@ -317,19 +476,28 @@ private fun OnboardingPageView(page: OnboardingPage, modifier: Modifier = Modifi
                     color = TextSecondary,
                     fontSize = 12.sp,
                     letterSpacing = 1.8.sp,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.staggerIn(eyebrowProgress, pagerState, pageIndex, rise = 18.dp, drift = 8.dp)
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
                     text = page.title,
                     style = MaterialTheme.typography.headlineMedium,
-                    color = TextPrimary
+                    color = TextPrimary,
+                    modifier = Modifier.staggerIn(titleProgress, pagerState, pageIndex, rise = 32.dp, drift = 14.dp)
                 )
                 Spacer(Modifier.height(10.dp))
                 Text(
                     text = page.description,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = TextSecondary
+                    color = TextSecondary,
+                    modifier = Modifier.staggerIn(
+                        descriptionProgress,
+                        pagerState,
+                        pageIndex,
+                        rise = 24.dp,
+                        drift = 10.dp
+                    )
                 )
             }
         }
@@ -354,11 +522,11 @@ private fun FeaturesPanel() {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(20.dp),
+                .padding(22.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 FeatureCard(
                     icon = Icons.Outlined.Campaign,
                     label = "Notices",
@@ -370,8 +538,8 @@ private fun FeaturesPanel() {
                     modifier = Modifier.weight(1f)
                 )
             }
-            Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Spacer(Modifier.height(18.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 FeatureCard(
                     icon = Icons.Outlined.HowToReg,
                     label = "Attendance",
@@ -393,7 +561,7 @@ private fun FeatureCard(icon: ImageVector, label: String, modifier: Modifier = M
         modifier = modifier,
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
     ) {
         Column(
             modifier = Modifier
@@ -419,7 +587,8 @@ private fun FeatureCard(icon: ImageVector, label: String, modifier: Modifier = M
                 text = label,
                 style = MaterialTheme.typography.labelLarge,
                 color = Navy,
-                textAlign = TextAlign.Center
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
             )
         }
     }
