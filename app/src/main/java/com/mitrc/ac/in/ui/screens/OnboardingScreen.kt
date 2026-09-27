@@ -1,6 +1,7 @@
 package com.mitrc.ac.`in`.ui.screens
 
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -48,9 +49,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -58,6 +63,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -73,6 +79,8 @@ import com.mitrc.ac.`in`.ui.theme.SurfaceWhite
 import com.mitrc.ac.`in`.ui.theme.TextPrimary
 import com.mitrc.ac.`in`.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -313,22 +321,31 @@ private fun SkipButton(onClick: () -> Unit) {
 
 @Composable
 private fun PageIndicator(pagerState: PagerState, pageCount: Int) {
-    val progress = pagerState.currentPage + pagerState.currentPageOffsetFraction
-
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
         repeat(pageCount) { index ->
-            val active = (1f - abs(index - progress)).coerceIn(0f, 1f)
             Box(
                 modifier = Modifier
                     .padding(horizontal = 4.dp)
                     .height(8.dp)
-                    .width(8.dp + 18.dp * active)
-                    .clip(CircleShape)
-                    .background(lerp(Color.White.copy(alpha = 0.30f), Gold, active))
+                    .width(26.dp) 
+                    .drawBehind {
+                        // Read scroll progress in DRAW phase to avoid Row recomposition jitter
+                        val progress = pagerState.currentPage + pagerState.currentPageOffsetFraction
+                        val active = (1f - abs(index - progress)).coerceIn(0f, 1f)
+                        val pillWidth = 8.dp.toPx() + 18.dp.toPx() * active
+                        val color = lerp(Color.White.copy(alpha = 0.30f), Gold, active)
+                        
+                        drawRoundRect(
+                            color = color,
+                            size = size.copy(width = pillWidth),
+                            cornerRadius = CornerRadius(size.height / 2f),
+                            topLeft = Offset(x = (size.width - pillWidth) / 2f, y = 0f)
+                        )
+                    }
             )
         }
     }
@@ -341,21 +358,38 @@ private fun OnboardingPageView(
     pageIndex: Int,
     modifier: Modifier = Modifier
 ) {
-    // 100% continuous, fraction-based calculation derived directly from scroll position
-    val pageOffset = (pageIndex - pagerState.currentPage) - pagerState.currentPageOffsetFraction
-    val absOffset = abs(pageOffset)
+    // 1. PERFORMANCE: Manually manage entrance progress with Animatable.
+    // Reading pagerState.currentPage directly in composition body triggers 
+    // recomposition of the whole page content. We avoid this using snapshotFlow.
+    val entranceAnim = remember { Animatable(0f) }
+    
+    LaunchedEffect(pagerState, pageIndex) {
+        snapshotFlow { pagerState.currentPage == pageIndex }
+            .distinctUntilChanged()
+            .collectLatest { isActive ->
+                entranceAnim.animateTo(
+                    targetValue = if (isActive) 1f else 0f,
+                    animationSpec = tween(durationMillis = 850, easing = FastOutSlowInEasing)
+                )
+            }
+    }
 
-    // Smooth typography fade-in factor that completes elegantly when the slide settles
-    val isPageActive = pagerState.currentPage == pageIndex
-    val entranceProgress by animateFloatAsState(
-        targetValue = if (isPageActive) 1f else 0f,
-        animationSpec = tween(durationMillis = 850, easing = FastOutSlowInEasing),
-        label = "entranceProgress"
-    )
+    // 2. PERFORMANCE: Pre-calculate density-dependent constants to save CPU cycles in graphicsLayer
+    val density = LocalDensity.current
+    val parallaxDist = remember(density) { with(density) { (-45).dp.toPx() } }
+    val drift10 = remember(density) { with(density) { 10.dp.toPx() } }
+    val drift15 = remember(density) { with(density) { 15.dp.toPx() } }
+    val drift20 = remember(density) { with(density) { 20.dp.toPx() } }
+    val rise12 = remember(density) { with(density) { 12.dp.toPx() } }
+    val rise20 = remember(density) { with(density) { 20.dp.toPx() } }
+    val rise28 = remember(density) { with(density) { 28.dp.toPx() } }
 
     Card(
         modifier = modifier.graphicsLayer {
-            // Completely smooth card level transitions
+            // All pager state reads are now isolated within draw-phase-only lambdas
+            val pageOffset = (pageIndex - pagerState.currentPage) - pagerState.currentPageOffsetFraction
+            val absOffset = abs(pageOffset)
+            
             alpha = (1f - absOffset * 0.6f).coerceIn(0f, 1f)
             scaleX = (1f - absOffset * 0.04f).coerceIn(0.96f, 1f)
             scaleY = (1f - absOffset * 0.04f).coerceIn(0.96f, 1f)
@@ -371,8 +405,8 @@ private fun OnboardingPageView(
                     .weight(1f)
                     .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
                     .graphicsLayer {
-                        // Perfectly sync the fade out of the media box with the slide progress
-                        alpha = (1f - absOffset).coerceIn(0f, 1f)
+                        val pageOffset = (pageIndex - pagerState.currentPage) - pagerState.currentPageOffsetFraction
+                        alpha = (1f - abs(pageOffset)).coerceIn(0f, 1f)
                     }
             ) {
                 when (val media = page.media) {
@@ -384,15 +418,12 @@ private fun OnboardingPageView(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .graphicsLayer {
-                                    // Smooth zoom out + fade in animation fully driven by slide progress.
-                                    // When swiping in, scale goes smoothly from 1.15f down to 1.0f.
-                                    // No matter if the user holds or hesitates, it is perfectly continuous with no snap artifacts.
+                                    val pageOffset = (pageIndex - pagerState.currentPage) - pagerState.currentPageOffsetFraction
+                                    val absOffset = abs(pageOffset)
                                     val zoomFactor = 1.0f + (absOffset * 0.15f)
                                     scaleX = zoomFactor
                                     scaleY = zoomFactor
-
-                                    // Parallax layout translation matching user finger position perfectly
-                                    translationX = pageOffset * (-45).dp.toPx()
+                                    translationX = pageOffset * parallaxDist
                                 }
                         )
                         Box(
@@ -421,9 +452,13 @@ private fun OnboardingPageView(
                         .width(44.dp)
                         .height(4.dp)
                         .graphicsLayer {
+                            val pageOffset = (pageIndex - pagerState.currentPage) - pagerState.currentPageOffsetFraction
+                            val absOffset = abs(pageOffset)
                             val scrollFade = (1f - absOffset).coerceIn(0f, 1f)
-                            alpha = entranceProgress * scrollFade
-                            scaleX = entranceProgress
+                            val entrance = entranceAnim.value
+                            
+                            alpha = entrance * scrollFade
+                            scaleX = entrance
                             transformOrigin = TransformOrigin(0f, 0.5f)
                         }
                         .background(
@@ -441,10 +476,14 @@ private fun OnboardingPageView(
                     letterSpacing = 1.8.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.graphicsLayer {
+                        val pageOffset = (pageIndex - pagerState.currentPage) - pagerState.currentPageOffsetFraction
+                        val absOffset = abs(pageOffset)
                         val scrollFade = (1f - absOffset).coerceIn(0f, 1f)
-                        alpha = entranceProgress * scrollFade
-                        translationY = (1f - entranceProgress) * 12.dp.toPx() + (absOffset * 8.dp.toPx())
-                        translationX = pageOffset * 10.dp.toPx()
+                        val entrance = entranceAnim.value
+
+                        alpha = entrance * scrollFade
+                        translationY = (1f - entrance) * rise12 + (absOffset * 8.dp.toPx())
+                        translationX = pageOffset * drift10
                     }
                 )
                 Spacer(Modifier.height(6.dp))
@@ -455,10 +494,14 @@ private fun OnboardingPageView(
                     style = MaterialTheme.typography.headlineMedium,
                     color = TextPrimary,
                     modifier = Modifier.graphicsLayer {
+                        val pageOffset = (pageIndex - pagerState.currentPage) - pagerState.currentPageOffsetFraction
+                        val absOffset = abs(pageOffset)
                         val scrollFade = (1f - absOffset).coerceIn(0f, 1f)
-                        alpha = entranceProgress * scrollFade
-                        translationY = (1f - entranceProgress) * 20.dp.toPx() + (absOffset * 14.dp.toPx())
-                        translationX = pageOffset * 15.dp.toPx()
+                        val entrance = entranceAnim.value
+
+                        alpha = entrance * scrollFade
+                        translationY = (1f - entrance) * rise20 + (absOffset * 14.dp.toPx())
+                        translationX = pageOffset * drift15
                     }
                 )
                 Spacer(Modifier.height(10.dp))
@@ -469,10 +512,14 @@ private fun OnboardingPageView(
                     style = MaterialTheme.typography.bodyLarge,
                     color = TextSecondary,
                     modifier = Modifier.graphicsLayer {
+                        val pageOffset = (pageIndex - pagerState.currentPage) - pagerState.currentPageOffsetFraction
+                        val absOffset = abs(pageOffset)
                         val scrollFade = (1f - absOffset).coerceIn(0f, 1f)
-                        alpha = entranceProgress * scrollFade
-                        translationY = (1f - entranceProgress) * 28.dp.toPx() + (absOffset * 20.dp.toPx())
-                        translationX = pageOffset * 20.dp.toPx()
+                        val entrance = entranceAnim.value
+
+                        alpha = entrance * scrollFade
+                        translationY = (1f - entrance) * rise28 + (absOffset * 20.dp.toPx())
+                        translationX = pageOffset * drift20
                     }
                 )
             }
