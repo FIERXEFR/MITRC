@@ -10,8 +10,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -95,11 +93,13 @@ import com.mitrc.ac.`in`.auth.AdminRepository
 import com.mitrc.ac.`in`.auth.AuthRepository
 import com.mitrc.ac.`in`.auth.StaffEntry
 import com.mitrc.ac.`in`.auth.StudentEntry
+import com.mitrc.ac.`in`.data.AdminDbRow
 import com.mitrc.ac.`in`.data.BranchRow
 import com.mitrc.ac.`in`.data.ClassGroupRow
 import com.mitrc.ac.`in`.data.ClassRow
 import com.mitrc.ac.`in`.data.CourseRow
 import com.mitrc.ac.`in`.data.SupabaseManager
+import com.mitrc.ac.`in`.data.SupabaseTableData
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
 import com.mitrc.ac.`in`.ui.theme.ErrorRed
 import com.mitrc.ac.`in`.ui.theme.Gold
@@ -111,12 +111,13 @@ import com.mitrc.ac.`in`.ui.theme.SuccessGreen
 import com.mitrc.ac.`in`.ui.theme.SurfaceWhite
 import com.mitrc.ac.`in`.ui.theme.TextPrimary
 import com.mitrc.ac.`in`.ui.theme.TextSecondary
+import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 enum class AdminEntryTab(val label: String) {
-    STUDENT("Student"),
-    STAFF("Staff")
+    STUDENT("STUDENT"),
+    STAFF("STAFF")
 }
 
 @Composable
@@ -126,12 +127,41 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
     val user = AuthRepository.currentUser
 
     var selectedTab by remember { mutableStateOf(AdminEntryTab.STUDENT) }
+    var tabSwitching by remember { mutableStateOf(false) }
+
+    var adminName by remember { mutableStateOf<String?>(null) }
+
+    // Fetch Admin's real name from admin_db
+    LaunchedEffect(user?.uid) {
+        val uid = user?.uid
+        if (!uid.isNullOrBlank()) {
+            val client = SupabaseManager.requireClient()
+            val row = runCatching {
+                client.postgrest[SupabaseTableData.Tables.ADMIN_DB]
+                    .select { filter { eq("uid", uid) } }
+                    .decodeList<AdminDbRow>()
+                    .firstOrNull()
+            }.getOrNull()
+            adminName = row?.name?.ifBlank { null }
+        }
+    }
 
     var animateTrigger by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay(100)
         animateTrigger = true
     }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val textPulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.85f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
 
     val studentForm = remember { StudentFormState() }
     val staffForm = remember { StaffFormState() }
@@ -141,10 +171,15 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
     var notice by remember { mutableStateOf<String?>(null) }
 
     fun switchTab(tab: AdminEntryTab) {
-        if (tab == selectedTab) return
-        selectedTab = tab
+        if (tab == selectedTab || tabSwitching) return
+        tabSwitching = true
         error = null
         notice = null
+        scope.launch {
+            delay(1000) // Non-cancelable 1-second authentic switch delay
+            selectedTab = tab
+            tabSwitching = false
+        }
     }
 
     fun submit() {
@@ -272,11 +307,12 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
                                 label = "titleAnimation"
                             ) { tab ->
                                 Text(
-                                    text = "${tab.label} Registration",
+                                    text = "${tab.label} REGISTRATION",
                                     color = Color.White,
-                                    fontSize = 24.sp,
+                                    fontSize = 22.sp,
                                     fontWeight = FontWeight.ExtraBold,
-                                    letterSpacing = (-0.5).sp
+                                    letterSpacing = (-0.5).sp,
+                                    modifier = Modifier.alpha(textPulseAlpha)
                                 )
                             }
                         }
@@ -319,10 +355,10 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
                         }
                         Spacer(Modifier.width(12.dp))
                         Text(
-                            text = user?.email ?: "admin@mitrc.ac.in",
-                            color = Color.White.copy(alpha = 0.7f),
-                            fontSize = 13.sp,
-                            style = MaterialTheme.typography.bodyMedium
+                            text = adminName ?: user?.email ?: "System Administrator",
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
@@ -330,10 +366,7 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
 
             AnimatedVisibility(
                 visible = animateTrigger,
-                enter = fadeIn(animationSpec = tween(500)) + slideInVertically(
-                    initialOffsetY = { 60 },
-                    animationSpec = tween(500)
-                )
+                enter = fadeIn(animationSpec = tween(500))
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
 
@@ -361,17 +394,36 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
 
                                 Spacer(Modifier.height(20.dp))
 
-                                // Smooth animated crossfade when switching category
-                                AnimatedContent(
-                                    targetState = selectedTab,
-                                    transitionSpec = {
-                                        fadeIn(animationSpec = tween(350)) togetherWith fadeOut(animationSpec = tween(350))
-                                    },
-                                    label = "categoryFormAnimation"
-                                ) { tab ->
-                                    when (tab) {
-                                        AdminEntryTab.STUDENT -> StudentEntryForm(studentForm)
-                                        AdminEntryTab.STAFF -> StaffEntryForm(staffForm)
+                                if (tabSwitching) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(200.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            CircularProgressIndicator(color = Navy, modifier = Modifier.size(36.dp))
+                                            Spacer(Modifier.height(14.dp))
+                                            Text(
+                                                text = "Loading Portal Roster...",
+                                                color = TextSecondary,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    AnimatedContent(
+                                        targetState = selectedTab,
+                                        transitionSpec = {
+                                            fadeIn(animationSpec = tween(350)) togetherWith fadeOut(animationSpec = tween(350))
+                                        },
+                                        label = "categoryFormAnimation"
+                                    ) { tab ->
+                                        when (tab) {
+                                            AdminEntryTab.STUDENT -> StudentEntryForm(studentForm)
+                                            AdminEntryTab.STAFF -> StaffEntryForm(staffForm)
+                                        }
                                     }
                                 }
 
@@ -397,7 +449,7 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
 
                                 Button(
                                     onClick = ::submit,
-                                    enabled = !loading,
+                                    enabled = !loading && !tabSwitching,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(54.dp),
@@ -554,7 +606,6 @@ private fun StudentEntryForm(form: StudentFormState) {
     var groups by remember { mutableStateOf<List<ClassGroupRow>>(emptyList()) }
     var isLoadingData by remember { mutableStateOf(false) }
 
-    // 1. Fetch courses from backend
     LaunchedEffect(Unit) {
         isLoadingData = true
         courses = AdminRepository.getCourses()
@@ -564,7 +615,6 @@ private fun StudentEntryForm(form: StudentFormState) {
         isLoadingData = false
     }
 
-    // 2. Fetch branches when selectedCourse changes
     LaunchedEffect(selectedCourse) {
         val c = selectedCourse
         if (c != null) {
@@ -578,7 +628,6 @@ private fun StudentEntryForm(form: StudentFormState) {
         }
     }
 
-    // 3. Fetch classes when selectedBranch changes
     LaunchedEffect(selectedBranch) {
         val b = selectedBranch
         if (b != null) {
@@ -594,7 +643,6 @@ private fun StudentEntryForm(form: StudentFormState) {
         }
     }
 
-    // 4. Fetch groups when classId changes
     LaunchedEffect(form.classId) {
         val cid = form.classId
         if (cid != null && cid > 0) {
@@ -675,7 +723,7 @@ private fun StudentEntryForm(form: StudentFormState) {
         Spacer(Modifier.height(10.dp))
         FormSectionLabel("ACADEMIC STRUCTURE & PLACEMENT")
 
-        // 1. Select Course Dropdown
+        // 1. Course Dropdown
         Text(text = "1. Select Course:", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
         Spacer(Modifier.height(4.dp))
         Box(modifier = Modifier.fillMaxWidth()) {
@@ -716,7 +764,7 @@ private fun StudentEntryForm(form: StudentFormState) {
 
         Spacer(Modifier.height(12.dp))
 
-        // 2. Select Branch Dropdown
+        // 2. Branch Dropdown
         Text(text = "2. Select Branch:", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
         Spacer(Modifier.height(4.dp))
         Box(modifier = Modifier.fillMaxWidth()) {
@@ -755,7 +803,7 @@ private fun StudentEntryForm(form: StudentFormState) {
 
         Spacer(Modifier.height(12.dp))
 
-        // 3. Select Class / Cohort Dropdown
+        // 3. Class Dropdown
         Text(text = "3. Select Semester & Section:", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
         Spacer(Modifier.height(4.dp))
         Box(modifier = Modifier.fillMaxWidth()) {
@@ -856,6 +904,9 @@ private fun StudentEntryForm(form: StudentFormState) {
 
 @Composable
 private fun StaffEntryForm(form: StaffFormState) {
+    var roleExpanded by remember { mutableStateOf(false) }
+    val rolesList = listOf("Teacher", "Mentor", "Coordinator", "HOD", "Dean")
+
     Column(modifier = Modifier.fillMaxWidth()) {
         FormSectionLabel("ACCOUNT CREDENTIALS")
 
@@ -897,15 +948,46 @@ private fun StaffEntryForm(form: StaffFormState) {
             leadingIcon = Icons.Outlined.Work
         )
         Spacer(Modifier.height(14.dp))
-        AdminField(
-            value = form.role,
-            onValueChange = { form.role = it },
-            label = "Role (e.g. Teacher, Coordinator)",
-            leadingIcon = Icons.Outlined.SupervisorAccount
-        )
+
+        // Role Dropdown Selection
+        Text(text = "Select Staff Role:", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+        Spacer(Modifier.height(4.dp))
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = form.role.ifBlank { "Select Role" },
+                onValueChange = {},
+                readOnly = true,
+                leadingIcon = { Icon(Icons.Outlined.SupervisorAccount, contentDescription = null, tint = Navy) },
+                trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, contentDescription = null, tint = Navy) },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = false,
+                shape = RoundedCornerShape(14.dp),
+                colors = adminFieldColors()
+            )
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clickable { roleExpanded = true }
+            )
+            DropdownMenu(
+                expanded = roleExpanded,
+                onDismissRequest = { roleExpanded = false },
+                modifier = Modifier.fillMaxWidth(0.85f)
+            ) {
+                rolesList.forEach { r ->
+                    DropdownMenuItem(
+                        text = { Text(r, fontWeight = FontWeight.SemiBold) },
+                        onClick = {
+                            form.role = r
+                            roleExpanded = false
+                        }
+                    )
+                }
+            }
+        }
 
         Spacer(Modifier.height(10.dp))
-        FormSectionLabel("CONTACT DETAILS")
+        FormSectionLabel("CONTACT & PROFILE")
 
         AdminField(
             value = form.phoneNo,
@@ -915,12 +997,34 @@ private fun StaffEntryForm(form: StaffFormState) {
             keyboardType = KeyboardType.Phone
         )
         Spacer(Modifier.height(14.dp))
-        AdminField(
-            value = form.gender,
-            onValueChange = { form.gender = it },
-            label = "Gender",
-            leadingIcon = Icons.Outlined.PersonOutline
-        )
+
+        // Gender Selection Chips
+        Text(text = "Select Gender:", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+        Spacer(Modifier.height(6.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            listOf("Male", "Female").forEach { g ->
+                val selected = form.gender.equals(g, ignoreCase = true)
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (selected) Navy else Slate)
+                        .clickable { form.gender = g }
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = g,
+                        color = if (selected) Color.White else TextPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1048,15 +1152,14 @@ private class StaffFormState {
     var name by mutableStateOf("")
     var designation by mutableStateOf("")
     var department by mutableStateOf("")
-    var role by mutableStateOf("")
+    var role by mutableStateOf("Teacher")
     var phoneNo by mutableStateOf("")
-    var gender by mutableStateOf("")
+    var gender by mutableStateOf("Male")
 
     fun resetIdentity() {
         email = ""
         password = ""
         name = ""
         phoneNo = ""
-        gender = ""
     }
 }
