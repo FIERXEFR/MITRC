@@ -10,6 +10,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -86,6 +88,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mitrc.ac.`in`.R
@@ -176,7 +179,7 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
         error = null
         notice = null
         scope.launch {
-            delay(1000) // Non-cancelable 1-second authentic switch delay
+            delay(1000) // Non-cancelable 1-second switch delay
             selectedTab = tab
             tabSwitching = false
         }
@@ -264,25 +267,23 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
             .background(Slate)
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+            modifier = Modifier.fillMaxSize()
         ) {
-            // Header with MITRC Logo
+            // Header with Roll-Up Typography Animation
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(
                         brush = Brush.verticalGradient(listOf(NavyDeep, Navy)),
-                        shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp)
+                        shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp)
                     )
-                    .padding(top = 56.dp, bottom = 32.dp, start = 24.dp, end = 24.dp)
+                    .padding(top = 48.dp, bottom = 28.dp, start = 20.dp, end = 20.dp)
             ) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .size(160.dp)
-                        .offset(x = 40.dp, y = (-50).dp)
+                        .size(140.dp)
+                        .offset(x = 35.dp, y = (-40).dp)
                         .background(Gold.copy(alpha = 0.07f), CircleShape)
                 )
 
@@ -296,20 +297,23 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
                             Image(
                                 painter = painterResource(R.drawable.logo_mitrc_white),
                                 contentDescription = "MITRC Alwar Logo",
-                                modifier = Modifier.width(185.dp)
+                                modifier = Modifier.width(170.dp)
                             )
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(6.dp))
+
+                            // Vertical Roll-Up Typography Animation
                             AnimatedContent(
                                 targetState = selectedTab,
                                 transitionSpec = {
-                                    fadeIn(animationSpec = tween(350)) togetherWith fadeOut(animationSpec = tween(350))
+                                    (fadeIn(animationSpec = tween(350)) + slideInVertically(animationSpec = tween(350)) { -it })
+                                        .togetherWith(fadeOut(animationSpec = tween(350)) + slideOutVertically(animationSpec = tween(350)) { it })
                                 },
-                                label = "titleAnimation"
+                                label = "rollUpTitleAnimation"
                             ) { tab ->
                                 Text(
                                     text = "${tab.label} REGISTRATION",
                                     color = Color.White,
-                                    fontSize = 22.sp,
+                                    fontSize = 20.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     letterSpacing = (-0.5).sp,
                                     modifier = Modifier.alpha(textPulseAlpha)
@@ -321,22 +325,25 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
                             shape = CircleShape,
                             color = Gold.copy(alpha = 0.15f),
                             border = BorderStroke(1.5.dp, GoldLight),
-                            modifier = Modifier.size(46.dp)
+                            modifier = Modifier.size(42.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     Icons.Outlined.AdminPanelSettings,
                                     contentDescription = "Admin",
                                     tint = GoldLight,
-                                    modifier = Modifier.size(24.dp)
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
                         }
                     }
 
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(10.dp))
 
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Box(
                             modifier = Modifier
                                 .background(
@@ -346,19 +353,25 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text(
-                                text = "ADMIN PANEL",
+                                text = "ADMIN",
                                 color = GoldLight,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.5.sp
+                                letterSpacing = 1.2.sp
                             )
                         }
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(10.dp))
+
+                        // Admin Name + Censored Email Address
+                        val displayName = adminName ?: "Administrator"
+                        val censoredMail = censorEmail(user?.email ?: "ukgankit@gmail.com")
                         Text(
-                            text = adminName ?: user?.email ?: "System Administrator",
+                            text = "$displayName ($censoredMail)",
                             color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -366,39 +379,49 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
 
             AnimatedVisibility(
                 visible = animateTrigger,
-                enter = fadeIn(animationSpec = tween(500))
+                enter = fadeIn(animationSpec = tween(500)),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
             ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-
-                    Box(
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    // Card View containing internal vertical scrollable form
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = SurfaceWhite,
+                        shadowElevation = 10.dp,
                         modifier = Modifier
-                            .offset(y = (-24).dp)
-                            .padding(horizontal = 16.dp)
+                            .weight(1f)
                             .fillMaxWidth()
                     ) {
-                        Surface(
-                            shape = RoundedCornerShape(28.dp),
-                            color = SurfaceWhite,
-                            shadowElevation = 14.dp,
-                            modifier = Modifier.fillMaxWidth()
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 18.dp, vertical = 18.dp)
                         ) {
+                            AdminEntryTabs(
+                                selected = selectedTab,
+                                onSelected = ::switchTab
+                            )
+
+                            Spacer(Modifier.height(14.dp))
+
+                            // Scrollable Form Content Inside Card View
                             Column(
                                 modifier = Modifier
+                                    .weight(1f)
                                     .fillMaxWidth()
-                                    .padding(horizontal = 20.dp, vertical = 24.dp)
+                                    .verticalScroll(rememberScrollState())
                             ) {
-                                AdminEntryTabs(
-                                    selected = selectedTab,
-                                    onSelected = ::switchTab
-                                )
-
-                                Spacer(Modifier.height(20.dp))
-
                                 if (tabSwitching) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .height(200.dp),
+                                            .height(220.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -416,9 +439,10 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
                                     AnimatedContent(
                                         targetState = selectedTab,
                                         transitionSpec = {
-                                            fadeIn(animationSpec = tween(350)) togetherWith fadeOut(animationSpec = tween(350))
+                                            (fadeIn(animationSpec = tween(350)) + slideInVertically(animationSpec = tween(350)) { -it })
+                                                .togetherWith(fadeOut(animationSpec = tween(350)) + slideOutVertically(animationSpec = tween(350)) { it })
                                         },
-                                        label = "categoryFormAnimation"
+                                        label = "rollUpCategoryFormAnimation"
                                     ) { tab ->
                                         when (tab) {
                                             AdminEntryTab.STUDENT -> StudentEntryForm(studentForm)
@@ -432,7 +456,7 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
                                         text = error.orEmpty(),
                                         color = ErrorRed,
                                         style = MaterialTheme.typography.bodySmall,
-                                        modifier = Modifier.padding(top = 14.dp)
+                                        modifier = Modifier.padding(top = 10.dp)
                                     )
                                 }
 
@@ -441,102 +465,111 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
                                         text = notice.orEmpty(),
                                         color = SuccessGreen,
                                         style = MaterialTheme.typography.bodySmall,
-                                        modifier = Modifier.padding(top = 14.dp)
+                                        modifier = Modifier.padding(top = 10.dp)
                                     )
                                 }
+                            }
 
-                                Spacer(Modifier.height(24.dp))
+                            Spacer(Modifier.height(12.dp))
 
-                                Button(
-                                    onClick = ::submit,
-                                    enabled = !loading && !tabSwitching,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(54.dp),
-                                    shape = RoundedCornerShape(14.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Navy,
-                                        contentColor = Color.White,
-                                        disabledContainerColor = Navy.copy(alpha = 0.55f),
-                                        disabledContentColor = Color.White.copy(alpha = 0.7f)
+                            // Pinned Submit Button inside Card View Bottom
+                            Button(
+                                onClick = ::submit,
+                                enabled = !loading && !tabSwitching,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(50.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Navy,
+                                    contentColor = Color.White,
+                                    disabledContainerColor = Navy.copy(alpha = 0.55f),
+                                    disabledContentColor = Color.White.copy(alpha = 0.7f)
+                                )
+                            ) {
+                                if (loading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        color = GoldLight,
+                                        strokeWidth = 2.dp
                                     )
-                                ) {
-                                    if (loading) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(22.dp),
-                                            color = GoldLight,
-                                            strokeWidth = 2.dp
-                                        )
-                                    } else {
-                                        Icon(
-                                            Icons.Outlined.PersonAdd,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                        Spacer(Modifier.width(10.dp))
-                                        Text(
-                                            text = if (selectedTab == AdminEntryTab.STUDENT) "Register Student Account" else "Register Staff Account",
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
+                                } else {
+                                    Icon(
+                                        Icons.Outlined.PersonAdd,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = if (selectedTab == AdminEntryTab.STUDENT) "Register Student Account" else "Register Staff Account",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
                         }
                     }
 
-                    Column(
+                    Spacer(Modifier.height(10.dp))
+
+                    // Fixed Footer
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                AuthRepository.signOut()
+                                onSignedOut()
+                            }
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 24.dp)
+                            .height(48.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFFEE2E2),
+                            contentColor = Color(0xFFDC2626)
+                        )
                     ) {
-                        Spacer(Modifier.height(8.dp))
-
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    AuthRepository.signOut()
-                                    onSignedOut()
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFFFEE2E2),
-                                contentColor = Color(0xFFDC2626)
-                            )
-                        ) {
-                            Icon(
-                                Icons.Outlined.Logout,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                text = "Sign Out from Portal",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Spacer(Modifier.height(20.dp))
-
+                        Icon(
+                            Icons.Outlined.Logout,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
                         Text(
-                            text = "© 2026 MITRC, Alwar. All Rights Reserved.",
-                            color = TextSecondary,
-                            fontSize = 11.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 28.dp)
+                            text = "Sign Out from Portal",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
+
+                    Spacer(Modifier.height(6.dp))
+
+                    Text(
+                        text = "© 2026 MITRC, Alwar. All Rights Reserved.",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
         }
     }
+}
+
+/** Censors email address format: ukgankit@gmail.com -> uk******@gmail.com */
+private fun censorEmail(email: String?): String {
+    val mail = email?.trim().orEmpty()
+    if (!mail.contains('@')) return mail
+    val parts = mail.split("@")
+    val local = parts[0]
+    val domain = parts[1]
+    if (local.length <= 2) {
+        return "${local.take(1)}*@$domain"
+    }
+    val visible = local.take(2)
+    val hidden = "*".repeat(local.length - 2)
+    return "$visible$hidden@$domain"
 }
 
 @Composable
@@ -547,7 +580,7 @@ private fun AdminEntryTabs(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Slate, RoundedCornerShape(14.dp))
+            .background(Slate, RoundedCornerShape(12.dp))
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
@@ -571,15 +604,16 @@ private fun AdminEntryTabPill(
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(if (selected) Navy else Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(vertical = 11.dp),
+            .padding(vertical = 10.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
             color = if (selected) Color.White else TextSecondary
         )
     }
@@ -673,14 +707,14 @@ private fun StudentEntryForm(form: StudentFormState) {
             leadingIcon = Icons.Outlined.Email,
             keyboardType = KeyboardType.Email
         )
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
         AdminPasswordField(
             value = form.password,
             onValueChange = { form.password = it },
             imeAction = ImeAction.Next
         )
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         FormSectionLabel("STUDENT PERSONAL DETAILS")
 
         AdminField(
@@ -689,21 +723,21 @@ private fun StudentEntryForm(form: StudentFormState) {
             label = "Full Name",
             leadingIcon = Icons.Outlined.Person
         )
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
         AdminField(
             value = form.serialNo,
             onValueChange = { form.serialNo = it },
             label = "Serial / Roll No",
             leadingIcon = Icons.Outlined.Badge
         )
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
         AdminField(
             value = form.fatherName,
             onValueChange = { form.fatherName = it },
             label = "Father's Name",
             leadingIcon = Icons.Outlined.SupervisorAccount
         )
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
         AdminField(
             value = form.studentPhoneNo,
             onValueChange = { form.studentPhoneNo = it },
@@ -711,7 +745,7 @@ private fun StudentEntryForm(form: StudentFormState) {
             leadingIcon = Icons.Outlined.ContactPhone,
             keyboardType = KeyboardType.Phone
         )
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
         AdminField(
             value = form.fatherPhoneNo,
             onValueChange = { form.fatherPhoneNo = it },
@@ -720,7 +754,7 @@ private fun StudentEntryForm(form: StudentFormState) {
             keyboardType = KeyboardType.Phone
         )
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         FormSectionLabel("ACADEMIC STRUCTURE & PLACEMENT")
 
         // 1. Course Dropdown
@@ -737,7 +771,7 @@ private fun StudentEntryForm(form: StudentFormState) {
                     .fillMaxWidth()
                     .clickable { courseExpanded = true },
                 enabled = false,
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = adminFieldColors()
             )
             Box(
@@ -748,7 +782,7 @@ private fun StudentEntryForm(form: StudentFormState) {
             DropdownMenu(
                 expanded = courseExpanded,
                 onDismissRequest = { courseExpanded = false },
-                modifier = Modifier.fillMaxWidth(0.85f)
+                modifier = Modifier.fillMaxWidth(0.8f)
             ) {
                 courses.forEach { course ->
                     DropdownMenuItem(
@@ -762,7 +796,7 @@ private fun StudentEntryForm(form: StudentFormState) {
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
 
         // 2. Branch Dropdown
         Text(text = "2. Select Branch:", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
@@ -776,7 +810,7 @@ private fun StudentEntryForm(form: StudentFormState) {
                 trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, contentDescription = null, tint = Navy) },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = false,
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = adminFieldColors()
             )
             Box(
@@ -787,7 +821,7 @@ private fun StudentEntryForm(form: StudentFormState) {
             DropdownMenu(
                 expanded = branchExpanded,
                 onDismissRequest = { branchExpanded = false },
-                modifier = Modifier.fillMaxWidth(0.85f)
+                modifier = Modifier.fillMaxWidth(0.8f)
             ) {
                 branches.forEach { branch ->
                     DropdownMenuItem(
@@ -801,7 +835,7 @@ private fun StudentEntryForm(form: StudentFormState) {
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
 
         // 3. Class Dropdown
         Text(text = "3. Select Semester & Section:", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
@@ -823,7 +857,7 @@ private fun StudentEntryForm(form: StudentFormState) {
                 trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, contentDescription = null, tint = Navy) },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = false,
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = adminFieldColors()
             )
             Box(
@@ -834,7 +868,7 @@ private fun StudentEntryForm(form: StudentFormState) {
             DropdownMenu(
                 expanded = classExpanded,
                 onDismissRequest = { classExpanded = false },
-                modifier = Modifier.fillMaxWidth(0.85f)
+                modifier = Modifier.fillMaxWidth(0.8f)
             ) {
                 classes.forEach { cls ->
                     DropdownMenuItem(
@@ -851,7 +885,7 @@ private fun StudentEntryForm(form: StudentFormState) {
 
         // 4. Lab Group Selection
         if (groups.isNotEmpty()) {
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(12.dp))
             Text(
                 text = "4. Select Lab Group (Optional):",
                 style = MaterialTheme.typography.bodySmall,
@@ -865,7 +899,7 @@ private fun StudentEntryForm(form: StudentFormState) {
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .background(if (form.groupId == null) Navy else Slate)
                         .clickable { form.groupId = null }
                         .padding(vertical = 10.dp),
@@ -883,7 +917,7 @@ private fun StudentEntryForm(form: StudentFormState) {
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(8.dp))
                             .background(if (selected) Navy else Slate)
                             .clickable { form.groupId = grp.id }
                             .padding(vertical = 10.dp),
@@ -917,14 +951,14 @@ private fun StaffEntryForm(form: StaffFormState) {
             leadingIcon = Icons.Outlined.Email,
             keyboardType = KeyboardType.Email
         )
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
         AdminPasswordField(
             value = form.password,
             onValueChange = { form.password = it },
             imeAction = ImeAction.Next
         )
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         FormSectionLabel("STAFF DETAILS")
 
         AdminField(
@@ -933,21 +967,21 @@ private fun StaffEntryForm(form: StaffFormState) {
             label = "Full Name",
             leadingIcon = Icons.Outlined.Person
         )
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
         AdminField(
             value = form.designation,
             onValueChange = { form.designation = it },
             label = "Designation (e.g. Assistant Professor)",
             leadingIcon = Icons.Outlined.AssignmentInd
         )
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
         AdminField(
             value = form.department,
             onValueChange = { form.department = it },
             label = "Department (e.g. CSE)",
             leadingIcon = Icons.Outlined.Work
         )
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
 
         // Role Dropdown Selection
         Text(text = "Select Staff Role:", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
@@ -961,7 +995,7 @@ private fun StaffEntryForm(form: StaffFormState) {
                 trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, contentDescription = null, tint = Navy) },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = false,
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = adminFieldColors()
             )
             Box(
@@ -972,7 +1006,7 @@ private fun StaffEntryForm(form: StaffFormState) {
             DropdownMenu(
                 expanded = roleExpanded,
                 onDismissRequest = { roleExpanded = false },
-                modifier = Modifier.fillMaxWidth(0.85f)
+                modifier = Modifier.fillMaxWidth(0.8f)
             ) {
                 rolesList.forEach { r ->
                     DropdownMenuItem(
@@ -986,7 +1020,7 @@ private fun StaffEntryForm(form: StaffFormState) {
             }
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         FormSectionLabel("CONTACT & PROFILE")
 
         AdminField(
@@ -996,7 +1030,7 @@ private fun StaffEntryForm(form: StaffFormState) {
             leadingIcon = Icons.Outlined.ContactPhone,
             keyboardType = KeyboardType.Phone
         )
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
 
         // Gender Selection Chips
         Text(text = "Select Gender:", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
@@ -1010,7 +1044,7 @@ private fun StaffEntryForm(form: StaffFormState) {
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .background(if (selected) Navy else Slate)
                         .clickable { form.gender = g }
                         .padding(vertical = 12.dp),
@@ -1036,7 +1070,7 @@ private fun FormSectionLabel(text: String) {
         fontWeight = FontWeight.Bold,
         color = TextSecondary,
         letterSpacing = 1.5.sp,
-        modifier = Modifier.padding(top = 16.dp, bottom = 10.dp)
+        modifier = Modifier.padding(top = 14.dp, bottom = 8.dp)
     )
 }
 
@@ -1060,7 +1094,7 @@ private fun AdminField(
             imeAction = imeAction
         ),
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = adminFieldColors()
     )
 }
@@ -1099,7 +1133,7 @@ private fun AdminPasswordField(
         ),
         keyboardActions = KeyboardActions(onDone = { /* submission is driven by the button */ }),
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = adminFieldColors()
     )
 }
