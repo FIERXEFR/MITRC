@@ -5,7 +5,7 @@ param(
 )
 
 $Secrets = [ordered]@{
-    supabaseUrl        = "https://unnjvvfpgpnuojepgtmi.supabase.co"
+    supabaseUrl        = "https://unnjvvfkpgnuojepgtmi.supabase.co"
     supabaseAnonKey    = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVubmp2dmZrcGdudW9qZXBndG1pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNDY4ODQsImV4cCI6MjEwNTkyMjg4NH0.6P48Fg4UuwEwTJeNILw_CBZ2Gq83ai7QUe6NZbdO4F0"
     supabaseServiceKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVubmp2dmZrcGdudW9qZXBndG1pIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MDM0Njg4NCwiZXhwIjoyMTA1OTIyODg0fQ.QGdWZ5bTrKoAF2EdqF7D2UM2DKgVlbVe84m69HsC6jQ"
     appName            = "MITRC"
@@ -42,7 +42,7 @@ foreach ($name in $Secrets.Keys) {
 
 foreach ($name in $Secrets.Keys) {
     [void]$sb.AppendLine("extern `"C`" JNIEXPORT jstring JNICALL")
-    [void]$sb.AppendLine("Java_com_mitrc_ac_in_NativeUtils_get$($name.Substring(0,1).ToUpper() + $name.Substring(1))(JNIEnv* env, jobject) {")
+    [void]$sb.AppendLine("Java_com_mitrc_ac_in_utils_NativeUtils_get$($name.Substring(0,1).ToUpper() + $name.Substring(1))(JNIEnv* env, jobject) {")
     [void]$sb.AppendLine("    return env->NewStringUTF(xor_decode(enc_$name, len_$name, key_$name).c_str());")
     [void]$sb.AppendLine("}")
     [void]$sb.AppendLine("")

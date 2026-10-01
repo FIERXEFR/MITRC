@@ -32,6 +32,12 @@
             android:screenOrientation="portrait"
             android:theme="@android:style/Theme.Material.Light.NoActionBar"
             tools:ignore="DiscouragedApi" />
+        <activity
+            android:name=".AdminPanelActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            tools:ignore="DiscouragedApi" />
     </application>
 
 </manifest>

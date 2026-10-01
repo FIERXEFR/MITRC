@@ -63,6 +63,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mitrc.ac.`in`.R
+import com.mitrc.ac.`in`.auth.AdminRepository
 import com.mitrc.ac.`in`.auth.AuthRepository
 import com.mitrc.ac.`in`.data.OnboardingStore
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
@@ -77,9 +78,15 @@ import com.mitrc.ac.`in`.ui.theme.SurfaceWhite
 import com.mitrc.ac.`in`.ui.theme.TextPrimary
 import com.mitrc.ac.`in`.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
+/**
+ * @param onLoggedIn routed to the normal student/co-ordinator portal.
+ * @param onAdminLoggedIn routed to [com.mitrc.ac.in.AdminPanelActivity] when the signed-in UID
+ * has a row in the `admin_db` table.
+ */
 @Composable
-fun LoginScreen(onLoggedIn: () -> Unit) {
+fun LoginScreen(onLoggedIn: () -> Unit, onAdminLoggedIn: () -> Unit) {
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
 
@@ -110,13 +117,46 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
         loading = true
         scope.launch {
             val result = AuthRepository.signIn(mail, password)
-            loading = false
             result.fold(
-                onSuccess = {
+                onSuccess = { user ->
                     OnboardingStore.markCompleted()
-                    onLoggedIn()
+                    if (!isStaff) {
+                        loading = false
+                        onLoggedIn()
+                    } else {
+                        runCatching { user.getIdToken(true).await() }
+
+                        when (val gate = AdminRepository.resolveStaffGate(user.uid, user.email)) {
+                            AdminRepository.StaffGate.Admin -> {
+                                loading = false
+                                onAdminLoggedIn()
+                            }
+
+                            AdminRepository.StaffGate.Staff -> {
+                                loading = false
+                                onLoggedIn()
+                            }
+
+                            AdminRepository.StaffGate.Neither -> {
+                                // Sign out from Firebase so an invalid staff attempt doesn't stay logged in
+                                AuthRepository.signOut()
+                                loading = false
+                                error = "Not a registered staff member (uid ${user.uid})"
+                            }
+
+                            is AdminRepository.StaffGate.Failed -> {
+                                // Sign out from Firebase so a failed check doesn't auto-navigate on restart
+                                AuthRepository.signOut()
+                                loading = false
+                                error = "Admin check failed: ${gate.reason}"
+                            }
+                        }
+                    }
                 },
-                onFailure = { error = AuthRepository.friendlyMessage(it) }
+                onFailure = {
+                    loading = false
+                    error = AuthRepository.friendlyMessage(it)
+                }
             )
         }
     }

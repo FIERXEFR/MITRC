@@ -1,5 +1,7 @@
 package com.mitrc.ac.`in`
 
+import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -9,6 +11,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -72,10 +75,26 @@ fun MitrcRoot(
                 fadeIn(tween(450, easing = FastOutSlowInEasing))
             }
         ) {
+            val context = LocalContext.current
             LoginScreen(
                 onLoggedIn = {
                     navController.navigate(MainActivity.ROUTE_HOME) {
                         popUpTo(MainActivity.ROUTE_LOGIN) { inclusive = true }
+                    }
+                },
+                onAdminLoggedIn = {
+                    val activity = context as? Activity
+                    if (activity != null) {
+                        activity.startActivity(
+                            Intent(activity, AdminPanelActivity::class.java)
+                        )
+                        activity.overridePendingTransition(
+                            android.R.anim.fade_in,
+                            android.R.anim.fade_out
+                        )
+                        // The panel becomes the task root, so an admin's back stack never
+                        // exposes the student/co-ordinator portal underneath it.
+                        activity.finish()
                     }
                 }
             )
