@@ -132,10 +132,12 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
     var selectedTab by remember { mutableStateOf(AdminEntryTab.STUDENT) }
     var tabSwitching by remember { mutableStateOf(false) }
 
+    var initialLoading by remember { mutableStateOf(true) }
     var adminName by remember { mutableStateOf<String?>(null) }
 
-    // Fetch Admin's real name from admin_db
+    // First time startup spinner + Fetch Admin's name
     LaunchedEffect(user?.uid) {
+        initialLoading = true
         val uid = user?.uid
         if (!uid.isNullOrBlank()) {
             val client = SupabaseManager.requireClient()
@@ -147,12 +149,8 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
             }.getOrNull()
             adminName = row?.name?.ifBlank { null }
         }
-    }
-
-    var animateTrigger by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        delay(100)
-        animateTrigger = true
+        delay(1000) // Authentic 1-second startup spinner
+        initialLoading = false
     }
 
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -179,7 +177,7 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
         error = null
         notice = null
         scope.launch {
-            delay(1000) // Non-cancelable 1-second switch delay
+            delay(1000)
             selectedTab = tab
             tabSwitching = false
         }
@@ -194,70 +192,107 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
             return
         }
 
-        val email = if (selectedTab == AdminEntryTab.STUDENT) studentForm.email.trim()
-        else staffForm.email.trim()
-        val password = if (selectedTab == AdminEntryTab.STUDENT) studentForm.password
-        else staffForm.password
-        val name = if (selectedTab == AdminEntryTab.STUDENT) studentForm.name.trim()
-        else staffForm.name.trim()
+        if (selectedTab == AdminEntryTab.STUDENT) {
+            val email = studentForm.email.trim()
+            val password = studentForm.password
+            val name = studentForm.name.trim()
+            val serialNo = studentForm.serialNo.trim()
+            val fatherName = studentForm.fatherName.trim()
+            val studentPhone = studentForm.studentPhoneNo.trim()
+            val fatherPhone = studentForm.fatherPhoneNo.trim()
 
-        when {
-            !email.contains('@') || !email.contains('.') -> {
+            if (email.isEmpty() || password.isEmpty() || name.isEmpty() ||
+                serialNo.isEmpty() || fatherName.isEmpty() || studentPhone.isEmpty() || fatherPhone.isEmpty()
+            ) {
+                error = "Please fill in all mandatory fields marked with *"
+                return
+            }
+
+            if (!email.contains('@') || !email.contains('.')) {
                 error = "Enter a valid email address"
                 return
             }
 
-            password.length < 6 -> {
+            if (password.length < 6) {
                 error = "Password must be at least 6 characters"
                 return
             }
 
-            name.isEmpty() -> {
-                error = "Enter the full name"
-                return
-            }
-        }
-
-        focusManager.clearFocus()
-        loading = true
-        scope.launch {
-            val result = if (selectedTab == AdminEntryTab.STUDENT) {
-                AdminRepository.createStudentAccount(
+            focusManager.clearFocus()
+            loading = true
+            scope.launch {
+                val result = AdminRepository.createStudentAccount(
                     StudentEntry(
                         email = email,
                         password = password,
                         name = name,
-                        serialNo = studentForm.serialNo.trim(),
-                        fatherName = studentForm.fatherName.trim(),
-                        studentPhoneNo = studentForm.studentPhoneNo.trim(),
-                        fatherPhoneNo = studentForm.fatherPhoneNo.trim(),
+                        serialNo = serialNo,
+                        fatherName = fatherName,
+                        studentPhoneNo = studentPhone,
+                        fatherPhoneNo = fatherPhone,
                         classId = studentForm.classId,
                         groupId = studentForm.groupId,
                     )
                 )
-            } else {
-                AdminRepository.createStaffAccount(
+                loading = false
+                result.fold(
+                    onSuccess = {
+                        notice = "Account created for $name!"
+                        studentForm.clearAll()
+                    },
+                    onFailure = { error = it.message ?: "Account creation failed" }
+                )
+            }
+        } else {
+            val email = staffForm.email.trim()
+            val password = staffForm.password
+            val name = staffForm.name.trim()
+            val designation = staffForm.designation.trim()
+            val department = staffForm.department.trim()
+            val role = staffForm.role.trim()
+            val phoneNo = staffForm.phoneNo.trim()
+
+            if (email.isEmpty() || password.isEmpty() || name.isEmpty() ||
+                designation.isEmpty() || department.isEmpty() || role.isEmpty() || phoneNo.isEmpty()
+            ) {
+                error = "Please fill in all mandatory fields marked with *"
+                return
+            }
+
+            if (!email.contains('@') || !email.contains('.')) {
+                error = "Enter a valid email address"
+                return
+            }
+
+            if (password.length < 6) {
+                error = "Password must be at least 6 characters"
+                return
+            }
+
+            focusManager.clearFocus()
+            loading = true
+            scope.launch {
+                val result = AdminRepository.createStaffAccount(
                     StaffEntry(
                         email = email,
                         password = password,
                         name = name,
-                        department = staffForm.department.trim(),
-                        role = staffForm.role.trim(),
-                        phoneNo = staffForm.phoneNo.trim(),
+                        department = department,
+                        role = role,
+                        phoneNo = phoneNo,
                         gender = staffForm.gender.trim(),
-                        designation = staffForm.designation.trim(),
+                        designation = designation,
                     )
                 )
+                loading = false
+                result.fold(
+                    onSuccess = {
+                        notice = "Staff account created for $name!"
+                        staffForm.clearAll()
+                    },
+                    onFailure = { error = it.message ?: "Account creation failed" }
+                )
             }
-            loading = false
-            result.fold(
-                onSuccess = {
-                    notice = "Account created for $name"
-                    if (selectedTab == AdminEntryTab.STUDENT) studentForm.resetIdentity()
-                    else staffForm.resetIdentity()
-                },
-                onFailure = { error = it.message ?: "Account creation failed" }
-            )
         }
     }
 
@@ -362,7 +397,6 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
                         }
                         Spacer(Modifier.width(10.dp))
 
-                        // Admin Name + Censored Email Address
                         val displayName = adminName ?: "Administrator"
                         val censoredMail = censorEmail(user?.email ?: "ukgankit@gmail.com")
                         Text(
@@ -377,19 +411,32 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
                 }
             }
 
-            AnimatedVisibility(
-                visible = animateTrigger,
-                enter = fadeIn(animationSpec = tween(500)),
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-            ) {
+            if (initialLoading) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = Navy, modifier = Modifier.size(44.dp))
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            text = "Loading...",
+                            color = TextSecondary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            } else {
                 Column(
                     modifier = Modifier
-                        .fillMaxSize()
+                        .weight(1f)
+                        .fillMaxWidth()
                         .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
-                    // Card View containing internal vertical scrollable form
+                    // Card View
                     Surface(
                         shape = RoundedCornerShape(24.dp),
                         color = SurfaceWhite,
@@ -410,7 +457,6 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
 
                             Spacer(Modifier.height(14.dp))
 
-                            // Scrollable Form Content Inside Card View
                             Column(
                                 modifier = Modifier
                                     .weight(1f)
@@ -428,7 +474,7 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
                                             CircularProgressIndicator(color = Navy, modifier = Modifier.size(36.dp))
                                             Spacer(Modifier.height(14.dp))
                                             Text(
-                                                text = "Loading Portal Roster...",
+                                                text = "Fetching...",
                                                 color = TextSecondary,
                                                 fontSize = 13.sp,
                                                 fontWeight = FontWeight.Medium
@@ -472,7 +518,6 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
 
                             Spacer(Modifier.height(12.dp))
 
-                            // Pinned Submit Button inside Card View Bottom
                             Button(
                                 onClick = ::submit,
                                 enabled = !loading && !tabSwitching,
@@ -557,7 +602,6 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
     }
 }
 
-/** Censors email address format: ukgankit@gmail.com -> uk******@gmail.com */
 private fun censorEmail(email: String?): String {
     val mail = email?.trim().orEmpty()
     if (!mail.contains('@')) return mail
@@ -625,6 +669,8 @@ private fun AdminEntryTabPill(
 
 @Composable
 private fun StudentEntryForm(form: StudentFormState) {
+    val scope = rememberCoroutineScope()
+
     var courses by remember { mutableStateOf<List<CourseRow>>(emptyList()) }
     var selectedCourse by remember { mutableStateOf<CourseRow?>(null) }
     var courseExpanded by remember { mutableStateOf(false) }
@@ -760,16 +806,29 @@ private fun StudentEntryForm(form: StudentFormState) {
         // 1. Course Dropdown
         Text(text = "1. Select Course:", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
         Spacer(Modifier.height(4.dp))
-        Box(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    if (courses.isEmpty()) {
+                        scope.launch {
+                            isLoadingData = true
+                            courses = AdminRepository.getCourses()
+                            if (courses.isNotEmpty()) selectedCourse = courses.first()
+                            isLoadingData = false
+                        }
+                    } else {
+                        courseExpanded = true
+                    }
+                }
+        ) {
             OutlinedTextField(
-                value = selectedCourse?.name ?: "Select Course",
+                value = selectedCourse?.name ?: if (courses.isEmpty()) "Tap to fetch courses" else "Select Course",
                 onValueChange = {},
                 readOnly = true,
                 leadingIcon = { Icon(Icons.Outlined.School, contentDescription = null, tint = Navy) },
                 trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, contentDescription = null, tint = Navy) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { courseExpanded = true },
+                modifier = Modifier.fillMaxWidth(),
                 enabled = false,
                 shape = RoundedCornerShape(12.dp),
                 colors = adminFieldColors()
@@ -777,7 +836,18 @@ private fun StudentEntryForm(form: StudentFormState) {
             Box(
                 modifier = Modifier
                     .matchParentSize()
-                    .clickable { courseExpanded = true }
+                    .clickable {
+                        if (courses.isEmpty()) {
+                            scope.launch {
+                                isLoadingData = true
+                                courses = AdminRepository.getCourses()
+                                if (courses.isNotEmpty()) selectedCourse = courses.first()
+                                isLoadingData = false
+                            }
+                        } else {
+                            courseExpanded = true
+                        }
+                    }
             )
             DropdownMenu(
                 expanded = courseExpanded,
@@ -1080,13 +1150,21 @@ private fun AdminField(
     onValueChange: (String) -> Unit,
     label: String,
     leadingIcon: ImageVector,
+    isRequired: Boolean = true,
     keyboardType: KeyboardType = KeyboardType.Text,
     imeAction: ImeAction = ImeAction.Next
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        label = { Text(label) },
+        label = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(label)
+                if (isRequired) {
+                    Text(text = " *", color = ErrorRed, fontWeight = FontWeight.Bold)
+                }
+            }
+        },
         singleLine = true,
         leadingIcon = { Icon(leadingIcon, contentDescription = null, tint = Navy) },
         keyboardOptions = KeyboardOptions(
@@ -1110,7 +1188,12 @@ private fun AdminPasswordField(
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        label = { Text("Password") },
+        label = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Password")
+                Text(text = " *", color = ErrorRed, fontWeight = FontWeight.Bold)
+            }
+        },
         singleLine = true,
         leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null, tint = Navy) },
         trailingIcon = {
@@ -1169,7 +1252,7 @@ private class StudentFormState {
     var classId by mutableStateOf<Int?>(null)
     var groupId by mutableStateOf<Int?>(null)
 
-    fun resetIdentity() {
+    fun clearAll() {
         email = ""
         password = ""
         name = ""
@@ -1177,6 +1260,10 @@ private class StudentFormState {
         fatherName = ""
         studentPhoneNo = ""
         fatherPhoneNo = ""
+    }
+
+    fun resetIdentity() {
+        clearAll()
     }
 }
 
@@ -1190,10 +1277,18 @@ private class StaffFormState {
     var phoneNo by mutableStateOf("")
     var gender by mutableStateOf("Male")
 
-    fun resetIdentity() {
+    fun clearAll() {
         email = ""
         password = ""
         name = ""
+        designation = ""
+        department = ""
+        role = "Teacher"
         phoneNo = ""
+        gender = "Male"
+    }
+
+    fun resetIdentity() {
+        clearAll()
     }
 }

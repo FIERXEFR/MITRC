@@ -222,77 +222,79 @@ fun HomeScreen(onSignedOut: () -> Unit) {
                 }
             }
 
-            // Role Switcher Bar
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 24.dp)
-            ) {
-                Text(
-                    text = "SWITCH PORTAL MODE",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextSecondary,
-                    letterSpacing = 1.5.sp,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
-                )
-
-                Row(
+            // Role Switcher Bar - Hidden when logged in as Student
+            if (selectedRole != StaffRole.STUDENT) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 20.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        .padding(top = 24.dp)
                 ) {
-                    StaffRole.entries.forEach { role ->
-                        val isSelected = selectedRole == role
-                        val scale by animateFloatAsState(if (isSelected) 1.04f else 1f, label = "tabScale")
+                    Text(
+                        text = "SWITCH PORTAL MODE",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextSecondary,
+                        letterSpacing = 1.5.sp,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                    )
 
-                        Box(
-                            modifier = Modifier
-                                .scale(scale)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(
-                                    when {
-                                        isSelected -> Navy
-                                        role.isComingSoon -> Slate
-                                        else -> SurfaceWhite
-                                    }
-                                )
-                                .clickable(enabled = !role.isComingSoon) {
-                                    selectedRole = role
-                                }
-                                .padding(horizontal = 18.dp, vertical = 12.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (role.isComingSoon) {
-                                    Icon(
-                                        Icons.Outlined.Lock,
-                                        contentDescription = null,
-                                        tint = TextSecondary.copy(alpha = 0.6f),
-                                        modifier = Modifier.size(14.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 20.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        StaffRole.entries.filter { it != StaffRole.STUDENT }.forEach { role ->
+                            val isSelected = selectedRole == role
+                            val scale by animateFloatAsState(if (isSelected) 1.04f else 1f, label = "tabScale")
+
+                            Box(
+                                modifier = Modifier
+                                    .scale(scale)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(
+                                        when {
+                                            isSelected -> Navy
+                                            role.isComingSoon -> Slate
+                                            else -> SurfaceWhite
+                                        }
                                     )
-                                    Spacer(Modifier.width(6.dp))
-                                } else if (isSelected) {
-                                    Icon(
-                                        Icons.Outlined.Star,
-                                        contentDescription = null,
-                                        tint = GoldLight,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                }
-                                Text(
-                                    text = role.label,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = when {
-                                        isSelected -> Color.White
-                                        role.isComingSoon -> TextSecondary.copy(alpha = 0.5f)
-                                        else -> TextPrimary
+                                    .clickable(enabled = !role.isComingSoon) {
+                                        selectedRole = role
                                     }
-                                )
+                                    .padding(horizontal = 18.dp, vertical = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (role.isComingSoon) {
+                                        Icon(
+                                            Icons.Outlined.Lock,
+                                            contentDescription = null,
+                                            tint = TextSecondary.copy(alpha = 0.6f),
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                    } else if (isSelected) {
+                                        Icon(
+                                            Icons.Outlined.Star,
+                                            contentDescription = null,
+                                            tint = GoldLight,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                    }
+                                    Text(
+                                        text = role.label,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = when {
+                                            isSelected -> Color.White
+                                            role.isComingSoon -> TextSecondary.copy(alpha = 0.5f)
+                                            else -> TextPrimary
+                                        }
+                                    )
+                                }
                             }
                         }
                     }

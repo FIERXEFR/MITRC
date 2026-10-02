@@ -74,22 +74,27 @@ object AdminRepository {
 
     suspend fun resolveStaffGate(uid: String?, email: String?): StaffGate {
         val id = uid?.trim().orEmpty()
-        if (id.isEmpty()) return StaffGate.Neither
         val mail = email?.trim().orEmpty()
+        if (id.isEmpty() && mail.isEmpty()) return StaffGate.Neither
+
         return try {
             val client = SupabaseManager.requireClient()
 
+            // 1. Probe admin_db (Strict non-empty match)
             val adminRows = client.postgrest[SupabaseTableData.Tables.ADMIN_DB]
                 .select()
                 .decodeList<AdminDbRow>()
 
             val matchingAdmin = adminRows.firstOrNull { row ->
-                row.uid.trim().equals(id, ignoreCase = true) ||
-                    (mail.isNotEmpty() && !row.email.isNullOrBlank() && row.email.trim().equals(mail, ignoreCase = true))
+                val dbUid = row.uid.trim()
+                val dbEmail = row.email?.trim().orEmpty()
+                (id.isNotEmpty() && dbUid.isNotEmpty() && dbUid.equals(id, ignoreCase = true)) ||
+                (mail.isNotEmpty() && dbEmail.isNotEmpty() && dbEmail.equals(mail, ignoreCase = true))
             }
 
             if (matchingAdmin != null) {
-                if (!matchingAdmin.uid.equals(id, ignoreCase = true)) {
+                Log.i(TAG, "resolveStaffGate: Matched in admin_db for email=$mail, uid=$id")
+                if (!matchingAdmin.uid.equals(id, ignoreCase = true) && id.isNotEmpty()) {
                     runCatching {
                         client.postgrest[SupabaseTableData.Tables.ADMIN_DB]
                             .update({ set("uid", id) }) {
@@ -100,17 +105,21 @@ object AdminRepository {
                 return StaffGate.Admin
             }
 
+            // 2. Probe staff_db (Strict non-empty match)
             val staffRows = client.postgrest[SupabaseTableData.Tables.STAFF_DB]
                 .select()
                 .decodeList<StaffDbRow>()
 
             val matchingStaff = staffRows.firstOrNull { row ->
-                row.uid.trim().equals(id, ignoreCase = true) ||
-                    (mail.isNotEmpty() && !row.emailId.isNullOrBlank() && row.emailId.trim().equals(mail, ignoreCase = true))
+                val dbUid = row.uid.trim()
+                val dbEmail = row.emailId?.trim().orEmpty()
+                (id.isNotEmpty() && dbUid.isNotEmpty() && dbUid.equals(id, ignoreCase = true)) ||
+                (mail.isNotEmpty() && dbEmail.isNotEmpty() && dbEmail.equals(mail, ignoreCase = true))
             }
 
             if (matchingStaff != null) {
-                if (!matchingStaff.uid.equals(id, ignoreCase = true)) {
+                Log.i(TAG, "resolveStaffGate: Matched in staff_db for email=$mail, uid=$id")
+                if (!matchingStaff.uid.equals(id, ignoreCase = true) && id.isNotEmpty()) {
                     runCatching {
                         client.postgrest[SupabaseTableData.Tables.STAFF_DB]
                             .update({ set("uid", id) }) {
@@ -121,7 +130,7 @@ object AdminRepository {
                 return StaffGate.Staff
             }
 
-            Log.w(TAG, "resolveStaffGate: No match for uid='$id', email='$mail'. Admin rows=${adminRows.size}, Staff rows=${staffRows.size}")
+            Log.w(TAG, "resolveStaffGate: No match in admin_db or staff_db for email='$mail', uid='$id'")
             StaffGate.Neither
         } catch (error: Throwable) {
             Log.e(TAG, "staff gate lookup failed for uid=$id", error)
@@ -240,35 +249,86 @@ object AdminRepository {
     // Helper queries for academic structure & users
     // -----------------------------------------------------------------------------------------
 
-    suspend fun getCourses(): List<CourseRow> = runCatching {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.COURSES]
+    private val defaultCourses = listOf(
+        CourseRow(id = 1, name = "B.Tech"),
+        CourseRow(id = 2, name = "BCA"),
+        CourseRow(id = 3, name = "BBA"),
+        CourseRow(id = 4, name = "MBA"),
+        CourseRow(id = 5, name = "M.Tech")
+    )
+
+    suspend fun getCourses(): List<CourseRow> = try {
+        val client = SupabaseManager.requireClient()
+        val list = client.postgrest[SupabaseTableData.Tables.COURSES]
             .select()
             .decodeList<CourseRow>()
-    }.getOrDefault(emptyList())
+        if (list.isNotEmpty()) list else defaultCourses
+    } catch (error: Throwable) {
+        Log.e(TAG, "getCourses failed, returning defaults", error)
+        defaultCourses
+    }
 
-    suspend fun getBranches(courseId: Int): List<BranchRow> = runCatching {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.BRANCHES]
+    private fun getDefaultBranches(courseId: Int): List<BranchRow> = when (courseId) {
+        1 -> listOf(
+            BranchRow(id = 1, courseId = 1, name = "CSE"),
+            BranchRow(id = 2, courseId = 1, name = "AI&ML"),
+            BranchRow(id = 3, courseId = 1, name = "AI&DS")
+        )
+        2 -> listOf(
+            BranchRow(id = 4, courseId = 2, name = "BCA Computer Applications")
+        )
+        else -> listOf(
+            BranchRow(id = 10 + courseId, courseId = courseId, name = "General")
+        )
+    }
+
+    suspend fun getBranches(courseId: Int): List<BranchRow> = try {
+        val client = SupabaseManager.requireClient()
+        val list = client.postgrest[SupabaseTableData.Tables.BRANCHES]
             .select { filter { eq("course_id", courseId) } }
             .decodeList<BranchRow>()
-    }.getOrDefault(emptyList())
+        if (list.isNotEmpty()) list else getDefaultBranches(courseId)
+    } catch (error: Throwable) {
+        Log.e(TAG, "getBranches failed for courseId=$courseId, returning defaults", error)
+        getDefaultBranches(courseId)
+    }
 
-    suspend fun getClassesForBranch(branchId: Int): List<ClassRow> = runCatching {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.CLASSES]
+    private fun getDefaultClasses(branchId: Int): List<ClassRow> = listOf(
+        ClassRow(id = 1, branchId = branchId, semester = 1, section = "A", academicYear = "2026-27"),
+        ClassRow(id = 2, branchId = branchId, semester = 1, section = "B", academicYear = "2026-27"),
+        ClassRow(id = 3, branchId = branchId, semester = 2, section = "A", academicYear = "2026-27")
+    )
+
+    suspend fun getClassesForBranch(branchId: Int): List<ClassRow> = try {
+        val client = SupabaseManager.requireClient()
+        val list = client.postgrest[SupabaseTableData.Tables.CLASSES]
             .select { filter { eq("branch_id", branchId) } }
             .decodeList<ClassRow>()
-    }.getOrDefault(emptyList())
+        if (list.isNotEmpty()) list else getDefaultClasses(branchId)
+    } catch (error: Throwable) {
+        Log.e(TAG, "getClassesForBranch failed for branchId=$branchId, returning defaults", error)
+        getDefaultClasses(branchId)
+    }
 
-    suspend fun getClasses(): List<ClassRow> = runCatching {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.CLASSES]
+    suspend fun getClasses(): List<ClassRow> = try {
+        val client = SupabaseManager.requireClient()
+        client.postgrest[SupabaseTableData.Tables.CLASSES]
             .select()
             .decodeList<ClassRow>()
-    }.getOrDefault(emptyList())
+    } catch (error: Throwable) {
+        Log.e(TAG, "getClasses failed", error)
+        emptyList()
+    }
 
-    suspend fun getClassGroups(classId: Int): List<ClassGroupRow> = runCatching {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.CLASS_GROUPS]
+    suspend fun getClassGroups(classId: Int): List<ClassGroupRow> = try {
+        val client = SupabaseManager.requireClient()
+        client.postgrest[SupabaseTableData.Tables.CLASS_GROUPS]
             .select { filter { eq("class_id", classId) } }
             .decodeList<ClassGroupRow>()
-    }.getOrDefault(emptyList())
+    } catch (error: Throwable) {
+        Log.e(TAG, "getClassGroups failed for classId=$classId", error)
+        emptyList()
+    }
 
     suspend fun getTeachers(): List<TeacherRow> = runCatching {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.TEACHERS]
