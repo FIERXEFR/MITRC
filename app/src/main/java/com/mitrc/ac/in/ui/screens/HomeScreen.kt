@@ -115,6 +115,14 @@ fun HomeScreen(onSignedOut: () -> Unit) {
         }
     }
 
+    // The student portal owns the whole screen - its own header, tabs and a fixed bottom
+    // navigation bar - so it returns before HomeScreen's shared header / role-switcher /
+    // sign-out scaffolding. The teacher and co-ordinator rendering below is unchanged.
+    if (selectedRole == StaffRole.STUDENT) {
+        StudentPortalShell(userUid = userUid, onSignedOut = onSignedOut)
+        return
+    }
+
     var animateTrigger by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay(100)
