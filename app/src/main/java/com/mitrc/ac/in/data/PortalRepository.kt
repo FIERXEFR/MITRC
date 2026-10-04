@@ -139,6 +139,13 @@ object PortalRepository {
             .firstOrNull()
     }
 
+    /** All rows in the `coordinators` table - used by the student "Contact Co-ordinator" sheet. */
+    suspend fun getCoordinators(): Result<List<CoordinatorRow>> = runCatching {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.COORDINATORS]
+            .select()
+            .decodeList<CoordinatorRow>()
+    }
+
     suspend fun getTimetables(classId: Int? = null): Result<List<TimetableRow>> = runCatching {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.TIMETABLES]
             .select {

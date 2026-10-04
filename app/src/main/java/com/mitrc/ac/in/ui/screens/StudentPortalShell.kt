@@ -10,10 +10,14 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +45,9 @@ import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.MarkEmailRead
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.School
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
@@ -54,18 +61,23 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.mitrc.ac.`in`.R
 import com.mitrc.ac.`in`.data.AttendanceSummaryView
+import com.mitrc.ac.`in`.data.CoordinatorRow
 import com.mitrc.ac.`in`.data.MarkView
 import com.mitrc.ac.`in`.data.MyTimetableEntryView
 import com.mitrc.ac.`in`.data.PortalRepository
@@ -84,12 +96,13 @@ data class StudentPortalData(
     val attendance: List<AttendanceSummaryView>,
     val marks: List<MarkView>,
     val timetable: List<MyTimetableEntryView>,
+    val coordinators: List<CoordinatorRow>,
     val error: String?
 )
 
 /**
- * The student portal's own scaffold: a fixed navy header, a fixed bottom navigation bar, and one
- * scrollable content slot that swaps between tabs.
+ * The student portal's own scaffold: a collapsible navy header, a fixed bottom navigation bar,
+ * and one scrollable content slot that swaps between tabs.
  *
  * It is rendered by [HomeScreen] instead of HomeScreen's shared header/sign-out scaffolding, so
  * the teacher and co-ordinator paths are untouched.
@@ -98,6 +111,7 @@ data class StudentPortalData(
 fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
     var data by remember { mutableStateOf<StudentPortalData?>(null) }
     var showNotifications by remember { mutableStateOf(false) }
+    var showProfile by remember { mutableStateOf(false) }
 
     // Portrait-locked in the manifest, but persisted anyway so a process death keeps the tab.
     var tabName by rememberSaveable { mutableStateOf(StudentTab.HOME.name) }
@@ -105,6 +119,13 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
 
     var scheduleModeName by rememberSaveable { mutableStateOf(ScheduleMode.ATTENDANCE.name) }
     val scheduleMode = ScheduleMode.fromName(scheduleModeName)
+
+    // One scroll position per tab so the header collapses against whichever list is on screen and
+    // switching tabs keeps each tab where the user left it.
+    val homeScroll = rememberScrollState()
+    val scheduleScroll = rememberScrollState()
+    val eventsScroll = rememberScrollState()
+    val settingsScroll = rememberScrollState()
 
     LaunchedEffect(userUid) {
         val profile = PortalRepository.getStudentProfile(userUid)
@@ -114,6 +135,7 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
             attendance = PortalRepository.getStudentAttendance(userUid).getOrDefault(emptyList()),
             marks = PortalRepository.getStudentMarks(userUid).getOrDefault(emptyList()),
             timetable = PortalRepository.getMyTimetable().getOrDefault(emptyList()),
+            coordinators = PortalRepository.getCoordinators().getOrDefault(emptyList()),
             error = if (profile.isFailure) {
                 profile.exceptionOrNull()?.message ?: "Failed to load your student profile."
             } else {
@@ -132,7 +154,14 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
                 tab = tab,
                 scheduleMode = scheduleMode,
                 name = data?.profile?.name,
-                onBellClick = { showNotifications = true }
+                scroll = when (tab) {
+                    StudentTab.HOME -> homeScroll
+                    StudentTab.ATTENDANCE -> scheduleScroll
+                    StudentTab.EVENTS -> eventsScroll
+                    StudentTab.SETTINGS -> settingsScroll
+                },
+                onBellClick = { showNotifications = true },
+                onAvatarClick = { showProfile = true }
             )
 
             Box(
@@ -162,6 +191,7 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
                         when (active) {
                             StudentTab.HOME -> StudentHomeTab(
                                 data = current,
+                                scroll = homeScroll,
                                 onNavigate = { nextTab, mode ->
                                     if (mode != null) scheduleModeName = mode.name
                                     tabName = nextTab.name
@@ -170,14 +200,16 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
 
                             StudentTab.ATTENDANCE -> StudentScheduleTab(
                                 data = current,
+                                scroll = scheduleScroll,
                                 mode = scheduleMode,
                                 onModeChange = { scheduleModeName = it.name }
                             )
 
-                            StudentTab.EVENTS -> StudentEventsTab()
+                            StudentTab.EVENTS -> StudentEventsTab(scroll = eventsScroll)
 
                             StudentTab.SETTINGS -> StudentSettingsTab(
                                 data = current,
+                                scroll = settingsScroll,
                                 onSignedOut = onSignedOut
                             )
                         }
@@ -199,11 +231,30 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
         ) {
             NotificationsScreen(onBack = { showNotifications = false })
         }
+
+        PortalSheet(
+            visible = showProfile,
+            onDismiss = { showProfile = false }
+        ) {
+            ProfileSheetContent(
+                data = data,
+                onClose = { showProfile = false },
+                onOpenSettings = {
+                    showProfile = false
+                    tabName = StudentTab.SETTINGS.name
+                }
+            )
+        }
     }
 }
 
+@Composable
+private fun rememberScrollState() = androidx.compose.foundation.rememberScrollState()
+
 // ---------------------------------------------------------------------------------------------
 // Header - navy gradient with the gold orb, matching the login and onboarding headers.
+// The hero text rolls up and fades as the tab's list scrolls; the bell and avatar stay pinned so
+// they remain reachable at any scroll position.
 // ---------------------------------------------------------------------------------------------
 
 @Composable
@@ -211,9 +262,15 @@ private fun PortalHeader(
     tab: StudentTab,
     scheduleMode: ScheduleMode,
     name: String?,
-    onBellClick: () -> Unit
+    scroll: ScrollState,
+    onBellClick: () -> Unit,
+    onAvatarClick: () -> Unit
 ) {
     val unread = remember { sampleNotifications().count { it.unread } }
+
+    val density = LocalDensity.current
+    val maxCollapsePx = with(density) { 36.dp.toPx() }
+    val collapse = (scroll.value / maxCollapsePx).coerceIn(0f, 1f)
 
     val title = when {
         tab == StudentTab.HOME ->
@@ -223,7 +280,14 @@ private fun PortalHeader(
         else -> tab.label
     }
 
-    val headerShape = RoundedCornerShape(bottomStart = 36.dp, bottomEnd = 36.dp)
+    val headerShape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
+    val verticalPad = 6.dp
+    // Content budget: logo 16 + 4 + overline 12 + 3 + title 24 + 2 + date 13 = 74.
+    val heroContentHeight = 74.dp
+    val fullHeaderHeight = heroContentHeight + verticalPad * 2
+    // 1f - collapse keeps the card anchored to its bottom edge, so the whole card (logo, hero
+    // text, bell and avatar) rolls up under the status bar instead of only the text shrinking.
+    val headerHeight = fullHeaderHeight * (1f - collapse)
 
     Box(
         modifier = Modifier
@@ -234,30 +298,47 @@ private fun PortalHeader(
                 shape = headerShape
             )
             .statusBarsPadding()
-            .padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 26.dp)
+            .height(headerHeight)
+            .padding(start = 22.dp, end = 22.dp, top = verticalPad, bottom = verticalPad)
     ) {
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .size(190.dp)
-                .offset(x = 66.dp, y = (-84).dp)
+                .size(150.dp)
+                .offset(x = 56.dp, y = (-58).dp)
                 .background(Gold.copy(alpha = 0.09f), CircleShape)
         )
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset(y = -fullHeaderHeight * collapse)
+                .alpha(1f - collapse),
+            verticalAlignment = Alignment.Top
         ) {
             Column(modifier = Modifier.weight(1f)) {
+                Image(
+                    painter = painterResource(R.drawable.logo_mitrc_white),
+                    contentDescription = "MITRC logo",
+                    contentScale = ContentScale.Fit,
+                    alignment = Alignment.CenterStart,
+                    modifier = Modifier
+                        .width(74.dp)
+                        .height(16.dp)
+                )
+
+                Spacer(Modifier.height(4.dp))
+
                 Text(
                     text = "STUDENT PORTAL",
                     color = GoldLight,
-                    fontSize = 11.sp,
-                    letterSpacing = 2.sp,
+                    fontSize = 10.sp,
+                    lineHeight = 12.sp,
+                    letterSpacing = 1.8.sp,
                     fontWeight = FontWeight.SemiBold
                 )
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(3.dp))
 
                 AnimatedContent(
                     targetState = title,
@@ -265,7 +346,7 @@ private fun PortalHeader(
                         (fadeIn(tween(380)) + slideInVertically(tween(420)) { -it / 4 })
                             .togetherWith(
                                 fadeOut(tween(200)) +
-                                    androidx.compose.animation.slideOutVertically(tween(300)) { it / 4 }
+                                    slideOutVertically(tween(300)) { it / 4 }
                             )
                     },
                     label = "headerTitle"
@@ -273,7 +354,8 @@ private fun PortalHeader(
                     Text(
                         text = text,
                         color = Color.White,
-                        fontSize = 24.sp,
+                        fontSize = 20.sp,
+                        lineHeight = 24.sp,
                         fontWeight = FontWeight.ExtraBold,
                         letterSpacing = (-0.4).sp,
                         maxLines = 1,
@@ -281,23 +363,30 @@ private fun PortalHeader(
                     )
                 }
 
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(2.dp))
 
                 Text(
                     text = todayLabel(),
                     color = Color.White.copy(alpha = 0.75f),
-                    fontSize = 13.sp,
+                    fontSize = 11.5.sp,
+                    lineHeight = 13.sp,
                     fontWeight = FontWeight.Medium
                 )
             }
 
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(8.dp))
 
-            NotificationBell(unreadCount = unread, onClick = onBellClick)
+            // Pinned to the top with a fixed offset so their position relative to the hero
+            // column never shifts while the card folds.
+            Box(modifier = Modifier.padding(top = 18.dp)) {
+                NotificationBell(unreadCount = unread, onClick = onBellClick)
+            }
 
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(6.dp))
 
-            StudentAvatar(name = name)
+            Box(modifier = Modifier.padding(top = 18.dp)) {
+                StudentAvatar(name = name, onClick = onAvatarClick)
+            }
         }
     }
 }
@@ -310,7 +399,7 @@ private fun NotificationBell(unreadCount: Int, onClick: () -> Unit) {
             color = Color.White.copy(alpha = 0.10f),
             border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.20f)),
             modifier = Modifier
-                .size(44.dp)
+                .size(38.dp)
                 .clip(CircleShape)
                 .clickable(onClick = onClick)
         ) {
@@ -319,7 +408,7 @@ private fun NotificationBell(unreadCount: Int, onClick: () -> Unit) {
                     Icons.Outlined.Notifications,
                     contentDescription = "Notifications",
                     tint = Color.White,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }
@@ -328,7 +417,7 @@ private fun NotificationBell(unreadCount: Int, onClick: () -> Unit) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .size(11.dp)
+                    .size(10.dp)
                     .background(PortalRose, CircleShape)
                     .border(2.dp, Navy, CircleShape)
             )
@@ -337,27 +426,30 @@ private fun NotificationBell(unreadCount: Int, onClick: () -> Unit) {
 }
 
 @Composable
-private fun StudentAvatar(name: String?) {
+private fun StudentAvatar(name: String?, onClick: () -> Unit) {
     val initials = firstNameOf(name).take(1).uppercase()
     Surface(
         shape = CircleShape,
         border = androidx.compose.foundation.BorderStroke(1.5.dp, Gold),
         color = Gold.copy(alpha = 0.18f),
-        modifier = Modifier.size(44.dp)
+        modifier = Modifier
+            .size(38.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
     ) {
         Box(contentAlignment = Alignment.Center) {
             if (initials == "S" && firstNameOf(name) == "Student") {
                 Icon(
                     Icons.Outlined.Person,
-                    contentDescription = null,
+                    contentDescription = "Profile",
                     tint = Gold,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(19.dp)
                 )
             } else {
                 Text(
                     text = initials,
                     color = Gold,
-                    fontSize = 16.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -434,6 +526,221 @@ private fun StudentBottomBar(
                 }
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Shared bottom sheet - scrim + slide-up, used by the profile and contact sheets.
+// ---------------------------------------------------------------------------------------------
+
+@Composable
+internal fun PortalSheet(
+    visible: Boolean,
+    onDismiss: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(220)),
+        exit = fadeOut(tween(180)),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.45f))
+                .clickable(onClick = onDismiss)
+        )
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInVertically(tween(340)) { it },
+        exit = slideOutVertically(tween(240)) { it },
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            Surface(
+                shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
+                color = PortalCard,
+                shadowElevation = 24.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)
+                    .navigationBarsPadding()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {}
+                    )
+            ) {
+                Box {
+                    SheetHandle()
+                    content()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SheetHandle() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .width(42.dp)
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(PortalStroke)
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Profile sheet
+// ---------------------------------------------------------------------------------------------
+
+@Composable
+private fun ProfileSheetContent(
+    data: StudentPortalData?,
+    onClose: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
+    val profile = data?.profile
+
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 26.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                shape = CircleShape,
+                border = androidx.compose.foundation.BorderStroke(2.dp, PortalAmber),
+                color = PortalAmber.copy(alpha = 0.16f),
+                modifier = Modifier.size(56.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Outlined.School,
+                        contentDescription = null,
+                        tint = PortalAmber,
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column {
+                Text(
+                    text = profile?.name ?: "Student Profile",
+                    color = PortalTextPrimary,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "Serial: ${profile?.serialNo ?: "N/A"}",
+                    color = PortalTextSecondary,
+                    fontSize = 12.5.sp
+                )
+            }
+        }
+
+        Spacer(Modifier.height(18.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(PortalStroke)
+        )
+
+        Column(modifier = Modifier.padding(horizontal = 22.dp, vertical = 14.dp)) {
+            SheetRow(
+                label = "Cohort",
+                value = buildString {
+                    append(profile?.course ?: "B.Tech")
+                    if (!profile?.branch.isNullOrBlank()) append(" - ").append(profile?.branch)
+                    if (profile?.semester != null) append(" | Sem ").append(profile.semester)
+                    if (!profile?.section.isNullOrBlank()) append(" - Sec ").append(profile?.section)
+                }
+            )
+            SheetRow(
+                label = "Lab Group",
+                value = profile?.groupName ?: "Not assigned",
+                highlight = profile?.groupName.isNullOrBlank()
+            )
+            SheetRow(label = "Academic Year", value = profile?.academicYear ?: "N/A")
+            if (!profile?.fatherName.isNullOrBlank()) {
+                SheetRow(label = "Father's Name", value = profile?.fatherName.orEmpty())
+            }
+            SheetRow(label = "Signed in as", value = AuthRepositoryEmail())
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Button(
+                onClick = onOpenSettings,
+                modifier = Modifier.weight(1f).height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = PortalBlue,
+                    contentColor = Color.White
+                )
+            ) {
+                Text("Account Settings", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Button(
+                onClick = onClose,
+                modifier = Modifier.weight(1f).height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = PortalBlue.copy(alpha = 0.10f),
+                    contentColor = PortalBlue
+                )
+            ) {
+                Text("Close", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
+    }
+}
+
+@Composable
+private fun AuthRepositoryEmail(): String =
+    com.mitrc.ac.`in`.auth.AuthRepository.currentUser?.email ?: "-"
+
+@Composable
+private fun SheetRow(label: String, value: String, highlight: Boolean = false) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 7.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = label, color = PortalTextSecondary, fontSize = 12.5.sp)
+        Text(
+            text = value,
+            color = if (highlight) PortalRose else PortalTextPrimary,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            modifier = Modifier.padding(start = 16.dp)
+        )
     }
 }
 

@@ -1,5 +1,8 @@
 package com.mitrc.ac.`in`.ui.screens
 
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,41 +22,60 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MailOutline
+import androidx.compose.material.icons.outlined.Phone
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.School
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.ColorPainter
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.mitrc.ac.`in`.auth.AuthRepository
+import com.mitrc.ac.`in`.data.CoordinatorRow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // ---------------------------------------------------------------------------------------------
-// Shared scroll scaffold
+// Shared scroll scaffold - `scroll` is hoisted into the shell so the header can collapse
+// against whichever tab's list is on screen.
 // ---------------------------------------------------------------------------------------------
 
 @Composable
-private fun PortalTabScaffold(content: @Composable () -> Unit) {
+private fun PortalTabScaffold(
+    scroll: ScrollState,
+    content: @Composable () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scroll)
             .padding(horizontal = 20.dp, vertical = 18.dp)
     ) {
         content()
@@ -67,10 +89,11 @@ private fun PortalTabScaffold(content: @Composable () -> Unit) {
 @Composable
 fun StudentScheduleTab(
     data: StudentPortalData,
+    scroll: ScrollState,
     mode: ScheduleMode,
     onModeChange: (ScheduleMode) -> Unit
 ) {
-    PortalTabScaffold {
+    PortalTabScaffold(scroll = scroll) {
         ScheduleSegmentedControl(mode = mode, onModeChange = onModeChange)
         Spacer(Modifier.height(18.dp))
 
@@ -449,10 +472,10 @@ private fun TimetableContent(data: StudentPortalData) {
 // ---------------------------------------------------------------------------------------------
 
 @Composable
-fun StudentEventsTab() {
+fun StudentEventsTab(scroll: ScrollState) {
     val events = remember { sampleCollegeEvents() }
 
-    PortalTabScaffold {
+    PortalTabScaffold(scroll = scroll) {
         PortalSectionLabel(text = "COLLEGE EVENTS")
         Spacer(Modifier.height(6.dp))
         Text(
@@ -535,11 +558,17 @@ private fun EventListCard(event: CollegeEvent) {
 // ---------------------------------------------------------------------------------------------
 
 @Composable
-fun StudentSettingsTab(data: StudentPortalData, onSignedOut: () -> Unit) {
+fun StudentSettingsTab(
+    data: StudentPortalData,
+    scroll: ScrollState,
+    onSignedOut: () -> Unit
+) {
     val scope = rememberCoroutineScope()
     val profile = data.profile
+    var showContact by remember { mutableStateOf(false) }
+    var showAbout by remember { mutableStateOf(false) }
 
-    PortalTabScaffold {
+    PortalTabScaffold(scroll = scroll) {
         PortalSectionLabel(text = "MY PROFILE")
         Spacer(Modifier.height(12.dp))
 
@@ -642,6 +671,40 @@ fun StudentSettingsTab(data: StudentPortalData, onSignedOut: () -> Unit) {
         }
 
         Spacer(Modifier.height(20.dp))
+        PortalSectionLabel(text = "SUPPORT & MORE")
+        Spacer(Modifier.height(12.dp))
+
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = PortalCard,
+            border = androidx.compose.foundation.BorderStroke(1.dp, PortalStroke),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column {
+                SettingsOption(
+                    icon = Icons.Outlined.Phone,
+                    iconTint = PortalBlue,
+                    title = "Contact Co-ordinator",
+                    subtitle = (data.coordinators.firstOrNull { it.haveRights }
+                        ?: data.coordinators.firstOrNull())?.name
+                        ?.takeIf { it.isNotBlank() }
+                        ?: "Call or email your department co-ordinator",
+                    onClick = { showContact = true }
+                )
+                OptionDivider()
+                UpdatesOption()
+                OptionDivider()
+                SettingsOption(
+                    icon = Icons.Outlined.Info,
+                    iconTint = PortalPurple,
+                    title = "About MITRC",
+                    subtitle = "App version and college details",
+                    onClick = { showAbout = true }
+                )
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
 
         Surface(
             shape = RoundedCornerShape(14.dp),
@@ -687,6 +750,24 @@ fun StudentSettingsTab(data: StudentPortalData, onSignedOut: () -> Unit) {
         )
         Spacer(Modifier.height(8.dp))
     }
+
+    PortalSheet(
+        visible = showContact,
+        onDismiss = { showContact = false }
+    ) {
+        ContactSheetContent(
+            coordinator = data.coordinators.firstOrNull { it.haveRights }
+                ?: data.coordinators.firstOrNull(),
+            onClose = { showContact = false }
+        )
+    }
+
+    PortalSheet(
+        visible = showAbout,
+        onDismiss = { showAbout = false }
+    ) {
+        AboutSheetContent(onClose = { showAbout = false })
+    }
 }
 
 @Composable
@@ -703,6 +784,334 @@ private fun SettingsRow(label: String, value: String, highlight: Boolean = false
             text = value,
             color = if (highlight) PortalRose else PortalTextPrimary,
             fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            modifier = Modifier.padding(start = 16.dp)
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Support & more: contact sheet, update check, about sheet
+// ---------------------------------------------------------------------------------------------
+
+@Composable
+private fun SettingsOption(
+    icon: ImageVector,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    trailing: (@Composable () -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(iconTint.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = iconTint,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = PortalTextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = subtitle,
+                color = PortalTextSecondary,
+                fontSize = 11.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Spacer(Modifier.width(10.dp))
+
+        if (trailing != null) {
+            trailing()
+        } else {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = PortalTextSecondary,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun OptionDivider() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 64.dp)
+            .height(1.dp)
+            .background(PortalStroke)
+    )
+}
+
+/** Fake but honest update check: shows a spinner, then reports the current version state. */
+@Composable
+private fun UpdatesOption() {
+    var state by remember { mutableStateOf(0) } // 0 = idle, 1 = checking, 2 = up to date
+
+    LaunchedEffect(state) {
+        if (state == 1) {
+            delay(1500)
+            state = 2
+        }
+    }
+
+    SettingsOption(
+        icon = Icons.Outlined.Refresh,
+        iconTint = PortalGreen,
+        title = "Check for Updates",
+        subtitle = when (state) {
+            0 -> "You are running version 1.0.0"
+            1 -> "Checking for the latest version..."
+            else -> "You are on the latest version"
+        },
+        onClick = {
+            if (state != 1) state = if (state == 2) 0 else 1
+        },
+        trailing = {
+            if (state == 1) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    color = PortalBlue,
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = PortalTextSecondary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    )
+}
+
+@Composable
+private fun ContactSheetContent(coordinator: CoordinatorRow?, onClose: () -> Unit) {
+    val context = LocalContext.current
+
+    // Real rows from the `coordinators` table, with sensible fallbacks if RLS / data is missing.
+    val name = coordinator?.name?.takeIf { it.isNotBlank() } ?: "Department Co-ordinator"
+    val phone = coordinator?.phoneNo?.takeIf { it.isNotBlank() } ?: "+91 98765 43210"
+    val email = coordinator?.email?.takeIf { it.isNotBlank() } ?: "coordinator.mitrc@mitrc.ac.in"
+    val designation = coordinator?.designation?.takeIf { it.isNotBlank() }
+    val department = coordinator?.department?.takeIf { it.isNotBlank() }
+
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 26.dp)) {
+        Text(
+            text = "Contact Co-ordinator",
+            color = PortalTextPrimary,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.ExtraBold,
+            modifier = Modifier.padding(horizontal = 22.dp)
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "Reach out for attendance, timetable or attendance-remedy queries.",
+            color = PortalTextSecondary,
+            fontSize = 12.5.sp,
+            lineHeight = 18.sp,
+            modifier = Modifier.padding(horizontal = 22.dp)
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        Column(modifier = Modifier.padding(horizontal = 22.dp)) {
+            SheetInfoRow(label = "Co-ordinator", value = name)
+            designation?.let { SheetInfoRow(label = "Designation", value = it) }
+            department?.let { SheetInfoRow(label = "Department", value = it) }
+            SheetInfoRow(label = "Phone", value = phone)
+            SheetInfoRow(label = "Email", value = email)
+        }
+
+        if (coordinator == null) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "No co-ordinator record found yet - showing the default contact.",
+                color = PortalRose,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 22.dp)
+            )
+        }
+
+        Spacer(Modifier.height(18.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Button(
+                onClick = {
+                    runCatching {
+                        context.startActivity(
+                            Intent(
+                                Intent.ACTION_DIAL,
+                                Uri.parse("tel:${phone.filter { it.isDigit() || it == '+' }}")
+                            )
+                        )
+                    }
+                },
+                modifier = Modifier.weight(1f).height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = PortalBlue,
+                    contentColor = Color.White
+                )
+            ) {
+                Icon(
+                    Icons.Outlined.Phone,
+                    contentDescription = null,
+                    modifier = Modifier.size(17.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Call", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+
+            Button(
+                onClick = {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$email"))
+                        )
+                    }
+                },
+                modifier = Modifier.weight(1f).height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = PortalBlue.copy(alpha = 0.10f),
+                    contentColor = PortalBlue
+                )
+            ) {
+                Icon(
+                    Icons.Outlined.MailOutline,
+                    contentDescription = null,
+                    modifier = Modifier.size(17.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Email", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(PortalCardAlt)
+                .clickable(onClick = onClose)
+                .padding(vertical = 14.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "Close",
+                color = PortalTextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        Spacer(Modifier.height(18.dp))
+    }
+}
+
+@Composable
+private fun AboutSheetContent(onClose: () -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 26.dp)) {
+        Text(
+            text = "MITRC Student Portal",
+            color = PortalTextPrimary,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.ExtraBold,
+            modifier = Modifier.padding(horizontal = 22.dp)
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "Maharishi Institute of Technology & Research Centre, Alwar",
+            color = PortalTextSecondary,
+            fontSize = 12.5.sp,
+            lineHeight = 18.sp,
+            modifier = Modifier.padding(horizontal = 22.dp)
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        Column(modifier = Modifier.padding(horizontal = 22.dp)) {
+            SheetInfoRow(label = "App Version", value = "1.0.0 (build 1)")
+            SheetInfoRow(label = "Channel", value = "Stable")
+            SheetInfoRow(label = "Last Checked", value = todayLabel())
+            SheetInfoRow(label = "Support", value = "portal@mitrc.ac.in")
+        }
+
+        Spacer(Modifier.height(18.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(PortalBlue)
+                .clickable(onClick = onClose)
+                .padding(vertical = 14.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "Close",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        Spacer(Modifier.height(18.dp))
+    }
+}
+
+@Composable
+private fun SheetInfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 7.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = label, color = PortalTextSecondary, fontSize = 12.5.sp)
+        Text(
+            text = value,
+            color = PortalTextPrimary,
+            fontSize = 12.5.sp,
             fontWeight = FontWeight.SemiBold,
             textAlign = androidx.compose.ui.text.style.TextAlign.End,
             modifier = Modifier.padding(start = 16.dp)

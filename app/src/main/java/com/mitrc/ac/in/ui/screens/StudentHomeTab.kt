@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -67,6 +68,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun StudentHomeTab(
     data: StudentPortalData,
+    scroll: ScrollState,
     onNavigate: (StudentTab, ScheduleMode?) -> Unit
 ) {
     // `attended` / `total` come back as Long from the view model; the UI works in Int.
@@ -85,7 +87,7 @@ fun StudentHomeTab(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scroll)
             .padding(horizontal = 20.dp, vertical = 18.dp)
     ) {
         Stagger(0) { StatRow(todayPresent = todayClasses.size, attended = totalAttended, missed = missed) }
