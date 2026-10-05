@@ -56,13 +56,14 @@ fun MITRCTheme(
 ) {
     val density = LocalDensity.current
 
-    // Pin fontScale to 1.0 so 16.sp always renders as 16.sp regardless of the device's
-    // accessibility font-size setting. Without this the same layout measures differently on
-    // every phone and the fixed-height chips, pills and headers overflow or truncate.
+    // Pin fontScale to 14/16 so 16.sp always renders as 14.sp regardless of the device's
+    // accessibility font-size setting. Without a fixed scale the same layout measures differently
+    // on every phone and the fixed-height chips, pills and headers overflow or truncate.
+    // 0.875f == 14.sp base: every sp value in the app shrinks by the same 12.5%.
     CompositionLocalProvider(
         LocalDensity provides Density(
             density = density.density,
-            fontScale = 1f
+            fontScale = 14f / 16f
         )
     ) {
         MaterialTheme(

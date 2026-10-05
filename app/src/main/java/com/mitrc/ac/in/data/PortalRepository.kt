@@ -57,6 +57,12 @@ object PortalRepository {
             .decodeList<MyTimetableEntryView>()
     }
 
+    suspend fun getPublishedNotes(): Result<List<NoteRow>> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.NOTES]
+            .select { filter { eq("is_visible", true) } }
+            .decodeList<NoteRow>()
+    }
+
     // -----------------------------------------------------------------------------------------
     // Teacher Queries & Attendance RPC
     // -----------------------------------------------------------------------------------------
@@ -148,7 +154,7 @@ object PortalRepository {
             .firstOrNull()
     }
 
-    /** All rows in the `coordinators` table - used by the student "Contact Co-ordinator" sheet. */
+    /** All rows in the `coordinators` table. */
     suspend fun getCoordinators(): Result<List<CoordinatorRow>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.COORDINATORS]
             .select()

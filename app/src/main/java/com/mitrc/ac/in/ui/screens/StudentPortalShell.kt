@@ -3,10 +3,16 @@ package com.mitrc.ac.`in`.ui.screens
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
@@ -52,27 +58,35 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.ColorPainter
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -80,14 +94,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import com.mitrc.ac.`in`.R
 import com.mitrc.ac.`in`.data.AttendanceSummaryView
-import com.mitrc.ac.`in`.data.CoordinatorRow
+import com.mitrc.ac.`in`.data.GreetingStore
 import com.mitrc.ac.`in`.data.MarkView
 import com.mitrc.ac.`in`.data.MyTimetableEntryView
 import com.mitrc.ac.`in`.data.PortalRepository
 import com.mitrc.ac.`in`.data.StudentDirectoryView
 import com.mitrc.ac.`in`.data.StudentSubjectView
+import com.mitrc.ac.`in`.data.SubjectTeacherView
 import com.mitrc.ac.`in`.ui.theme.Gold
 import com.mitrc.ac.`in`.ui.theme.GoldLight
 import com.mitrc.ac.`in`.ui.theme.Navy
@@ -100,9 +118,49 @@ data class StudentPortalData(
     val attendance: List<AttendanceSummaryView>,
     val marks: List<MarkView>,
     val timetable: List<MyTimetableEntryView>,
-    val coordinators: List<CoordinatorRow>,
-    val error: String?
+    val error: String?,
+    /** `v_subject_teachers` rows for this student's class - backs the "Contact Faculty" sheet. */
+    val faculty: List<SubjectTeacherView> = emptyList(),
+    /**
+     * Teacher-published PDFs from the `notes` table, already filtered down to the subjects this
+     * student is enrolled in - backs the Notes segment of the Academics tab.
+     */
+    val pdfNotes: List<PortalPdfNote> = emptyList()
 )
+
+/**
+ * Fetches everything [StudentPortalShell] renders. Split out of the shell's [LaunchedEffect] so
+ * the pull-to-refresh gestures can re-run it silently while the current data stays on screen.
+ *
+ * `getOrDefault` keeps one dead query (say a notes fetch that fails) from blanking the whole
+ * portal; a failed profile still surfaces as [StudentPortalData.error] so the Retry screen shows.
+ */
+private suspend fun loadPortalData(userUid: String): StudentPortalData {
+    val profile = PortalRepository.getStudentProfile(userUid)
+    val subjects = PortalRepository.getStudentSubjects(userUid).getOrDefault(emptyList())
+    val faculty = profile.getOrNull()?.classId
+        ?.let { PortalRepository.getSubjectTeachers(it) }
+        ?.getOrDefault(emptyList())
+        .orEmpty()
+
+    return StudentPortalData(
+        profile = profile.getOrNull(),
+        subjects = subjects,
+        attendance = PortalRepository.getStudentAttendance(userUid).getOrDefault(emptyList()),
+        marks = PortalRepository.getStudentMarks(userUid).getOrDefault(emptyList()),
+        timetable = PortalRepository.getMyTimetable().getOrDefault(emptyList()),
+        faculty = faculty,
+        // Notes live in their own table; the mapper drops rows outside this student's subjects.
+        pdfNotes = PortalRepository.getPublishedNotes()
+            .getOrDefault(emptyList())
+            .toPortalPdfNotes(subjects = subjects, subjectTeachers = faculty),
+        error = if (profile.isFailure) {
+            profile.exceptionOrNull()?.message ?: "Failed to load your student profile."
+        } else {
+            null
+        }
+    )
+}
 
 /**
  * The student portal's own scaffold: a collapsible navy header, a fixed bottom navigation bar,
@@ -116,6 +174,10 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
     var data by remember { mutableStateOf<StudentPortalData?>(null) }
     var showNotifications by remember { mutableStateOf(false) }
     var showProfile by remember { mutableStateOf(false) }
+
+    // Session-local notebook for the student's own jottings (the `notes` table is for
+    // teacher-published PDFs instead). Hoisted here so switching tabs does not discard them.
+    val notes = remember { mutableStateListOf<PortalNote>() }
 
     // Portrait-locked in the manifest, but persisted anyway so a process death keeps the tab.
     var tabName by rememberSaveable { mutableStateOf(StudentTab.HOME.name) }
@@ -137,20 +199,13 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
 
     LaunchedEffect(userUid, reloadKey) {
         data = null
-        val profile = PortalRepository.getStudentProfile(userUid)
-        data = StudentPortalData(
-            profile = profile.getOrNull(),
-            subjects = PortalRepository.getStudentSubjects(userUid).getOrDefault(emptyList()),
-            attendance = PortalRepository.getStudentAttendance(userUid).getOrDefault(emptyList()),
-            marks = PortalRepository.getStudentMarks(userUid).getOrDefault(emptyList()),
-            timetable = PortalRepository.getMyTimetable().getOrDefault(emptyList()),
-            coordinators = PortalRepository.getCoordinators().getOrDefault(emptyList()),
-            error = if (profile.isFailure) {
-                profile.exceptionOrNull()?.message ?: "Failed to load your student profile."
-            } else {
-                null
-            }
-        )
+        data = loadPortalData(userUid)
+    }
+
+    // Silent re-fetch used by the pull-to-refresh gestures: the current data stays on screen
+    // instead of blanking out to the full-screen loading skeleton.
+    val refreshData: suspend () -> Unit = {
+        data = loadPortalData(userUid)
     }
 
     Box(
@@ -204,6 +259,7 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
                             StudentTab.HOME -> StudentHomeTab(
                                 data = current,
                                 scroll = homeScroll,
+                                onReload = refreshData,
                                 onNavigate = { nextTab, mode ->
                                     if (mode != null) scheduleModeName = mode.name
                                     tabName = nextTab.name
@@ -214,6 +270,8 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
                                 data = current,
                                 scroll = scheduleScroll,
                                 mode = scheduleMode,
+                                notes = notes,
+                                onReload = refreshData,
                                 onModeChange = { scheduleModeName = it.name }
                             )
 
@@ -276,13 +334,13 @@ private fun PortalHeader(
 ) {
     val unread = remember { sampleNotifications().count { it.unread } }
 
-    val density = LocalDensity.current
-    val maxCollapsePx = with(density) { 36.dp.toPx() }
-    val collapse = (scroll.value / maxCollapsePx).coerceIn(0f, 1f)
+    // "Welcome" the first open of the day, "HEY" for every later open - resolved once and
+    // held for the lifetime of the shell.
+    val greeting = remember { GreetingStore.greeting() }
 
     val title = when {
         tab == StudentTab.HOME ->
-            "${greetingForHour(java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY))}, ${firstNameOf(name)} \ud83d\udc4b"
+            "$greeting, ${firstNameOf(name)} \ud83d\udc4b"
 
         tab == StudentTab.ATTENDANCE -> scheduleMode.label
         else -> tab.label
@@ -293,10 +351,17 @@ private fun PortalHeader(
     // Content budget: logo 16 + 4 + overline 12 + 3 + title 24 + 2 + date 13 = 74.
     val heroContentHeight = 74.dp
     val fullHeaderHeight = heroContentHeight + verticalPad * 2
-    // 1f - collapse keeps the card anchored to its bottom edge, so the whole card (logo, hero
-    // text, bell and avatar) rolls up under the status bar instead of only the text shrinking.
-    val headerHeight = fullHeaderHeight * (1f - collapse)
 
+    val density = LocalDensity.current
+    // The fold used to finish in 36.dp of scroll, which is why it snapped instead of rolling.
+    // It now takes ~96.dp, i.e. a little longer than the card is tall, so the whole collapse
+    // is one continuous gesture.
+    val foldDistancePx = with(density) { 96.dp.toPx() }
+    val fullHeaderHeightPx = with(density) { fullHeaderHeight.toPx() }
+
+    // `scroll.value` is deliberately read *only* inside the offset / layer / measure lambdas:
+    // none of them are composition, so scrolling the list no longer recomposes the header on
+    // every frame. That per-frame recomposition was the source of the stutter.
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -306,7 +371,16 @@ private fun PortalHeader(
                 shape = headerShape
             )
             .statusBarsPadding()
-            .height(headerHeight)
+            .layout { measurable, constraints ->
+                val collapse = (scroll.value / foldDistancePx).coerceIn(0f, 1f)
+                val heightPx = (fullHeaderHeightPx * (1f - collapse))
+                    .roundToInt()
+                    .coerceIn(0, constraints.maxHeight)
+                val placeable = measurable.measure(
+                    constraints.copy(minHeight = heightPx, maxHeight = heightPx)
+                )
+                layout(constraints.maxWidth, heightPx) { placeable.place(0, 0) }
+            }
             .padding(start = 22.dp, end = 22.dp, top = verticalPad, bottom = verticalPad)
     ) {
         Box(
@@ -320,8 +394,13 @@ private fun PortalHeader(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .offset(y = -fullHeaderHeight * collapse)
-                .alpha(1f - collapse),
+                // Draw-phase only: the roll-up and the fade happen on the graphics layer, so a
+                // scroll frame never re-lays out the hero column (nor recomposes the header).
+                .graphicsLayer {
+                    val collapse = (scroll.value / foldDistancePx).coerceIn(0f, 1f)
+                    translationY = -fullHeaderHeightPx * collapse
+                    alpha = 1f - collapse
+                },
             verticalAlignment = Alignment.Top
         ) {
             Column(modifier = Modifier.weight(1f)) {
@@ -392,8 +471,12 @@ private fun PortalHeader(
 
             Spacer(Modifier.width(6.dp))
 
-            Box(modifier = Modifier.padding(top = 18.dp)) {
-                StudentAvatar(name = name, onClick = onAvatarClick)
+            // The Settings tab already lists the profile in full, so the avatar duplicate is
+            // hidden there.
+            if (tab != StudentTab.SETTINGS) {
+                Box(modifier = Modifier.padding(top = 18.dp)) {
+                    StudentAvatar(name = name, onClick = onAvatarClick)
+                }
             }
         }
     }
@@ -567,6 +650,37 @@ internal fun PortalSheet(
         exit = slideOutVertically(tween(240)) { it },
         modifier = Modifier.fillMaxSize()
     ) {
+        // The drag state lives *inside* the visibility block, so it is thrown away together
+        // with the content: every time the sheet is reopened it starts back at offset 0.
+        var dragOffset by remember { mutableStateOf(0f) }
+        var dragging by remember { mutableStateOf(false) }
+        val dragThresholdPx = with(LocalDensity.current) { 110.dp.toPx() }
+
+        // While the finger is down the value simply *is* the finger position (snap), so the
+        // card tracks the gesture with no lag. The moment the gesture ends the target becomes
+        // 0 and the same state object springs the card back to its resting position.
+        val offsetY by animateFloatAsState(
+            targetValue = if (dragging) dragOffset else 0f,
+            animationSpec = if (dragging) {
+                snap<Float>()
+            } else {
+                spring<Float>(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            },
+            label = "sheetDragOffset"
+        )
+
+        // If the sheet is dismissed mid-drag and reopened before the exit animation finishes,
+        // the content is still in composition - make sure it starts back at rest.
+        LaunchedEffect(visible) {
+            if (visible) {
+                dragging = false
+                dragOffset = 0f
+            }
+        }
+
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.BottomCenter
@@ -578,6 +692,29 @@ internal fun PortalSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp)
+                    // Layout-phase read: the finger-tracking offset re-lays out only this card
+                    // and never recomposes the sheet.
+                    .offset { IntOffset(0, offsetY.roundToInt()) }
+                    .draggable(
+                        state = rememberDraggableState { delta ->
+                            // Downward only - the sheet can never be pulled past its rest spot.
+                            dragOffset = (dragOffset + delta).coerceAtLeast(0f)
+                        },
+                        orientation = Orientation.Vertical,
+                        onDragStarted = { dragging = true },
+                        onDragStopped = { velocity ->
+                            if (dragOffset > dragThresholdPx || velocity > 2500f) {
+                                // Far enough down (or a confident flick): close the sheet and
+                                // leave the offset where the finger left it, so the card keeps
+                                // travelling down while the exit animation plays.
+                                onDismiss()
+                            } else {
+                                // Not far enough: release the finger and spring back to rest.
+                                dragging = false
+                                dragOffset = 0f
+                            }
+                        }
+                    )
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -748,12 +885,7 @@ private fun SheetRow(label: String, value: String, highlight: Boolean = false) {
 
 @Composable
 internal fun PortalLoading() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        CircularProgressIndicator(color = PortalBlue)
-    }
+    HomeTabSkeleton()
 }
 
 /**
@@ -867,9 +999,20 @@ internal fun PortalNoProfileState() {
 // Notifications - opened from the bell, mocked for now.
 // ---------------------------------------------------------------------------------------------
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NotificationsScreen(onBack: () -> Unit) {
+    var isRefreshing by remember { mutableStateOf(false) }
+    // Brief first-paint skeleton so the list doesn't pop in fully formed.
+    var isLoading by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
     val notifications = remember { sampleNotifications().toMutableStateList() }
+
+    LaunchedEffect(Unit) {
+        delay(650)
+        isLoading = false
+    }
 
     Column(
         modifier = Modifier
@@ -933,18 +1076,41 @@ private fun NotificationsScreen(onBack: () -> Unit) {
             )
         }
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 20.dp,
-                end = 20.dp,
-                top = 4.dp,
-                bottom = 32.dp
-            ),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                scope.launch {
+                    isRefreshing = true
+                    delay(1200)
+                    notifications.clear()
+                    notifications.addAll(sampleNotifications())
+                    isRefreshing = false
+                }
+            },
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
         ) {
-            items(notifications) { item ->
-                NotificationRow(item = item)
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    start = 20.dp,
+                    end = 20.dp,
+                    top = 4.dp,
+                    bottom = 32.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (isLoading || isRefreshing) {
+                    items(4) {
+                        NotificationRowSkeleton()
+                    }
+                } else {
+                    items(notifications, key = { it.id }) { item ->
+                        NotificationRow(item = item)
+                    }
+                }
             }
         }
     }

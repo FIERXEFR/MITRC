@@ -30,6 +30,7 @@ object SupabaseTableData {
         const val TIMETABLE_PERIODS = "timetable_periods"
         const val TIMETABLE_ENTRIES = "timetable_entries"
         const val COORDINATORS = "coordinators"
+        const val NOTES = "notes"
     }
 
     object Views {
@@ -390,4 +391,20 @@ data class MyTimetableEntryView(
 data class TakeAttendanceRecord(
     @SerialName("uid") val uid: String,
     @SerialName("status") val status: String, // 'P'|'A'|'L'|'OD'
+)
+
+@Serializable
+data class NoteRow(
+    @SerialName("id") val id: Int = 0,
+    @SerialName("class_subject_id") val classSubjectId: Int,
+    @SerialName("group_id") val groupId: Int? = null,
+    @SerialName("title") val title: String,
+    @SerialName("description") val description: String? = null,
+    @SerialName("category") val category: String = "notes",
+    @SerialName("drive_url") val driveUrl: String,
+    @SerialName("teacher_id") val teacherId: Int,
+    @SerialName("uploaded_by") val uploadedBy: String? = null,
+    @SerialName("is_visible") val isVisible: Boolean = true,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null
 )

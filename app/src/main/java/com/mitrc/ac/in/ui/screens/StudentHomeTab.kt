@@ -1,11 +1,9 @@
 package com.mitrc.ac.`in`.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -35,14 +33,17 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.LocalFireDepartment
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,8 +52,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.ColorPainter
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -60,17 +64,34 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.mitrc.ac.`in`.ui.theme.GoldLight
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // ---------------------------------------------------------------------------------------------
 // Home tab
 // ---------------------------------------------------------------------------------------------
 
+// The stack-up entrance plays once per process; coming back to the Home tab shows the cards
+// in place rather than replaying the whole stagger (replaying it was the source of the
+// stutter on every tab switch).
+private var homeEntrancePlayed = false
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StudentHomeTab(
     data: StudentPortalData,
     scroll: ScrollState,
+    onReload: suspend () -> Unit,
     onNavigate: (StudentTab, ScheduleMode?) -> Unit
 ) {
+    var isRefreshing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+
+    val animateEntrance = remember {
+        val first = !homeEntrancePlayed
+        homeEntrancePlayed = true
+        first
+    }
     // `attended` / `total` come back as Long from the view model; the UI works in Int.
     val totalAttended = remember(data.attendance) { data.attendance.sumOf { it.attended }.toInt() }
     val totalClasses = remember(data.attendance) { data.attendance.sumOf { it.total }.toInt() }
@@ -84,55 +105,105 @@ fun StudentHomeTab(
     val events = remember { sampleCollegeEvents() }
     val quickActions = remember { sampleQuickActions() }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scroll)
-            .padding(horizontal = 20.dp, vertical = 18.dp)
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            scope.launch {
+                isRefreshing = true
+                // `finally` so a failed query still drops the spinner instead of wedging it.
+                try {
+                    onReload()
+                } finally {
+                    isRefreshing = false
+                }
+            }
+        },
+        modifier = Modifier.fillMaxSize()
     ) {
-        Stagger(0) { StatRow(todayPresent = todayClasses.size, attended = totalAttended, missed = missed) }
-        Spacer(Modifier.height(14.dp))
+        if (isRefreshing) {
+            HomeTabSkeleton()
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(scroll)
+                    .padding(horizontal = 20.dp, vertical = 18.dp)
+            ) {
+                Stagger(0, animateEntrance) {
+                    StatRow(todayPresent = todayClasses.size, attended = totalAttended, missed = missed)
+                }
+                Spacer(Modifier.height(14.dp))
 
-        Stagger(1) { StreakCard(totalPresent = totalAttended) }
-        Spacer(Modifier.height(14.dp))
+                Stagger(1, animateEntrance) { StreakCard(totalPresent = totalAttended) }
+                Spacer(Modifier.height(14.dp))
 
-        Stagger(2) { OverallAttendanceCard(percent = overallPct, attended = totalAttended, total = totalClasses) }
-        Spacer(Modifier.height(20.dp))
+                Stagger(2, animateEntrance) {
+                    OverallAttendanceCard(percent = overallPct, attended = totalAttended, total = totalClasses)
+                }
+                Spacer(Modifier.height(20.dp))
 
-        Stagger(3) {
-            EventsSection(
-                events = events,
-                onSeeAll = { onNavigate(StudentTab.EVENTS, null) }
-            )
+                Stagger(3, animateEntrance) {
+                    EventsSection(
+                        events = events,
+                        onSeeAll = { onNavigate(StudentTab.EVENTS, null) }
+                    )
+                }
+                Spacer(Modifier.height(20.dp))
+
+                Stagger(4, animateEntrance) { TodayClassesSection(classes = todayClasses) }
+                Spacer(Modifier.height(20.dp))
+
+                Stagger(5, animateEntrance) { QuickAccessGrid(actions = quickActions, onNavigate = onNavigate) }
+
+                if (overallPct in 0.01..74.99) {
+                    Spacer(Modifier.height(16.dp))
+                    Stagger(6, animateEntrance) {
+                        LowAttendanceBanner(percent = overallPct, attended = totalAttended, total = totalClasses)
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+            }
         }
-        Spacer(Modifier.height(20.dp))
-
-        Stagger(4) { TodayClassesSection(classes = todayClasses) }
-        Spacer(Modifier.height(20.dp))
-
-        Stagger(5) { QuickAccessGrid(actions = quickActions, onNavigate = onNavigate) }
-
-        if (overallPct in 0.01..74.99) {
-            Spacer(Modifier.height(16.dp))
-            Stagger(6) { LowAttendanceBanner(percent = overallPct, attended = totalAttended, total = totalClasses) }
-        }
-
-        Spacer(Modifier.height(18.dp))
-        Stagger(7) { DailyQuote() }
-        Spacer(Modifier.height(8.dp))
     }
 }
 
+/**
+ * Stack-up entrance for the home cards.
+ *
+ * The whole list is laid out on the very first frame and only the *draw* layer is animated
+ * (alpha + a small Y translate). Nothing is added to or removed from the layout while the
+ * animation runs, so the scroll column never re-measures mid-flight: no dropped frames, no
+ * jitter when the user flips back to the Home tab.
+ *
+ * [animate] is false after the first reveal, so returning to the tab shows the cards already
+ * in place instead of replaying the whole stagger.
+ */
 @Composable
-private fun Stagger(index: Int, content: @Composable () -> Unit) {
-    var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        delay(index * 60L)
-        shown = true
+private fun Stagger(index: Int, animate: Boolean, content: @Composable () -> Unit) {
+    // animateFloatAsState starts at whatever target the first composition reports, so the
+    // target must begin at 0 for the animation to run at all.
+    var revealed by remember { mutableStateOf(!animate) }
+    if (animate) {
+        LaunchedEffect(Unit) { revealed = true }
     }
-    AnimatedVisibility(
-        visible = shown,
-        enter = fadeIn(tween(420)) + slideInVertically(tween(460)) { it / 4 }
+
+    val progress by animateFloatAsState(
+        targetValue = if (revealed) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = 460,
+            delayMillis = index * 55,
+            easing = FastOutSlowInEasing
+        ),
+        label = "stagger$index"
+    )
+
+    Box(
+        modifier = Modifier.graphicsLayer {
+            alpha = progress
+            translationY = (1f - progress) * 40f * density
+        }
     ) {
         content()
     }
@@ -890,37 +961,3 @@ private fun LowAttendanceBanner(percent: Double, attended: Int, total: Int) {
     }
 }
 
-@Composable
-private fun DailyQuote() {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = PortalCard,
-        border = androidx.compose.foundation.BorderStroke(1.dp, PortalStroke),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(PortalBlue.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "\ud83d\udca1",
-                    fontSize = 15.sp
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Text(
-                text = "\"Small steps every day lead to big results.\"",
-                color = PortalTextSecondary,
-                fontSize = 12.5.sp,
-                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
-            )
-        }
-    }
-}
