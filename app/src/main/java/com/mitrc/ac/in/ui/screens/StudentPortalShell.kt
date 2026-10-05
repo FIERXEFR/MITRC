@@ -34,7 +34,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -45,10 +45,13 @@ import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.MarkEmailRead
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -71,6 +74,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -87,7 +91,6 @@ import com.mitrc.ac.`in`.ui.theme.Gold
 import com.mitrc.ac.`in`.ui.theme.GoldLight
 import com.mitrc.ac.`in`.ui.theme.Navy
 import com.mitrc.ac.`in`.ui.theme.NavyDeep
-import kotlinx.coroutines.delay
 
 /** Everything the portal tabs need, loaded once in the shell and shared down. */
 data class StudentPortalData(
@@ -127,7 +130,12 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
     val eventsScroll = rememberScrollState()
     val settingsScroll = rememberScrollState()
 
-    LaunchedEffect(userUid) {
+    // Reloadable: a transient failure (e.g. a token that expired mid-session) can be retried
+    // from the error screen instead of leaving the user stranded.
+    var reloadKey by remember { mutableStateOf(0) }
+
+    LaunchedEffect(userUid, reloadKey) {
+        data = null
         val profile = PortalRepository.getStudentProfile(userUid)
         data = StudentPortalData(
             profile = profile.getOrNull(),
@@ -174,7 +182,10 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
                     PortalLoading()
                 } else if (current.profile == null) {
                     if (current.error != null) {
-                        PortalErrorState(message = current.error)
+                        PortalErrorState(
+                            message = current.error,
+                            onRetry = { reloadKey++ }
+                        )
                     } else {
                         PortalNoProfileState()
                     }
@@ -570,14 +581,17 @@ internal fun PortalSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp)
-                    .navigationBarsPadding()
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         onClick = {}
                     )
             ) {
-                Box {
+                // The inset is applied to the content, not the Surface: padding the Surface
+                // itself lifted the whole card above the nav bar and left a transparent gap
+                // underneath it. Now the card runs to the physical screen edge and only the
+                // content is kept clear of the system bars.
+                Box(modifier = Modifier.navigationBarsPadding()) {
                     SheetHandle()
                     content()
                 }
@@ -758,8 +772,21 @@ internal fun PortalLoading() {
     }
 }
 
+/**
+ * Full-screen failure state. [message] is the raw exception text, so it is only shown when it
+ * looks readable; auth failures in particular are mapped to something a student can act on.
+ */
 @Composable
-internal fun PortalErrorState(message: String) {
+internal fun PortalErrorState(message: String, onRetry: (() -> Unit)? = null) {
+    val raw = message.lowercase()
+    val isAuthProblem = listOf("jwt", "token", "unauthorized", "expired", "pgrst301")
+        .any { marker -> raw.contains(marker) }
+    val detail = when {
+        isAuthProblem -> "Your session expired. Tap retry to sign you back in."
+        message.isBlank() -> "Check your internet connection and try again."
+        else -> message
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -782,10 +809,31 @@ internal fun PortalErrorState(message: String) {
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = message,
+                text = detail,
                 color = PortalTextSecondary,
-                fontSize = 13.sp
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center
             )
+
+            if (onRetry != null) {
+                Spacer(Modifier.height(20.dp))
+                Button(
+                    onClick = onRetry,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PortalBlue,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Icon(
+                        Icons.Outlined.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(text = "Retry", fontWeight = FontWeight.SemiBold)
+                }
+            }
         }
     }
 }
@@ -895,116 +943,111 @@ private fun NotificationsScreen(onBack: () -> Unit) {
             ),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            itemsIndexed(notifications) { index, item ->
-                NotificationRow(index = index, item = item)
+            items(notifications) { item ->
+                NotificationRow(item = item)
             }
         }
     }
 }
 
 @Composable
-private fun NotificationRow(index: Int, item: PortalNotification) {
-    var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        delay(index * 55L)
-        shown = true
+private fun NotificationRow(item: PortalNotification) {
+    val accent = when (item.tone) {
+        NotificationTone.INFO -> PortalBlue
+        NotificationTone.ALERT -> PortalRose
+        NotificationTone.SUCCESS -> PortalGreen
+    }
+    val icon = when (item.tone) {
+        NotificationTone.INFO -> Icons.Outlined.Campaign
+        NotificationTone.ALERT -> Icons.Outlined.ErrorOutline
+        NotificationTone.SUCCESS -> Icons.Outlined.CheckCircle
     }
 
-    AnimatedVisibility(
-        visible = shown,
-        enter = fadeIn(tween(380)) + slideInVertically(tween(440)) { it / 3 }
-    ) {
-        val accent = when (item.tone) {
-            NotificationTone.INFO -> PortalBlue
-            NotificationTone.ALERT -> PortalRose
-            NotificationTone.SUCCESS -> PortalGreen
-        }
-        val icon = when (item.tone) {
-            NotificationTone.INFO -> Icons.Outlined.Campaign
-            NotificationTone.ALERT -> Icons.Outlined.ErrorOutline
-            NotificationTone.SUCCESS -> Icons.Outlined.CheckCircle
-        }
-
-        Surface(
-            shape = RoundedCornerShape(18.dp),
-            color = PortalCard,
-            border = androidx.compose.foundation.BorderStroke(
-                1.dp,
-                if (item.unread) accent.copy(alpha = 0.5f) else PortalStroke
+    ElevatedCard(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = PortalCard),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 6.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            // The BOM's ElevatedCard has no border parameter, so the unread accent is drawn as a
+            // modifier border over the raised surface instead.
+            .border(
+                width = 1.dp,
+                color = if (item.unread) accent.copy(alpha = 0.5f) else PortalStroke,
+                shape = RoundedCornerShape(18.dp)
             )
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.Top) {
-                    Surface(
-                        shape = CircleShape,
-                        color = accent.copy(alpha = 0.12f),
-                        modifier = Modifier.size(38.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                icon,
-                                contentDescription = null,
-                                tint = accent,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.width(12.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = item.title,
-                                color = PortalTextPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.weight(1f),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            if (item.unread) {
-                                Spacer(Modifier.width(8.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .background(PortalRose, CircleShape)
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = item.body,
-                            color = PortalTextSecondary,
-                            fontSize = 12.5.sp,
-                            lineHeight = 18.sp
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = item.time,
-                            color = PortalTextSecondary.copy(alpha = 0.7f),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Surface(
+                    shape = CircleShape,
+                    color = accent.copy(alpha = 0.12f),
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            icon,
+                            contentDescription = null,
+                            tint = accent,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
 
-                val image = item.image
-                if (image != null) {
-                    Spacer(Modifier.height(12.dp))
-                    AsyncImage(
-                        model = image,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        placeholder = ColorPainter(PortalCardAlt),
-                        error = ColorPainter(PortalCardAlt),
-                        fallback = ColorPainter(PortalCardAlt),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(150.dp)
-                            .clip(RoundedCornerShape(14.dp))
+                Spacer(Modifier.width(12.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = item.title,
+                            color = PortalTextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (item.unread) {
+                            Spacer(Modifier.width(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(PortalRose, CircleShape)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = item.body,
+                        color = PortalTextSecondary,
+                        fontSize = 12.5.sp,
+                        lineHeight = 18.sp
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = item.time,
+                        color = PortalTextSecondary.copy(alpha = 0.7f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
                     )
                 }
+            }
+
+            val image = item.image
+            if (image != null) {
+                Spacer(Modifier.height(12.dp))
+                AsyncImage(
+                    model = image,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    placeholder = ColorPainter(PortalCardAlt),
+                    error = ColorPainter(PortalCardAlt),
+                    fallback = ColorPainter(PortalCardAlt),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(150.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                )
             }
         }
     }

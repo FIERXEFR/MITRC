@@ -78,64 +78,72 @@ object AdminRepository {
         if (id.isEmpty() && mail.isEmpty()) return StaffGate.Neither
 
         return try {
-            val client = SupabaseManager.requireClient()
-
-            // 1. Probe admin_db (Strict non-empty match)
-            val adminRows = client.postgrest[SupabaseTableData.Tables.ADMIN_DB]
-                .select()
-                .decodeList<AdminDbRow>()
-
-            val matchingAdmin = adminRows.firstOrNull { row ->
-                val dbUid = row.uid.trim()
-                val dbEmail = row.email?.trim().orEmpty()
-                (id.isNotEmpty() && dbUid.isNotEmpty() && dbUid.equals(id, ignoreCase = true)) ||
-                (mail.isNotEmpty() && dbEmail.isNotEmpty() && dbEmail.equals(mail, ignoreCase = true))
+            // Wrapped so a token rejected on the first request after sign-in (the exact moment
+            // this gate runs) gets one refresh + retry instead of failing the login outright.
+            SupabaseManager.withAuthRetry {
+                resolveStaffGateOnce(id, mail)
             }
-
-            if (matchingAdmin != null) {
-                Log.i(TAG, "resolveStaffGate: Matched in admin_db for email=$mail, uid=$id")
-                if (!matchingAdmin.uid.equals(id, ignoreCase = true) && id.isNotEmpty()) {
-                    runCatching {
-                        client.postgrest[SupabaseTableData.Tables.ADMIN_DB]
-                            .update({ set("uid", id) }) {
-                                filter { eq("email", matchingAdmin.email ?: mail) }
-                            }
-                    }
-                }
-                return StaffGate.Admin
-            }
-
-            // 2. Probe staff_db (Strict non-empty match)
-            val staffRows = client.postgrest[SupabaseTableData.Tables.STAFF_DB]
-                .select()
-                .decodeList<StaffDbRow>()
-
-            val matchingStaff = staffRows.firstOrNull { row ->
-                val dbUid = row.uid.trim()
-                val dbEmail = row.emailId?.trim().orEmpty()
-                (id.isNotEmpty() && dbUid.isNotEmpty() && dbUid.equals(id, ignoreCase = true)) ||
-                (mail.isNotEmpty() && dbEmail.isNotEmpty() && dbEmail.equals(mail, ignoreCase = true))
-            }
-
-            if (matchingStaff != null) {
-                Log.i(TAG, "resolveStaffGate: Matched in staff_db for email=$mail, uid=$id")
-                if (!matchingStaff.uid.equals(id, ignoreCase = true) && id.isNotEmpty()) {
-                    runCatching {
-                        client.postgrest[SupabaseTableData.Tables.STAFF_DB]
-                            .update({ set("uid", id) }) {
-                                filter { eq("email_id", matchingStaff.emailId ?: mail) }
-                            }
-                    }
-                }
-                return StaffGate.Staff
-            }
-
-            Log.w(TAG, "resolveStaffGate: No match in admin_db or staff_db for email='$mail', uid='$id'")
-            StaffGate.Neither
         } catch (error: Throwable) {
             Log.e(TAG, "staff gate lookup failed for uid=$id", error)
             StaffGate.Failed("${error::class.simpleName}: ${error.message}")
         }
+    }
+
+    private suspend fun resolveStaffGateOnce(id: String, mail: String): StaffGate {
+        val client = SupabaseManager.requireClient()
+
+        // 1. Probe admin_db (Strict non-empty match)
+        val adminRows = client.postgrest[SupabaseTableData.Tables.ADMIN_DB]
+            .select()
+            .decodeList<AdminDbRow>()
+
+        val matchingAdmin = adminRows.firstOrNull { row ->
+            val dbUid = row.uid.trim()
+            val dbEmail = row.email?.trim().orEmpty()
+            (id.isNotEmpty() && dbUid.isNotEmpty() && dbUid.equals(id, ignoreCase = true)) ||
+            (mail.isNotEmpty() && dbEmail.isNotEmpty() && dbEmail.equals(mail, ignoreCase = true))
+        }
+
+        if (matchingAdmin != null) {
+            Log.i(TAG, "resolveStaffGate: Matched in admin_db for email=$mail, uid=$id")
+            if (!matchingAdmin.uid.equals(id, ignoreCase = true) && id.isNotEmpty()) {
+                runCatching {
+                    client.postgrest[SupabaseTableData.Tables.ADMIN_DB]
+                        .update({ set("uid", id) }) {
+                            filter { eq("email", matchingAdmin.email ?: mail) }
+                        }
+                }
+            }
+            return StaffGate.Admin
+        }
+
+        // 2. Probe staff_db (Strict non-empty match)
+        val staffRows = client.postgrest[SupabaseTableData.Tables.STAFF_DB]
+            .select()
+            .decodeList<StaffDbRow>()
+
+        val matchingStaff = staffRows.firstOrNull { row ->
+            val dbUid = row.uid.trim()
+            val dbEmail = row.emailId?.trim().orEmpty()
+            (id.isNotEmpty() && dbUid.isNotEmpty() && dbUid.equals(id, ignoreCase = true)) ||
+            (mail.isNotEmpty() && dbEmail.isNotEmpty() && dbEmail.equals(mail, ignoreCase = true))
+        }
+
+        if (matchingStaff != null) {
+            Log.i(TAG, "resolveStaffGate: Matched in staff_db for email=$mail, uid=$id")
+            if (!matchingStaff.uid.equals(id, ignoreCase = true) && id.isNotEmpty()) {
+                runCatching {
+                    client.postgrest[SupabaseTableData.Tables.STAFF_DB]
+                        .update({ set("uid", id) }) {
+                            filter { eq("email_id", matchingStaff.emailId ?: mail) }
+                        }
+                }
+            }
+            return StaffGate.Staff
+        }
+
+        Log.w(TAG, "resolveStaffGate: No match in admin_db or staff_db for email='$mail', uid='$id'")
+        return StaffGate.Neither
     }
 
     sealed interface StaffGate {

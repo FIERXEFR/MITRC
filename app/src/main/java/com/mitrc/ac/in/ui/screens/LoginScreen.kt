@@ -120,12 +120,15 @@ fun LoginScreen(onLoggedIn: () -> Unit, onAdminLoggedIn: () -> Unit) {
             result.fold(
                 onSuccess = { user ->
                     OnboardingStore.markCompleted()
+                    // Mint a fresh ID token before the portal's first Supabase queries. Without
+                    // this the student path can fire requests with a token Firebase has not
+                    // finished issuing yet, which surfaces as a JWT error on first login.
+                    runCatching { user.getIdToken(true).await() }
+
                     if (!isStaff) {
                         loading = false
                         onLoggedIn()
                     } else {
-                        runCatching { user.getIdToken(true).await() }
-
                         when (val gate = AdminRepository.resolveStaffGate(user.uid, user.email)) {
                             AdminRepository.StaffGate.Admin -> {
                                 loading = false

@@ -13,36 +13,45 @@ object PortalRepository {
     private const val TAG = "PortalRepository"
     private val json = Json { ignoreUnknownKeys = true }
 
+    /**
+     * Every read/write goes through here so a request rejected for a bad or expired JWT gets one
+     * transparent token refresh + retry before the failure reaches the UI. Individual call sites
+     * stay free of auth plumbing.
+     */
+    private suspend fun <T> query(block: suspend () -> T): Result<T> = runCatching {
+        SupabaseManager.withAuthRetry { block() }
+    }
+
     // -----------------------------------------------------------------------------------------
     // Student Queries
     // -----------------------------------------------------------------------------------------
 
-    suspend fun getStudentProfile(uid: String): Result<StudentDirectoryView?> = runCatching {
+    suspend fun getStudentProfile(uid: String): Result<StudentDirectoryView?> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_DIRECTORY]
             .select { filter { eq("uid", uid) } }
             .decodeList<StudentDirectoryView>()
             .firstOrNull()
     }
 
-    suspend fun getStudentSubjects(uid: String): Result<List<StudentSubjectView>> = runCatching {
+    suspend fun getStudentSubjects(uid: String): Result<List<StudentSubjectView>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_SUBJECTS]
             .select { filter { eq("student_uid", uid) } }
             .decodeList<StudentSubjectView>()
     }
 
-    suspend fun getStudentAttendance(uid: String): Result<List<AttendanceSummaryView>> = runCatching {
+    suspend fun getStudentAttendance(uid: String): Result<List<AttendanceSummaryView>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_ATTENDANCE_SUMMARY]
             .select { filter { eq("student_uid", uid) } }
             .decodeList<AttendanceSummaryView>()
     }
 
-    suspend fun getStudentMarks(uid: String): Result<List<MarkView>> = runCatching {
+    suspend fun getStudentMarks(uid: String): Result<List<MarkView>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_MARKS]
             .select { filter { eq("student_uid", uid) } }
             .decodeList<MarkView>()
     }
 
-    suspend fun getMyTimetable(): Result<List<MyTimetableEntryView>> = runCatching {
+    suspend fun getMyTimetable(): Result<List<MyTimetableEntryView>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_MY_TIMETABLE]
             .select()
             .decodeList<MyTimetableEntryView>()
@@ -52,26 +61,26 @@ object PortalRepository {
     // Teacher Queries & Attendance RPC
     // -----------------------------------------------------------------------------------------
 
-    suspend fun getTeacherProfile(uid: String): Result<TeacherRow?> = runCatching {
+    suspend fun getTeacherProfile(uid: String): Result<TeacherRow?> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.TEACHERS]
             .select { filter { eq("firebase_uid", uid) } }
             .decodeList<TeacherRow>()
             .firstOrNull()
     }
 
-    suspend fun getTeacherSubjects(teacherId: Int): Result<List<SubjectTeacherView>> = runCatching {
+    suspend fun getTeacherSubjects(teacherId: Int): Result<List<SubjectTeacherView>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_SUBJECT_TEACHERS]
             .select { filter { eq("teacher_id", teacherId) } }
             .decodeList<SubjectTeacherView>()
     }
 
-    suspend fun getEnrolledStudentsForClass(classId: Int): Result<List<StudentDirectoryView>> = runCatching {
+    suspend fun getEnrolledStudentsForClass(classId: Int): Result<List<StudentDirectoryView>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_DIRECTORY]
             .select { filter { eq("class_id", classId) } }
             .decodeList<StudentDirectoryView>()
     }
 
-    suspend fun getExistingAttendance(classSubjectId: Int, date: String, period: Int): Result<List<AttendanceRecordRow>> = runCatching {
+    suspend fun getExistingAttendance(classSubjectId: Int, date: String, period: Int): Result<List<AttendanceRecordRow>> = query {
         val client = SupabaseManager.requireClient()
         val session = client.postgrest[SupabaseTableData.Tables.ATTENDANCE_SESSIONS]
             .select {
@@ -93,19 +102,19 @@ object PortalRepository {
         }
     }
 
-    suspend fun getAssessments(classSubjectId: Int): Result<List<AssessmentRow>> = runCatching {
+    suspend fun getAssessments(classSubjectId: Int): Result<List<AssessmentRow>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.ASSESSMENTS]
             .select { filter { eq("class_subject_id", classSubjectId) } }
             .decodeList<AssessmentRow>()
     }
 
-    suspend fun createAssessment(assessment: AssessmentRow): Result<AssessmentRow> = runCatching {
+    suspend fun createAssessment(assessment: AssessmentRow): Result<AssessmentRow> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.ASSESSMENTS]
             .insert(assessment) { select() }
             .decodeSingle<AssessmentRow>()
     }
 
-    suspend fun saveMarks(marksList: List<MarkRow>): Result<Unit> = runCatching {
+    suspend fun saveMarks(marksList: List<MarkRow>): Result<Unit> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.MARKS]
             .upsert(marksList)
     }
@@ -115,7 +124,7 @@ object PortalRepository {
         classDate: String,
         period: Int,
         records: List<TakeAttendanceRecord>
-    ): Result<String> = runCatching {
+    ): Result<String> = query {
         val client = SupabaseManager.requireClient()
         val recordsJson = json.encodeToJsonElement(records)
         val params = buildJsonObject {
@@ -132,7 +141,7 @@ object PortalRepository {
     // Coordinator Queries & Timetable Operations
     // -----------------------------------------------------------------------------------------
 
-    suspend fun getCoordinatorProfile(uid: String): Result<CoordinatorRow?> = runCatching {
+    suspend fun getCoordinatorProfile(uid: String): Result<CoordinatorRow?> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.COORDINATORS]
             .select { filter { eq("firebase_uid", uid) } }
             .decodeList<CoordinatorRow>()
@@ -140,13 +149,13 @@ object PortalRepository {
     }
 
     /** All rows in the `coordinators` table - used by the student "Contact Co-ordinator" sheet. */
-    suspend fun getCoordinators(): Result<List<CoordinatorRow>> = runCatching {
+    suspend fun getCoordinators(): Result<List<CoordinatorRow>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.COORDINATORS]
             .select()
             .decodeList<CoordinatorRow>()
     }
 
-    suspend fun getTimetables(classId: Int? = null): Result<List<TimetableRow>> = runCatching {
+    suspend fun getTimetables(classId: Int? = null): Result<List<TimetableRow>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.TIMETABLES]
             .select {
                 if (classId != null && classId > 0) {
@@ -156,19 +165,19 @@ object PortalRepository {
             .decodeList<TimetableRow>()
     }
 
-    suspend fun getTimetableEntries(timetableId: Int): Result<List<TimetableEntryView>> = runCatching {
+    suspend fun getTimetableEntries(timetableId: Int): Result<List<TimetableEntryView>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_TIMETABLE_ENTRIES]
             .select { filter { eq("timetable_id", timetableId) } }
             .decodeList<TimetableEntryView>()
     }
 
-    suspend fun getTimetablePeriods(timetableId: Int): Result<List<TimetablePeriodRow>> = runCatching {
+    suspend fun getTimetablePeriods(timetableId: Int): Result<List<TimetablePeriodRow>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.TIMETABLE_PERIODS]
             .select { filter { eq("timetable_id", timetableId) } }
             .decodeList<TimetablePeriodRow>()
     }
 
-    suspend fun duplicateTimetable(sourceId: Int, effectiveFrom: String): Result<Int> = runCatching {
+    suspend fun duplicateTimetable(sourceId: Int, effectiveFrom: String): Result<Int> = query {
         val client = SupabaseManager.requireClient()
         val params = buildJsonObject {
             put("p_source", sourceId)
@@ -178,22 +187,22 @@ object PortalRepository {
         response.decodeAs<Int>()
     }
 
-    suspend fun updateTimetableHeader(timetable: TimetableRow): Result<Unit> = runCatching {
+    suspend fun updateTimetableHeader(timetable: TimetableRow): Result<Unit> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.TIMETABLES]
             .update(timetable) { filter { eq("id", timetable.id) } }
     }
 
-    suspend fun upsertTimetableEntry(entry: TimetableEntryRow): Result<Unit> = runCatching {
+    suspend fun upsertTimetableEntry(entry: TimetableEntryRow): Result<Unit> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.TIMETABLE_ENTRIES]
             .upsert(entry)
     }
 
-    suspend fun deleteTimetableEntry(entryId: Int): Result<Unit> = runCatching {
+    suspend fun deleteTimetableEntry(entryId: Int): Result<Unit> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.TIMETABLE_ENTRIES]
             .delete { filter { eq("id", entryId) } }
     }
 
-    suspend fun setStudentGroup(studentUid: String, classId: Int, groupId: Int?): Result<Unit> = runCatching {
+    suspend fun setStudentGroup(studentUid: String, classId: Int, groupId: Int?): Result<Unit> = query {
         val client = SupabaseManager.requireClient()
         val params = buildJsonObject {
             put("p_student_uid", studentUid)
@@ -207,7 +216,7 @@ object PortalRepository {
         client.postgrest.rpc("set_student_group", params)
     }
 
-    suspend fun getSubjectTeachers(classId: Int): Result<List<SubjectTeacherView>> = runCatching {
+    suspend fun getSubjectTeachers(classId: Int): Result<List<SubjectTeacherView>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_SUBJECT_TEACHERS]
             .select { filter { eq("class_id", classId) } }
             .decodeList<SubjectTeacherView>()
