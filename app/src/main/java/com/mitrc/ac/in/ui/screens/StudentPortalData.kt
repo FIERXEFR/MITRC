@@ -6,7 +6,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,12 +34,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.mitrc.ac.`in`.data.NoteRow
 import com.mitrc.ac.`in`.data.StudentSubjectView
 import com.mitrc.ac.`in`.data.SubjectTeacherView
+import com.mitrc.ac.`in`.ui.theme.DarkTextMuted
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
 import com.mitrc.ac.`in`.ui.theme.ErrorRed
 import com.mitrc.ac.`in`.ui.theme.Gold
@@ -86,21 +89,50 @@ val PortalRose = ErrorRed
 val PortalGreen = SuccessGreen
 
 /**
+ * Skeleton fill - a mid grey so the block is actually visible against a white portal card.
+ * (The old value was `Slate`, i.e. white-on-white in light theme.)
+ */
+val PortalSkeletonBase = DividerSoft
+/** The darker grey band that sweeps across [PortalSkeletonBase] during a shimmer. */
+val PortalSkeletonShine = DarkTextMuted
+
+/**
  * Reusable shimmer modifier for skeleton previews across all cards & screens.
+ *
+ * Draws a mid-grey block with a darker slate band travelling across it, left to right. The band
+ * is deliberately darker than the base rather than lighter - a light highlight only shows up on a
+ * dark surface, which is why the previous near-white pulse was invisible in light theme.
  */
 @Composable
 fun Modifier.shimmerEffect(): Modifier {
     val transition = rememberInfiniteTransition(label = "shimmerTransition")
-    val alpha by transition.animateFloat(
-        initialValue = 0.25f,
-        targetValue = 0.70f,
+    val progress by transition.animateFloat(
+        // -1f .. 2f puts the band fully off one edge at each end, so it never pops into view.
+        initialValue = -1f,
+        targetValue = 2f,
         animationSpec = infiniteRepeatable(
-            animation = tween(900, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
+            animation = tween(1100, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
         ),
-        label = "shimmerAlpha"
+        label = "shimmerProgress"
     )
-    return this.background(PortalCardAlt.copy(alpha = alpha))
+    // Deliberately read here, during composition: the frame that moves the band then rebuilds
+    // this modifier and invalidates the draw pass. Reading it only inside `drawBehind` would
+    // happen after the draw pass was already considered clean, so the band would never move.
+    val sweep = progress
+
+    return this.drawBehind {
+        val width = size.width.coerceAtLeast(1f)
+        val band = width * 0.55f
+        val centre = width * sweep
+        drawRect(
+            brush = Brush.linearGradient(
+                colors = listOf(PortalSkeletonBase, PortalSkeletonShine, PortalSkeletonBase),
+                start = Offset(centre - band, 0f),
+                end = Offset(centre + band, size.height.coerceAtLeast(1f))
+            )
+        )
+    }
 }
 
 /** The four fixed destinations in the bottom navigation bar. */
