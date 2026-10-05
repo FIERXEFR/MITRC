@@ -62,6 +62,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -249,11 +250,7 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
         ) {
             ProfileSheetContent(
                 data = data,
-                onClose = { showProfile = false },
-                onOpenSettings = {
-                    showProfile = false
-                    tabName = StudentTab.SETTINGS.name
-                }
+                onClose = { showProfile = false }
             )
         }
     }
@@ -625,8 +622,7 @@ private fun SheetHandle() {
 @Composable
 private fun ProfileSheetContent(
     data: StudentPortalData?,
-    onClose: () -> Unit,
-    onOpenSettings: () -> Unit
+    onClose: () -> Unit
 ) {
     val profile = data?.profile
 
@@ -702,23 +698,11 @@ private fun ProfileSheetContent(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 22.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 22.dp, vertical = 14.dp)
         ) {
             Button(
-                onClick = onOpenSettings,
-                modifier = Modifier.weight(1f).height(48.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = PortalBlue,
-                    contentColor = Color.White
-                )
-            ) {
-                Text("Account Settings", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            }
-            Button(
                 onClick = onClose,
-                modifier = Modifier.weight(1f).height(48.dp),
+                modifier = Modifier.fillMaxWidth().height(48.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = PortalBlue.copy(alpha = 0.10f),
@@ -885,12 +869,20 @@ internal fun PortalNoProfileState() {
 
 @Composable
 private fun NotificationsScreen(onBack: () -> Unit) {
-    val notifications = remember { sampleNotifications() }
+    val notifications = remember { sampleNotifications().toMutableStateList() }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(PortalBackground)
+            // The overlay is drawn over the portal header, and a tap that lands on a non-clickable
+            // child (title text, the mark-all icon's padding) would otherwise fall through to the
+            // avatar underneath and pop the profile sheet. Consuming here stops that.
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {}
+            )
     ) {
         Row(
             modifier = Modifier
@@ -929,7 +921,15 @@ private fun NotificationsScreen(onBack: () -> Unit) {
                 Icons.Outlined.MarkEmailRead,
                 contentDescription = "Mark all as read",
                 tint = PortalBlue,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable {
+                        for (index in notifications.indices) {
+                            notifications[index] = notifications[index].copy(unread = false)
+                        }
+                    }
+                    .padding(6.dp)
+                    .size(20.dp)
             )
         }
 
