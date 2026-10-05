@@ -26,11 +26,10 @@ object PortalRepository {
             .firstOrNull()
     }
 
-    suspend fun getStudentSubjects(uid: String): Result<List<StudentSubjectView>> = query {
-        // Updated to use the new view name if needed, assuming V_STUDENT_SUBJECTS is still valid or similar
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_SUBJECTS]
-            .select { filter { eq("student_uid", uid) } }
-            .decodeList<StudentSubjectView>()
+    suspend fun getStudentSubjects(classId: Int): Result<List<ClassSubjectView>> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_CLASS_SUBJECTS]
+            .select { filter { eq("class_id", classId) } }
+            .decodeList<ClassSubjectView>()
     }
 
     suspend fun getStudentAttendance(uid: String): Result<List<AttendanceSummaryView>> = query {

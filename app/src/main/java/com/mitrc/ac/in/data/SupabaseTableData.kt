@@ -358,3 +358,7 @@ data class NoteRow(
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null
 )
+
+typealias StudentDirectoryView = StudentProfileView
+typealias StudentSubjectView = ClassSubjectView
+typealias SubjectTeacherView = StaffDirectoryView

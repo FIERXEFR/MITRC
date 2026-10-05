@@ -98,14 +98,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import com.mitrc.ac.`in`.R
-import com.mitrc.ac.`in`.data.AttendanceSummaryView
-import com.mitrc.ac.`in`.data.GreetingStore
-import com.mitrc.ac.`in`.data.MarkView
-import com.mitrc.ac.`in`.data.MyTimetableEntryView
-import com.mitrc.ac.`in`.data.PortalRepository
-import com.mitrc.ac.`in`.data.StudentDirectoryView
-import com.mitrc.ac.`in`.data.StudentSubjectView
-import com.mitrc.ac.`in`.data.SubjectTeacherView
+import com.mitrc.ac.`in`.data.*
 import com.mitrc.ac.`in`.ui.theme.Gold
 import com.mitrc.ac.`in`.ui.theme.GoldLight
 import com.mitrc.ac.`in`.ui.theme.Navy
@@ -113,14 +106,14 @@ import com.mitrc.ac.`in`.ui.theme.NavyDeep
 
 /** Everything the portal tabs need, loaded once in the shell and shared down. */
 data class StudentPortalData(
-    val profile: StudentDirectoryView?,
-    val subjects: List<StudentSubjectView>,
+    val profile: StudentProfileView?,
+    val subjects: List<ClassSubjectView>,
     val attendance: List<AttendanceSummaryView>,
     val marks: List<MarkView>,
     val timetable: List<MyTimetableEntryView>,
     val error: String?,
-    /** `v_subject_teachers` rows for this student's class - backs the "Contact Faculty" sheet. */
-    val faculty: List<SubjectTeacherView> = emptyList(),
+    /** `v_class_subjects` rows for this student's class - backs the "Contact Faculty" sheet. */
+    val faculty: List<ClassSubjectView> = emptyList(),
     /**
      * Teacher-published PDFs from the `notes` table, already filtered down to the subjects this
      * student is enrolled in - backs the Notes segment of the Academics tab.
@@ -137,11 +130,12 @@ data class StudentPortalData(
  */
 private suspend fun loadPortalData(userUid: String): StudentPortalData {
     val profile = PortalRepository.getStudentProfile(userUid)
-    val subjects = PortalRepository.getStudentSubjects(userUid).getOrDefault(emptyList())
-    val faculty = profile.getOrNull()?.classId
-        ?.let { PortalRepository.getSubjectTeachers(it) }
-        ?.getOrDefault(emptyList())
-        .orEmpty()
+    val classId = profile.getOrNull()?.classId ?: 0
+    val subjects = if (classId > 0) {
+        PortalRepository.getStudentSubjects(classId).getOrDefault(emptyList())
+    } else {
+        emptyList()
+    }
 
     return StudentPortalData(
         profile = profile.getOrNull(),
@@ -149,11 +143,11 @@ private suspend fun loadPortalData(userUid: String): StudentPortalData {
         attendance = PortalRepository.getStudentAttendance(userUid).getOrDefault(emptyList()),
         marks = PortalRepository.getStudentMarks(userUid).getOrDefault(emptyList()),
         timetable = PortalRepository.getMyTimetable().getOrDefault(emptyList()),
-        faculty = faculty,
+        faculty = subjects,
         // Notes live in their own table; the mapper drops rows outside this student's subjects.
         pdfNotes = PortalRepository.getPublishedNotes()
             .getOrDefault(emptyList())
-            .toPortalPdfNotes(subjects = subjects, subjectTeachers = faculty),
+            .toPortalPdfNotes(subjects = subjects),
         error = if (profile.isFailure) {
             profile.exceptionOrNull()?.message ?: "Failed to load your student profile."
         } else {

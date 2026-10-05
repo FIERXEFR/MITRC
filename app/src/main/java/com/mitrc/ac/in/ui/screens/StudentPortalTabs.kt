@@ -43,6 +43,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import com.mitrc.ac.`in`.data.*
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -1328,7 +1329,7 @@ fun StudentSettingsTab(
     ) {
         ContactFacultySheetContent(
             batchName = data.profile?.groupName,
-            faculty = data.faculty,
+            faculty = data.subjects,
             onClose = { showContact = false }
         )
     }
@@ -1445,7 +1446,7 @@ private fun OptionDivider() {
 @Composable
 private fun ContactFacultySheetContent(
     batchName: String?,
-    faculty: List<SubjectTeacherView>,
+    faculty: List<ClassSubjectView>,
     onClose: () -> Unit
 ) {
     // `v_subject_teachers` returns one row per subject, so a teacher who handles three

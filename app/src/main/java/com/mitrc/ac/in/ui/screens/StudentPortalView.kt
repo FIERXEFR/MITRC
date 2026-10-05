@@ -81,7 +81,8 @@ fun StudentPortalView(userUid: String) {
         errorMsg = null
 
         val profileRes = PortalRepository.getStudentProfile(userUid)
-        val subjectsRes = PortalRepository.getStudentSubjects(userUid)
+        val classId = profileRes.getOrNull()?.classId ?: 0
+        val subjectsRes = if (classId > 0) PortalRepository.getStudentSubjects(classId) else Result.success(emptyList())
         val attendanceRes = PortalRepository.getStudentAttendance(userUid)
         val marksRes = PortalRepository.getStudentMarks(userUid)
         val timetableRes = PortalRepository.getMyTimetable()

@@ -40,9 +40,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import com.mitrc.ac.`in`.data.NoteRow
-import com.mitrc.ac.`in`.data.StudentSubjectView
-import com.mitrc.ac.`in`.data.SubjectTeacherView
+import com.mitrc.ac.`in`.data.*
 import com.mitrc.ac.`in`.ui.theme.DarkTextMuted
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
 import com.mitrc.ac.`in`.ui.theme.ErrorRed
@@ -200,16 +198,11 @@ data class PortalPdfNote(
  * the `notes_class_subject_id_created_at_idx` index the query is planned against.
  */
 fun List<NoteRow>.toPortalPdfNotes(
-    subjects: List<StudentSubjectView>,
-    subjectTeachers: List<SubjectTeacherView>
+    subjects: List<ClassSubjectView>
 ): List<PortalPdfNote> {
     if (isEmpty()) return emptyList()
 
     val enrolledBySubjectId = subjects.associateBy { it.classSubjectId }
-    // One teacher handles several subjects, so index by teacher id rather than subject id.
-    val teacherNameById = subjectTeachers
-        .filter { it.teacherId > 0 && it.teacherName.isNotBlank() }
-        .associate { it.teacherId to it.teacherName.trim() }
 
     return sortedByDescending { it.createdAt.orEmpty() } // ISO-8601 sorts correctly as plain text
         .mapNotNull { row ->
@@ -226,7 +219,7 @@ fun List<NoteRow>.toPortalPdfNotes(
                 description = row.description,
                 category = row.category,
                 driveUrl = row.driveUrl,
-                teacherName = teacherNameById[row.teacherId] ?: "Faculty",
+                teacherName = subject.teacherName.ifBlank { "Faculty" },
                 createdAt = formatNoteDate(row.createdAt)
             )
         }
