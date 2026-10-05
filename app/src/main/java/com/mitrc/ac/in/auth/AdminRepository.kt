@@ -7,17 +7,14 @@ import com.mitrc.ac.`in`.data.AdminDbRow
 import com.mitrc.ac.`in`.data.BranchRow
 import com.mitrc.ac.`in`.data.ClassGroupRow
 import com.mitrc.ac.`in`.data.ClassRow
-import com.mitrc.ac.`in`.data.CoordinatorRow
 import com.mitrc.ac.`in`.data.CourseRow
 import com.mitrc.ac.`in`.data.EnrollmentRow
-import com.mitrc.ac.`in`.data.StaffDbRow
+import com.mitrc.ac.`in`.data.FacultyMasterRow
 import com.mitrc.ac.`in`.data.StudentRow
 import com.mitrc.ac.`in`.data.SupabaseManager
 import com.mitrc.ac.`in`.data.SupabaseTableData
-import com.mitrc.ac.`in`.data.TeacherRow
 import com.mitrc.ac.`in`.data.blankToNull
 import io.github.jan.supabase.postgrest.postgrest
-import io.github.jan.supabase.postgrest.query.Columns
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
@@ -34,6 +31,7 @@ import kotlinx.serialization.json.Json
 
 /**
  * The admin panel's data-entry gate & system management repository.
+ * Updated to use faculty_master as the single source of truth for staff.
  */
 object AdminRepository {
 
@@ -78,8 +76,6 @@ object AdminRepository {
         if (id.isEmpty() && mail.isEmpty()) return StaffGate.Neither
 
         return try {
-            // Wrapped so a token rejected on the first request after sign-in (the exact moment
-            // this gate runs) gets one refresh + retry instead of failing the login outright.
             SupabaseManager.withAuthRetry {
                 resolveStaffGateOnce(id, mail)
             }
@@ -117,32 +113,32 @@ object AdminRepository {
             return StaffGate.Admin
         }
 
-        // 2. Probe staff_db (Strict non-empty match)
-        val staffRows = client.postgrest[SupabaseTableData.Tables.STAFF_DB]
+        // 2. Probe faculty_master (Single source of truth for all staff)
+        val staffRows = client.postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
             .select()
-            .decodeList<StaffDbRow>()
+            .decodeList<FacultyMasterRow>()
 
         val matchingStaff = staffRows.firstOrNull { row ->
-            val dbUid = row.uid.trim()
-            val dbEmail = row.emailId?.trim().orEmpty()
+            val dbUid = row.firebaseUid?.trim().orEmpty()
+            val dbEmail = row.email?.trim().orEmpty()
             (id.isNotEmpty() && dbUid.isNotEmpty() && dbUid.equals(id, ignoreCase = true)) ||
             (mail.isNotEmpty() && dbEmail.isNotEmpty() && dbEmail.equals(mail, ignoreCase = true))
         }
 
         if (matchingStaff != null) {
-            Log.i(TAG, "resolveStaffGate: Matched in staff_db for email=$mail, uid=$id")
-            if (!matchingStaff.uid.equals(id, ignoreCase = true) && id.isNotEmpty()) {
+            Log.i(TAG, "resolveStaffGate: Matched in faculty_master for email=$mail, uid=$id")
+            if (matchingStaff.firebaseUid.isNullOrEmpty() && id.isNotEmpty()) {
                 runCatching {
-                    client.postgrest[SupabaseTableData.Tables.STAFF_DB]
-                        .update({ set("uid", id) }) {
-                            filter { eq("email_id", matchingStaff.emailId ?: mail) }
+                    client.postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
+                        .update({ set("firebase_uid", id) }) {
+                            filter { eq("email", matchingStaff.email ?: mail) }
                         }
                 }
             }
             return StaffGate.Staff
         }
 
-        Log.w(TAG, "resolveStaffGate: No match in admin_db or staff_db for email='$mail', uid='$id'")
+        Log.w(TAG, "resolveStaffGate: No match in admin_db or faculty_master for email='$mail', uid='$id'")
         return StaffGate.Neither
     }
 
@@ -199,16 +195,15 @@ object AdminRepository {
             email = entry.email,
             password = entry.password,
             displayName = entry.name,
-            table = SupabaseTableData.Tables.STAFF_DB,
+            table = SupabaseTableData.Tables.FACULTY_MASTER,
         ) { uid ->
-            StaffDbRow(
-                uid = uid,
-                emailId = entry.email.blankToNull(),
+            FacultyMasterRow(
+                firebaseUid = uid,
+                email = entry.email.blankToNull(),
                 department = entry.department.blankToNull(),
                 role = entry.role.blankToNull(),
                 name = entry.name.blankToNull(),
                 phoneNo = entry.phoneNo.blankToNull(),
-                gender = entry.gender.blankToNull(),
                 designation = entry.designation.blankToNull(),
             )
         }
@@ -221,9 +216,7 @@ object AdminRepository {
         buildRow: (uid: String) -> Any,
     ): Result<String> {
         if (!SupabaseManager.isConfigured) {
-            return Result.failure(
-                IllegalStateException("Supabase is not configured.")
-            )
+            return Result.failure(IllegalStateException("Supabase is not configured."))
         }
 
         val created = createAuthAccount(email, password, displayName)
@@ -234,7 +227,7 @@ object AdminRepository {
             val client = SupabaseManager.requireClient()
             when (row) {
                 is StudentRow -> client.postgrest[table].insert(row)
-                is StaffDbRow -> client.postgrest[table].insert(row)
+                is FacultyMasterRow -> client.postgrest[table].insert(row)
                 else -> error("Unsupported row type ${row::class.simpleName}")
             }
         }
@@ -243,10 +236,7 @@ object AdminRepository {
             Log.w(TAG, "supabase insert into $table failed, rolling back auth account", error)
             deleteAuthAccount(created.idToken)
             return Result.failure(
-                IllegalStateException(
-                    "The account was created but the $table record could not be saved: " +
-                        error.message.orEmpty()
-                )
+                IllegalStateException("The account was created but the $table record could not be saved: ${error.message}")
             )
         }
 
@@ -254,7 +244,7 @@ object AdminRepository {
     }
 
     // -----------------------------------------------------------------------------------------
-    // Helper queries for academic structure & users
+    // Helper queries
     // -----------------------------------------------------------------------------------------
 
     private val defaultCourses = listOf(
@@ -270,9 +260,9 @@ object AdminRepository {
         val list = client.postgrest[SupabaseTableData.Tables.COURSES]
             .select()
             .decodeList<CourseRow>()
-        if (list.isNotEmpty()) list else defaultCourses
+        list.ifEmpty { defaultCourses }
     } catch (error: Throwable) {
-        Log.e(TAG, "getCourses failed, returning defaults", error)
+        Log.e(TAG, "getCourses failed", error)
         defaultCourses
     }
 
@@ -282,12 +272,7 @@ object AdminRepository {
             BranchRow(id = 2, courseId = 1, name = "AI&ML"),
             BranchRow(id = 3, courseId = 1, name = "AI&DS")
         )
-        2 -> listOf(
-            BranchRow(id = 4, courseId = 2, name = "BCA Computer Applications")
-        )
-        else -> listOf(
-            BranchRow(id = 10 + courseId, courseId = courseId, name = "General")
-        )
+        else -> listOf(BranchRow(id = 10 + courseId, courseId = courseId, name = "General"))
     }
 
     suspend fun getBranches(courseId: Int): List<BranchRow> = try {
@@ -295,72 +280,58 @@ object AdminRepository {
         val list = client.postgrest[SupabaseTableData.Tables.BRANCHES]
             .select { filter { eq("course_id", courseId) } }
             .decodeList<BranchRow>()
-        if (list.isNotEmpty()) list else getDefaultBranches(courseId)
+        list.ifEmpty { getDefaultBranches(courseId) }
     } catch (error: Throwable) {
-        Log.e(TAG, "getBranches failed for courseId=$courseId, returning defaults", error)
+        Log.e(TAG, "getBranches failed", error)
         getDefaultBranches(courseId)
     }
 
-    private fun getDefaultClasses(branchId: Int): List<ClassRow> = listOf(
-        ClassRow(id = 1, branchId = branchId, semester = 1, section = "A", academicYear = "2026-27"),
-        ClassRow(id = 2, branchId = branchId, semester = 1, section = "B", academicYear = "2026-27"),
-        ClassRow(id = 3, branchId = branchId, semester = 2, section = "A", academicYear = "2026-27")
-    )
+    suspend fun getClasses(): List<ClassRow> = runCatching {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.CLASSES]
+            .select()
+            .decodeList<ClassRow>()
+    }.getOrDefault(emptyList())
 
-    suspend fun getClassesForBranch(branchId: Int): List<ClassRow> = try {
-        val client = SupabaseManager.requireClient()
-        val list = client.postgrest[SupabaseTableData.Tables.CLASSES]
+    suspend fun getClassesForBranch(branchId: Int): List<ClassRow> = runCatching {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.CLASSES]
             .select { filter { eq("branch_id", branchId) } }
             .decodeList<ClassRow>()
-        if (list.isNotEmpty()) list else getDefaultClasses(branchId)
-    } catch (error: Throwable) {
-        Log.e(TAG, "getClassesForBranch failed for branchId=$branchId, returning defaults", error)
-        getDefaultClasses(branchId)
-    }
+    }.getOrDefault(emptyList())
 
-    suspend fun getClasses(): List<ClassRow> = try {
-        val client = SupabaseManager.requireClient()
-        client.postgrest[SupabaseTableData.Tables.CLASSES]
-            .select()
-            .decodeList<ClassRow>()
-    } catch (error: Throwable) {
-        Log.e(TAG, "getClasses failed", error)
-        emptyList()
-    }
-
-    suspend fun getClassGroups(classId: Int): List<ClassGroupRow> = try {
-        val client = SupabaseManager.requireClient()
-        client.postgrest[SupabaseTableData.Tables.CLASS_GROUPS]
+    suspend fun getClassGroups(classId: Int): List<ClassGroupRow> = runCatching {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.CLASS_GROUPS]
             .select { filter { eq("class_id", classId) } }
             .decodeList<ClassGroupRow>()
-    } catch (error: Throwable) {
-        Log.e(TAG, "getClassGroups failed for classId=$classId", error)
-        emptyList()
-    }
-
-    suspend fun getTeachers(): List<TeacherRow> = runCatching {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.TEACHERS]
-            .select()
-            .decodeList<TeacherRow>()
     }.getOrDefault(emptyList())
 
-    suspend fun getCoordinators(): List<CoordinatorRow> = runCatching {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.COORDINATORS]
+    suspend fun getTeachers(): List<FacultyMasterRow> = runCatching {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
             .select()
-            .decodeList<CoordinatorRow>()
+            .decodeList<FacultyMasterRow>()
     }.getOrDefault(emptyList())
 
-    suspend fun getTeacherByUid(uid: String): TeacherRow? = runCatching {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.TEACHERS]
+    suspend fun getCoordinators(): List<FacultyMasterRow> = runCatching {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
+            .select { filter { eq("is_coordinator", true) } }
+            .decodeList<FacultyMasterRow>()
+    }.getOrDefault(emptyList())
+
+    suspend fun getTeacherByUid(uid: String): FacultyMasterRow? = runCatching {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
             .select { filter { eq("firebase_uid", uid) } }
-            .decodeList<TeacherRow>()
+            .decodeList<FacultyMasterRow>()
             .firstOrNull()
     }.getOrNull()
 
-    suspend fun getCoordinatorByUid(uid: String): CoordinatorRow? = runCatching {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.COORDINATORS]
-            .select { filter { eq("firebase_uid", uid) } }
-            .decodeList<CoordinatorRow>()
+    suspend fun getCoordinatorByUid(uid: String): FacultyMasterRow? = runCatching {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
+            .select { 
+                filter { 
+                    eq("firebase_uid", uid) 
+                    eq("is_coordinator", true)
+                } 
+            }
+            .decodeList<FacultyMasterRow>()
             .firstOrNull()
     }.getOrNull()
 
@@ -376,38 +347,23 @@ object AdminRepository {
         displayName: String,
     ): Result<CreatedAccount> {
         if (apiKey.isBlank()) {
-            return Result.failure(
-                IllegalStateException("Firebase Web API key is missing from google-services.json")
-            )
+            return Result.failure(IllegalStateException("Firebase Web API key is missing"))
         }
 
         val outcome = runCatching {
             val response = http.post("$SIGN_UP_URL?key=$apiKey") {
                 contentType(ContentType.Application.Json)
-                setBody(
-                    json.encodeToString(
-                        SignUpRequest(
-                            email = email,
-                            password = password,
-                            displayName = displayName,
-                        )
-                    )
-                )
+                setBody(json.encodeToString(SignUpRequest(email = email, password = password, displayName = displayName)))
             }
             val body = response.bodyAsText()
-            if (!response.status.isSuccess()) {
-                throw IllegalStateException(errorMessageOf(body))
-            }
+            if (!response.status.isSuccess()) throw IllegalStateException(errorMessageOf(body))
             val parsed = json.decodeFromString<SignUpResponse>(body)
-            if (parsed.localId.isBlank()) {
-                throw IllegalStateException("Account creation returned no user id")
-            }
+            if (parsed.localId.isBlank()) throw IllegalStateException("Account creation returned no user id")
             CreatedAccount(uid = parsed.localId, idToken = parsed.idToken)
         }
 
         val account = outcome.getOrNull()
         if (account != null) return Result.success(account)
-
         val error = outcome.exceptionOrNull() ?: IllegalStateException("Account creation failed")
         return Result.failure(IllegalStateException(friendlyAuthError(error.message), error))
     }
@@ -434,12 +390,6 @@ object AdminRepository {
             message.contains("INVALID_EMAIL") -> "Enter a valid email address"
             message.contains("WEAK_PASSWORD") -> "Password must be at least 6 characters"
             message.contains("TOO_MANY_ATTEMPTS") -> "Too many attempts. Please try again later"
-            message.contains("OPERATION_NOT_ALLOWED") ->
-                "Email/password sign-up is disabled for this Firebase project"
-            message.contains("INVALID_LOGIN_CREDENTIALS") -> "Invalid email or password"
-            message.contains("network", ignoreCase = true) ||
-                message.contains("Unable to resolve host", ignoreCase = true) ->
-                "Network error - check your internet connection"
             else -> message
         }
     }

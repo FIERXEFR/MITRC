@@ -1,6 +1,5 @@
 package com.mitrc.ac.`in`.data
 
-import android.util.Log
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc
 import kotlinx.serialization.json.Json
@@ -10,14 +9,8 @@ import kotlinx.serialization.json.put
 
 object PortalRepository {
 
-    private const val TAG = "PortalRepository"
     private val json = Json { ignoreUnknownKeys = true }
 
-    /**
-     * Every read/write goes through here so a request rejected for a bad or expired JWT gets one
-     * transparent token refresh + retry before the failure reaches the UI. Individual call sites
-     * stay free of auth plumbing.
-     */
     private suspend fun <T> query(block: suspend () -> T): Result<T> = runCatching {
         SupabaseManager.withAuthRetry { block() }
     }
@@ -26,14 +19,15 @@ object PortalRepository {
     // Student Queries
     // -----------------------------------------------------------------------------------------
 
-    suspend fun getStudentProfile(uid: String): Result<StudentDirectoryView?> = query {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_DIRECTORY]
+    suspend fun getStudentProfile(uid: String): Result<StudentProfileView?> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_PROFILES]
             .select { filter { eq("uid", uid) } }
-            .decodeList<StudentDirectoryView>()
+            .decodeList<StudentProfileView>()
             .firstOrNull()
     }
 
     suspend fun getStudentSubjects(uid: String): Result<List<StudentSubjectView>> = query {
+        // Updated to use the new view name if needed, assuming V_STUDENT_SUBJECTS is still valid or similar
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_SUBJECTS]
             .select { filter { eq("student_uid", uid) } }
             .decodeList<StudentSubjectView>()
@@ -64,26 +58,26 @@ object PortalRepository {
     }
 
     // -----------------------------------------------------------------------------------------
-    // Teacher Queries & Attendance RPC
+    // Teacher / Faculty Queries
     // -----------------------------------------------------------------------------------------
 
-    suspend fun getTeacherProfile(uid: String): Result<TeacherRow?> = query {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.TEACHERS]
+    suspend fun getTeacherProfile(uid: String): Result<FacultyMasterRow?> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
             .select { filter { eq("firebase_uid", uid) } }
-            .decodeList<TeacherRow>()
+            .decodeList<FacultyMasterRow>()
             .firstOrNull()
     }
 
-    suspend fun getTeacherSubjects(teacherId: Int): Result<List<SubjectTeacherView>> = query {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_SUBJECT_TEACHERS]
+    suspend fun getTeacherSubjects(teacherId: Int): Result<List<ClassSubjectView>> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_CLASS_SUBJECTS]
             .select { filter { eq("teacher_id", teacherId) } }
-            .decodeList<SubjectTeacherView>()
+            .decodeList<ClassSubjectView>()
     }
 
-    suspend fun getEnrolledStudentsForClass(classId: Int): Result<List<StudentDirectoryView>> = query {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_DIRECTORY]
+    suspend fun getEnrolledStudentsForClass(classId: Int): Result<List<StudentProfileView>> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_PROFILES]
             .select { filter { eq("class_id", classId) } }
-            .decodeList<StudentDirectoryView>()
+            .decodeList<StudentProfileView>()
     }
 
     suspend fun getExistingAttendance(classSubjectId: Int, date: String, period: Int): Result<List<AttendanceRecordRow>> = query {
@@ -144,21 +138,25 @@ object PortalRepository {
     }
 
     // -----------------------------------------------------------------------------------------
-    // Coordinator Queries & Timetable Operations
+    // Coordinator Queries
     // -----------------------------------------------------------------------------------------
 
-    suspend fun getCoordinatorProfile(uid: String): Result<CoordinatorRow?> = query {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.COORDINATORS]
-            .select { filter { eq("firebase_uid", uid) } }
-            .decodeList<CoordinatorRow>()
+    suspend fun getCoordinatorProfile(uid: String): Result<FacultyMasterRow?> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
+            .select { 
+                filter { 
+                    eq("firebase_uid", uid) 
+                    eq("is_coordinator", true)
+                } 
+            }
+            .decodeList<FacultyMasterRow>()
             .firstOrNull()
     }
 
-    /** All rows in the `coordinators` table. */
-    suspend fun getCoordinators(): Result<List<CoordinatorRow>> = query {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.COORDINATORS]
-            .select()
-            .decodeList<CoordinatorRow>()
+    suspend fun getCoordinators(): Result<List<FacultyMasterRow>> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
+            .select { filter { eq("is_coordinator", true) } }
+            .decodeList<FacultyMasterRow>()
     }
 
     suspend fun getTimetables(classId: Int? = null): Result<List<TimetableRow>> = query {
@@ -222,9 +220,9 @@ object PortalRepository {
         client.postgrest.rpc("set_student_group", params)
     }
 
-    suspend fun getSubjectTeachers(classId: Int): Result<List<SubjectTeacherView>> = query {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_SUBJECT_TEACHERS]
+    suspend fun getSubjectTeachers(classId: Int): Result<List<ClassSubjectView>> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_CLASS_SUBJECTS]
             .select { filter { eq("class_id", classId) } }
-            .decodeList<SubjectTeacherView>()
+            .decodeList<ClassSubjectView>()
     }
 }

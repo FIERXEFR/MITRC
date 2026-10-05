@@ -17,10 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -28,9 +24,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,12 +42,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mitrc.ac.`in`.data.AssessmentRow
+import com.mitrc.ac.`in`.data.ClassSubjectView
+import com.mitrc.ac.`in`.data.FacultyMasterRow
 import com.mitrc.ac.`in`.data.MarkRow
 import com.mitrc.ac.`in`.data.PortalRepository
-import com.mitrc.ac.`in`.data.StudentDirectoryView
-import com.mitrc.ac.`in`.data.SubjectTeacherView
+import com.mitrc.ac.`in`.data.StudentProfileView
 import com.mitrc.ac.`in`.data.TakeAttendanceRecord
-import com.mitrc.ac.`in`.data.TeacherRow
 import com.mitrc.ac.`in`.ui.theme.ErrorRed
 import com.mitrc.ac.`in`.ui.theme.Gold
 import com.mitrc.ac.`in`.ui.theme.Navy
@@ -80,14 +74,14 @@ fun TeacherAttendanceView(userUid: String) {
     var activeMode by remember { mutableStateOf(TeacherMode.ATTENDANCE) }
 
     var loading by remember { mutableStateOf(true) }
-    var teacher by remember { mutableStateOf<TeacherRow?>(null) }
-    var subjects by remember { mutableStateOf<List<SubjectTeacherView>>(emptyList()) }
+    var teacher by remember { mutableStateOf<FacultyMasterRow?>(null) }
+    var subjects by remember { mutableStateOf<List<ClassSubjectView>>(emptyList()) }
 
-    var selectedSubject by remember { mutableStateOf<SubjectTeacherView?>(null) }
+    var selectedSubject by remember { mutableStateOf<ClassSubjectView?>(null) }
     var selectedDate by remember { mutableStateOf(getTodayIstDate()) }
     var selectedPeriod by remember { mutableStateOf(1) }
 
-    var students by remember { mutableStateOf<List<StudentDirectoryView>>(emptyList()) }
+    var students by remember { mutableStateOf<List<StudentProfileView>>(emptyList()) }
     val attendanceMap = remember { mutableStateMapOf<String, String>() }
 
     var saving by remember { mutableStateOf(false) }
@@ -419,7 +413,7 @@ fun TeacherAttendanceView(userUid: String) {
 }
 
 @Composable
-private fun TeacherMarksSection(subjects: List<SubjectTeacherView>) {
+private fun TeacherMarksSection(subjects: List<ClassSubjectView>) {
     val scope = rememberCoroutineScope()
 
     var selectedSubject by remember { mutableStateOf(subjects.firstOrNull()) }
@@ -430,7 +424,7 @@ private fun TeacherMarksSection(subjects: List<SubjectTeacherView>) {
     var numberStr by remember { mutableStateOf("1") }
     var maxMarksStr by remember { mutableStateOf("20.0") }
 
-    var students by remember { mutableStateOf<List<StudentDirectoryView>>(emptyList()) }
+    var students by remember { mutableStateOf<List<StudentProfileView>>(emptyList()) }
     val marksMap = remember { mutableStateMapOf<String, String>() }
 
     var saving by remember { mutableStateOf(false) }
@@ -691,7 +685,7 @@ private fun TeacherMarksSection(subjects: List<SubjectTeacherView>) {
 
 @Composable
 private fun StudentAttendanceRow(
-    student: StudentDirectoryView,
+    student: StudentProfileView,
     currentStatus: String,
     onStatusChanged: (String) -> Unit
 ) {

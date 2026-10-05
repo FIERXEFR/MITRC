@@ -12,14 +12,13 @@ object SupabaseTableData {
     object Tables {
         const val ADMIN_DB = "admin_db"
         const val STUDENTS = "students"
-        const val STAFF_DB = "staff_db"
+        const val FACULTY_MASTER = "faculty_master"
         const val COURSES = "courses"
         const val BRANCHES = "branches"
         const val SUBJECTS = "subjects"
         const val CLASSES = "classes"
         const val CLASS_SUBJECTS = "class_subjects"
         const val CLASS_SUBJECT_TEACHERS = "class_subject_teachers"
-        const val TEACHERS = "teachers"
         const val CLASS_GROUPS = "class_groups"
         const val ENROLLMENTS = "enrollments"
         const val ASSESSMENTS = "assessments"
@@ -29,51 +28,18 @@ object SupabaseTableData {
         const val TIMETABLES = "timetables"
         const val TIMETABLE_PERIODS = "timetable_periods"
         const val TIMETABLE_ENTRIES = "timetable_entries"
-        const val COORDINATORS = "coordinators"
         const val NOTES = "notes"
     }
 
     object Views {
-        const val V_STUDENT_DIRECTORY = "v_student_directory"
-        const val V_STUDENT_SUBJECTS = "v_student_subjects"
+        const val V_STUDENT_PROFILES = "v_student_profiles"
+        const val V_CLASS_SUBJECTS = "v_class_subjects"
+        const val V_STAFF_DIRECTORY = "v_staff_directory"
         const val V_ATTENDANCE_SUMMARY = "v_attendance_summary"
         const val V_MARKS = "v_marks"
-        const val V_SUBJECT_TEACHERS = "v_subject_teachers"
         const val V_ACTIVE_TIMETABLES = "v_active_timetables"
         const val V_TIMETABLE_ENTRIES = "v_timetable_entries"
         const val V_MY_TIMETABLE = "v_my_timetable"
-    }
-
-    object AdminDb {
-        const val UID = "uid"
-        const val NAME = "name"
-        const val EMAIL = "email"
-    }
-
-    object Students {
-        const val UID = "uid"
-        const val NAME = "name"
-        const val SERIAL_NO = "serial_no"
-        const val FATHER_NAME = "father_name"
-        const val STUDENT_PHONE_NO = "student_phone_no"
-        const val FATHER_PHONE_NO = "father_phone_no"
-        const val STUDENT_EMAIL = "student_email"
-        const val GROUP_NAME = "group_name"
-        const val IS_LOCKED = "is_locked"
-        const val IS_PTM = "is_ptm"
-        const val CREATED_AT = "created_at"
-        const val UPDATED_AT = "updated_at"
-    }
-
-    object StaffDb {
-        const val UID = "uid"
-        const val EMAIL_ID = "email_id"
-        const val DEPARTMENT = "department"
-        const val ROLE = "role"
-        const val NAME = "name"
-        const val PHONE_NO = "phone_no"
-        const val GENDER = "gender"
-        const val DESIGNATION = "designation"
     }
 }
 
@@ -107,15 +73,16 @@ data class StudentRow(
 )
 
 @Serializable
-data class StaffDbRow(
-    @SerialName("uid") val uid: String,
-    @SerialName("email_id") val emailId: String? = null,
-    @SerialName("department") val department: String? = null,
-    @SerialName("role") val role: String? = null,
+data class FacultyMasterRow(
+    @SerialName("id") val id: Int = 0,
+    @SerialName("firebase_uid") val firebaseUid: String? = null,
+    @SerialName("email") val email: String? = null,
     @SerialName("name") val name: String? = null,
     @SerialName("phone_no") val phoneNo: String? = null,
-    @SerialName("gender") val gender: String? = null,
+    @SerialName("department") val department: String? = null,
     @SerialName("designation") val designation: String? = null,
+    @SerialName("role") val role: String? = null,
+    @SerialName("is_coordinator") val isCoordinator: Boolean = false,
 )
 
 @Serializable
@@ -157,13 +124,6 @@ data class ClassSubjectRow(
 )
 
 @Serializable
-data class TeacherRow(
-    @SerialName("id") val id: Int = 0,
-    @SerialName("name") val name: String,
-    @SerialName("firebase_uid") val firebaseUid: String? = null,
-)
-
-@Serializable
 data class ClassGroupRow(
     @SerialName("id") val id: Int = 0,
     @SerialName("class_id") val classId: Int,
@@ -201,7 +161,7 @@ data class AttendanceSessionRow(
     @SerialName("class_subject_id") val classSubjectId: Int,
     @SerialName("class_date") val classDate: String,
     @SerialName("period") val period: Int,
-    @SerialName("taken_by") val takenBy: String? = null,
+    @SerialName("taken_by") val takenBy: Int? = null, // Faculty ID
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
 )
@@ -247,26 +207,12 @@ data class TimetableEntryRow(
     @SerialName("room") val room: String? = null,
 )
 
-@Serializable
-data class CoordinatorRow(
-    @SerialName("id") val id: Int = 0,
-    @SerialName("email") val email: String? = null,
-    @SerialName("name") val name: String? = null,
-    @SerialName("phone_no") val phoneNo: String? = null,
-    @SerialName("designation") val designation: String? = null,
-    @SerialName("department") val department: String? = null,
-    @SerialName("profile_url") val profileUrl: String? = null,
-    @SerialName("have_rights") val haveRights: Boolean = false,
-    @SerialName("is_tbincharge") val isTbIncharge: Boolean = false,
-    @SerialName("firebase_uid") val firebaseUid: String? = null,
-)
-
 // ---------------------------------------------------------------------------------------------
 // Row shapes - Views
 // ---------------------------------------------------------------------------------------------
 
 @Serializable
-data class StudentDirectoryView(
+data class StudentProfileView(
     @SerialName("uid") val uid: String,
     @SerialName("name") val name: String? = null,
     @SerialName("serial_no") val serialNo: String? = null,
@@ -283,16 +229,6 @@ data class StudentDirectoryView(
     @SerialName("section") val section: String? = null,
     @SerialName("academic_year") val academicYear: String? = null,
     @SerialName("class_id") val classId: Int? = null,
-)
-
-@Serializable
-data class StudentSubjectView(
-    @SerialName("student_uid") val studentUid: String,
-    @SerialName("class_subject_id") val classSubjectId: Int,
-    @SerialName("subject_code") val subjectCode: String,
-    @SerialName("subject_name") val subjectName: String,
-    @SerialName("subject_kind") val subjectKind: String,
-    @SerialName("class_id") val classId: Int,
 )
 
 @Serializable
@@ -319,7 +255,7 @@ data class MarkView(
 )
 
 @Serializable
-data class SubjectTeacherView(
+data class ClassSubjectView(
     @SerialName("class_subject_id") val classSubjectId: Int,
     @SerialName("class_id") val classId: Int,
     @SerialName("subject_code") val subjectCode: String,
@@ -327,6 +263,20 @@ data class SubjectTeacherView(
     @SerialName("subject_kind") val subjectKind: String,
     @SerialName("teacher_id") val teacherId: Int,
     @SerialName("teacher_name") val teacherName: String,
+    @SerialName("teacher_email") val teacherEmail: String? = null,
+)
+
+@Serializable
+data class StaffDirectoryView(
+    @SerialName("id") val id: Int,
+    @SerialName("firebase_uid") val firebaseUid: String? = null,
+    @SerialName("name") val name: String? = null,
+    @SerialName("email") val email: String? = null,
+    @SerialName("phone_no") val phoneNo: String? = null,
+    @SerialName("department") val department: String? = null,
+    @SerialName("designation") val designation: String? = null,
+    @SerialName("is_coordinator") val isCoordinator: Boolean = false,
+    @SerialName("mentor_class_id") val mentorClassId: Int? = null,
 )
 
 @Serializable

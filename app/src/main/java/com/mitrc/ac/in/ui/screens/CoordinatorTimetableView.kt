@@ -17,11 +17,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.Publish
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -30,9 +28,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,11 +46,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mitrc.ac.`in`.auth.AdminRepository
 import com.mitrc.ac.`in`.data.ClassGroupRow
-import com.mitrc.ac.`in`.data.CoordinatorRow
+import com.mitrc.ac.`in`.data.FacultyMasterRow
 import com.mitrc.ac.`in`.data.PortalRepository
-import com.mitrc.ac.`in`.data.StudentDirectoryView
-import com.mitrc.ac.`in`.data.SubjectTeacherView
-import com.mitrc.ac.`in`.data.TimetableEntryRow
+import com.mitrc.ac.`in`.data.ClassSubjectView
 import com.mitrc.ac.`in`.data.TimetableEntryView
 import com.mitrc.ac.`in`.data.TimetableRow
 import com.mitrc.ac.`in`.ui.theme.ErrorRed
@@ -77,12 +71,12 @@ fun CoordinatorTimetableView(userUid: String) {
     val scope = rememberCoroutineScope()
 
     var loading by remember { mutableStateOf(true) }
-    var coordinator by remember { mutableStateOf<CoordinatorRow?>(null) }
+    var coordinator by remember { mutableStateOf<FacultyMasterRow?>(null) }
     var timetables by remember { mutableStateOf<List<TimetableRow>>(emptyList()) }
     var selectedTimetable by remember { mutableStateOf<TimetableRow?>(null) }
 
     var entries by remember { mutableStateOf<List<TimetableEntryView>>(emptyList()) }
-    var subjects by remember { mutableStateOf<List<SubjectTeacherView>>(emptyList()) }
+    var subjects by remember { mutableStateOf<List<ClassSubjectView>>(emptyList()) }
     var groups by remember { mutableStateOf<List<ClassGroupRow>>(emptyList()) }
 
     var actionMsg by remember { mutableStateOf<String?>(null) }
@@ -132,7 +126,7 @@ fun CoordinatorTimetableView(userUid: String) {
     }
 
     val coord = coordinator
-    if (coord == null || (!coord.haveRights && !coord.isTbIncharge)) {
+    if (coord == null || !coord.isCoordinator) {
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
@@ -156,7 +150,7 @@ fun CoordinatorTimetableView(userUid: String) {
         return
     }
 
-    Column {
+    Column(modifier = Modifier.padding(16.dp)) {
         Text(
             text = "TIMETABLE MANAGER & DRAFTS",
             fontSize = 11.sp,
@@ -364,7 +358,7 @@ fun CoordinatorTimetableView(userUid: String) {
 
         Spacer(Modifier.height(24.dp))
 
-        // Signatories Section from Coordinators
+        // Signatories Section
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
@@ -386,12 +380,12 @@ fun CoordinatorTimetableView(userUid: String) {
                     Column {
                         Text(text = coord.name ?: "Coordinator", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                         Text(
-                            text = if (coord.isTbIncharge) "Time Table Incharge" else "Coordinator",
+                            text = "Coordinator",
                             fontSize = 11.sp,
                             color = TextSecondary
                         )
                     }
-                    if (!coord.department.isNull_or_blank()) {
+                    if (!coord.department.isNullOrBlank()) {
                         Text(text = coord.department.orEmpty(), fontSize = 12.sp, color = Navy, fontWeight = FontWeight.SemiBold)
                     }
                 }
@@ -399,8 +393,6 @@ fun CoordinatorTimetableView(userUid: String) {
         }
     }
 }
-
-private fun String?.isNull_or_blank(): Boolean = this == null || this.trim().isEmpty()
 
 @Composable
 private fun SlotEntryRow(entry: TimetableEntryView, onDelete: () -> Unit) {
@@ -428,7 +420,7 @@ private fun SlotEntryRow(entry: TimetableEntryView, onDelete: () -> Unit) {
                 fontWeight = FontWeight.SemiBold,
                 color = TextPrimary
             )
-            if (!entry.teacherName.isNull_or_blank()) {
+            if (!entry.teacherName.isNullOrBlank()) {
                 Text(text = "Teacher: ${entry.teacherName}", fontSize = 11.sp, color = TextSecondary)
             }
         }
