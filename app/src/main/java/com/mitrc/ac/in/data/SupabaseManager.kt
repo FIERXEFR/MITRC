@@ -135,6 +135,20 @@ object SupabaseManager {
         ""
     }
 
+    suspend fun getAuthTokenInfo(): String {
+        val auth = FirebaseAuth.getInstance()
+        val user = auth.currentUser
+        if (user == null) {
+            return "NO_FIREBASE_USER (Using Supabase Anon Key)"
+        }
+        val token = runCatching { user.getIdToken(false).await()?.token }.getOrNull()
+        return if (!token.isNullOrBlank()) {
+            "FIREBASE_ID_TOKEN_PRESENT (uid=${user.uid}, email=${user.email}, tokenLength=${token.length}, prefix=${token.take(12)}...)"
+        } else {
+            "FIREBASE_USER_EXISTS_BUT_TOKEN_NULL (Using Supabase Anon Key)"
+        }
+    }
+
     fun requireClient(): SupabaseClient =
         client ?: error("Supabase is not configured. Run scripts/generate_xor_cpp.ps1 with real credentials.")
 }

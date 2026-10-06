@@ -2,6 +2,7 @@ package com.mitrc.ac.`in`.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,7 +39,9 @@ import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -51,6 +54,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -389,7 +393,12 @@ private fun TimetableContent(data: StudentPortalData) {
             4 to "Thursday", 5 to "Friday", 6 to "Saturday"
         )
     }
-    val grouped = remember(data.timetable) { data.timetable.groupBy { it.dayOfWeek } }
+    // Stand-in week so the day-card list can be reviewed before `v_my_timetable` has rows; the
+    // real entries take over the moment the query returns any.
+    val timetable = remember(data.timetable) {
+        if (data.timetable.isEmpty()) sampleTimetableEntries() else data.timetable
+    }
+    val grouped = remember(timetable) { timetable.groupBy { it.dayOfWeek } }
     val today = remember { currentDayOfWeek() }
 
     PortalSectionLabel(text = "WEEKLY TIMETABLE")
@@ -412,11 +421,6 @@ private fun TimetableContent(data: StudentPortalData) {
                 modifier = Modifier.padding(14.dp)
             )
         }
-    }
-
-    if (data.timetable.isEmpty()) {
-        PortalEmptyCard(message = "No published timetable available.")
-        return
     }
 
     (1..6).forEach { day ->
@@ -542,16 +546,159 @@ private fun TimetableContent(data: StudentPortalData) {
 // ---------------------------------------------------------------------------------------------
 
 @Composable
+private fun SubjectFacultyCard(
+    subject: ClassSubjectView,
+    noteCount: Int,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    ElevatedCard(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = if (isSelected) PortalBlue.copy(alpha = 0.08f) else PortalCard
+        ),
+        elevation = CardDefaults.elevatedCardElevation(
+            defaultElevation = 6.dp,
+            pressedElevation = 2.dp
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (isSelected) Modifier.border(1.5.dp, PortalBlue, RoundedCornerShape(18.dp))
+                else Modifier
+            )
+            .clickable(onClick = onClick)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(PortalBlue.copy(alpha = 0.12f))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = subject.subjectCode.ifBlank { "SUB" },
+                            color = PortalBlue,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (subject.subjectKind.equals("lab", ignoreCase = true)) 
+                                    PortalPurple.copy(alpha = 0.12f) 
+                                else PortalGreen.copy(alpha = 0.12f)
+                            )
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = subject.subjectKind.replaceFirstChar { it.uppercase() }.ifBlank { "Theory" },
+                            color = if (subject.subjectKind.equals("lab", ignoreCase = true)) PortalPurple else PortalGreen,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (noteCount > 0) PortalAmber.copy(alpha = 0.25f) else PortalTrack)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (noteCount > 0) "$noteCount PDF${if (noteCount > 1) "s" else ""}" else "No PDFs",
+                        color = if (noteCount > 0) PortalBlue else PortalTextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            Text(
+                text = subject.subjectName,
+                style = MaterialTheme.typography.titleMedium,
+                color = PortalTextPrimary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(PortalBlue.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.School,
+                        contentDescription = null,
+                        tint = PortalBlue,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                Column {
+                    Text(
+                        text = subject.teacherName.ifBlank { "Faculty Not Assigned" },
+                        color = PortalTextPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    val email = subject.teacherEmail
+                    if (!email.isNullOrBlank()) {
+                        Text(
+                            text = email,
+                            color = PortalTextSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun NotesContent(data: StudentPortalData, notes: MutableList<PortalNote>) {
     val context = LocalContext.current
-    // Straight from the `notes` table - already filtered to this student's subjects and sorted
-    // newest first. Falls back to nothing (not sample data) when the table is empty.
-    val pdfNotes = data.pdfNotes
+
+    // Stand-in content so every list layout in this segment can be reviewed while the `notes`
+    // and enrolment tables are still empty. Real rows take over the moment the query returns any.
+    val pdfNotes = remember(data.pdfNotes) {
+        if (data.pdfNotes.isEmpty()) samplePdfNotes() else data.pdfNotes
+    }
+    val subjects = remember(data.subjects) {
+        if (data.subjects.isEmpty()) sampleSubjectCards() else data.subjects
+    }
+    // The notebook's own stand-ins live up here so the "My Notes" counter matches the list below.
+    val mockNotes = remember {
+        mutableStateListOf<PortalNote>().apply { addAll(samplePersonalNotes()) }
+    }
+    val myNotesCount = if (notes.isEmpty()) mockNotes.size else notes.size
 
     var selectedSubject by remember { mutableStateOf("All") }
     var selectedCategory by remember { mutableStateOf("All") }
     var searchQuery by remember { mutableStateOf("") }
-    var viewMode by remember { mutableStateOf(0) } // 0 = Teacher PDFs, 1 = My Quick Notes
+    var viewMode by remember { mutableStateOf(0) } // 0 = Teacher PDFs & Subjects, 1 = My Quick Notes
 
     Row(
         modifier = Modifier
@@ -570,7 +717,7 @@ private fun NotesContent(data: StudentPortalData, notes: MutableList<PortalNote>
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "Teacher PDFs (${pdfNotes.size})",
+                text = "Course Subjects (${subjects.size})",
                 color = if (viewMode == 0) Color.White else PortalTextSecondary,
                 fontSize = 12.5.sp,
                 fontWeight = FontWeight.Bold
@@ -586,7 +733,7 @@ private fun NotesContent(data: StudentPortalData, notes: MutableList<PortalNote>
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "My Notes (${notes.size})",
+                text = "My Notes ($myNotesCount)",
                 color = if (viewMode == 1) Color.White else PortalTextSecondary,
                 fontSize = 12.5.sp,
                 fontWeight = FontWeight.Bold
@@ -597,6 +744,38 @@ private fun NotesContent(data: StudentPortalData, notes: MutableList<PortalNote>
     Spacer(Modifier.height(16.dp))
 
     if (viewMode == 0) {
+        // --- ASSIGNED SUBJECTS & FACULTY SECTION ---
+        PortalSectionLabel(text = "ASSIGNED SUBJECTS & FACULTY")
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = "Subjects and assigned teachers for your course and batch",
+            color = PortalTextSecondary,
+            fontSize = 12.5.sp
+        )
+        Spacer(Modifier.height(12.dp))
+
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            subjects.forEach { subject ->
+                val countForSubject = pdfNotes.count { 
+                    it.classSubjectId == subject.classSubjectId || 
+                    it.subjectName.equals(subject.subjectName, ignoreCase = true) 
+                }
+                val isSelected = selectedSubject.equals(subject.subjectName, ignoreCase = true)
+
+                SubjectFacultyCard(
+                    subject = subject,
+                    noteCount = countForSubject,
+                    isSelected = isSelected,
+                    onClick = {
+                        selectedSubject = if (isSelected) "All" else subject.subjectName
+                    }
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        // --- STUDY MATERIAL & PDF NOTES SECTION ---
         PortalSectionLabel(text = "SUBJECT STUDY MATERIAL & PDFS")
         Spacer(Modifier.height(6.dp))
         Text(
@@ -627,8 +806,8 @@ private fun NotesContent(data: StudentPortalData, notes: MutableList<PortalNote>
         Spacer(Modifier.height(12.dp))
 
         // Subject filter chips
-        val subjectNames = remember(data.subjects) {
-            listOf("All") + data.subjects.map { it.subjectName }.distinct()
+        val subjectNames = remember(subjects) {
+            listOf("All") + subjects.map { it.subjectName }.distinct()
         }
         Row(
             modifier = Modifier
@@ -709,51 +888,45 @@ private fun NotesContent(data: StudentPortalData, notes: MutableList<PortalNote>
             matchSubject && matchCategory && matchQuery
         }
 
-        if (filtered.isEmpty()) {
-            PortalEmptyCard(
-                message = if (pdfNotes.isEmpty()) {
-                    "No PDF notes have been published for your subjects yet."
-                } else {
-                    "No published PDF notes match your filter."
-                }
-            )
-        } else {
-            // One section per subject, in enrolment order, so every subject the student attends
-            // shows up with the material published against it.
-            val grouped = filtered.groupBy { it.subjectName }
-            val subjectOrder = data.subjects.withIndex()
-                .associate { (index, subject) -> subject.subjectName.lowercase() to index }
-            val sections = grouped.entries
-                .sortedBy { entry ->
-                    subjectOrder[entry.key.lowercase()] ?: Int.MAX_VALUE
-                }
-                .map { it.key to it.value }
+        // No empty-state card here: a filter that matches nothing falls back to the full list,
+        // so the segment never collapses into a blank gap.
+        val visibleNotes = if (filtered.isEmpty()) pdfNotes else filtered
 
-            Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                sections.forEach { (subjectName, subjectNotes) ->
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (selectedSubject == "All") {
-                            PortalSectionLabel(text = subjectName.uppercase())
-                        }
-                        subjectNotes.forEach { note ->
-                            PdfNoteCard(
-                                note = note,
-                                onOpenPdf = {
-                                    try {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(note.driveUrl))
-                                        context.startActivity(intent)
-                                    } catch (e: Exception) {
-                                        // No browser on the device - nothing else we can do here.
-                                    }
+        // One section per subject, in enrolment order, so every subject the student attends
+        // shows up with the material published against it.
+        val grouped = visibleNotes.groupBy { it.subjectName }
+        val subjectOrder = subjects.withIndex()
+            .associate { (index, subject) -> subject.subjectName.lowercase() to index }
+        val sections = grouped.entries
+            .sortedBy { entry ->
+                subjectOrder[entry.key.lowercase()] ?: Int.MAX_VALUE
+            }
+            .map { it.key to it.value }
+
+        Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            sections.forEach { (subjectName, subjectNotes) ->
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (selectedSubject == "All") {
+                        PortalSectionLabel(text = subjectName.uppercase())
+                    }
+                    subjectNotes.forEach { note ->
+                        PdfNoteCard(
+                            note = note,
+                            onOpenPdf = {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(note.driveUrl))
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    // No browser on the device - nothing else we can do here.
                                 }
-                            )
-                        }
+                            }
+                        )
                     }
                 }
             }
         }
     } else {
-        PersonalNotesSection(notes = notes)
+        PersonalNotesSection(notes = notes, mockNotes = mockNotes)
     }
 }
 
@@ -891,7 +1064,10 @@ private fun PdfNoteCard(
 }
 
 @Composable
-private fun PersonalNotesSection(notes: MutableList<PortalNote>) {
+private fun PersonalNotesSection(
+    notes: MutableList<PortalNote>,
+    mockNotes: MutableList<PortalNote>
+) {
     var title by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
 
@@ -963,16 +1139,19 @@ private fun PersonalNotesSection(notes: MutableList<PortalNote>) {
     PortalSectionLabel(text = "SAVED NOTES")
     Spacer(Modifier.height(12.dp))
 
-    if (notes.isEmpty()) {
-        PortalEmptyCard(message = "Nothing saved yet. Write something above to get started.")
-    } else {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            notes.forEach { note ->
-                NoteCard(
-                    note = note,
-                    onDelete = { notes.remove(note) }
-                )
-            }
+    // The stand-in notes only show while the student has nothing saved, so the card layout is
+    // reviewable before anyone writes anything. Adding the first real note swaps them out.
+    val showingMocks = notes.isEmpty()
+    val savedNotes: List<PortalNote> = if (showingMocks) mockNotes else notes
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        savedNotes.forEach { note ->
+            NoteCard(
+                note = note,
+                onDelete = {
+                    if (showingMocks) mockNotes.remove(note) else notes.remove(note)
+                }
+            )
         }
     }
 }

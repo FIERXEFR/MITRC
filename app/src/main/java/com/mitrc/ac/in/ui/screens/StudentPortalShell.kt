@@ -112,7 +112,7 @@ data class StudentPortalData(
     val marks: List<MarkView>,
     val timetable: List<MyTimetableEntryView>,
     val error: String?,
-    /** `v_class_subjects` rows for this student's class - backs the "Contact Faculty" sheet. */
+    /** `v_my_subject_cards` rows for this student - backs the "Contact Faculty" sheet. */
     val faculty: List<ClassSubjectView> = emptyList(),
     /**
      * Teacher-published PDFs from the `notes` table, already filtered down to the subjects this
@@ -211,7 +211,7 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
             PortalHeader(
                 tab = tab,
                 scheduleMode = scheduleMode,
-                name = data?.profile?.name,
+                name = portalDisplayName(data?.profile),
                 scroll = when (tab) {
                     StudentTab.HOME -> homeScroll
                     StudentTab.ATTENDANCE -> scheduleScroll
@@ -242,9 +242,13 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
                 } else {
                     AnimatedContent(
                         targetState = tab,
+                        // The outgoing tab has to be gone *before* the incoming one turns visible.
+                        // Fading both at once (160ms out / 320ms in) left the previous tab's cards
+                        // drawn at partial alpha under the new ones - a ghost card behind every card.
+                        // 120ms out, then the new content fades in over it.
                         transitionSpec = {
-                            fadeIn(tween(320, easing = { 1f - (1f - it) * (1f - it) }))
-                                .togetherWith(fadeOut(tween(160)))
+                            fadeIn(tween(280, delayMillis = 120))
+                                .togetherWith(fadeOut(tween(120)))
                         },
                         modifier = Modifier.fillMaxSize(),
                         label = "studentTabSwitch"
@@ -423,11 +427,14 @@ private fun PortalHeader(
 
                 AnimatedContent(
                     targetState = title,
+                    // Same rule as the tab switch: the old title leaves first (and slides clear),
+                    // then the new one rolls in, so two titles are never legible at the same time.
                     transitionSpec = {
-                        (fadeIn(tween(380)) + slideInVertically(tween(420)) { -it / 4 })
+                        (fadeIn(tween(340, delayMillis = 150)) +
+                            slideInVertically(tween(400, delayMillis = 150)) { -it / 4 })
                             .togetherWith(
-                                fadeOut(tween(200)) +
-                                    slideOutVertically(tween(300)) { it / 4 }
+                                fadeOut(tween(150)) +
+                                    slideOutVertically(tween(200)) { it / 4 }
                             )
                     },
                     label = "headerTitle"
@@ -780,7 +787,7 @@ private fun ProfileSheetContent(
             Spacer(Modifier.width(14.dp))
             Column {
                 Text(
-                    text = profile?.name ?: "Student Profile",
+                    text = portalDisplayName(profile).takeIf { it != "Student" } ?: "Student Profile",
                     color = PortalTextPrimary,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.ExtraBold,

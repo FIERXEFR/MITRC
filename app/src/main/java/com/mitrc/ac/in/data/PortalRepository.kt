@@ -1,5 +1,7 @@
 package com.mitrc.ac.`in`.data
 
+import android.util.Log
+import io.github.jan.supabase.postgrest.exception.PostgrestRestException
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc
 import kotlinx.serialization.json.Json
@@ -9,6 +11,7 @@ import kotlinx.serialization.json.put
 
 object PortalRepository {
 
+    private const val TAG = "PortalRepository"
     private val json = Json { ignoreUnknownKeys = true }
 
     private suspend fun <T> query(block: suspend () -> T): Result<T> = runCatching {
@@ -20,16 +23,130 @@ object PortalRepository {
     // -----------------------------------------------------------------------------------------
 
     suspend fun getStudentProfile(uid: String): Result<StudentProfileView?> = query {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_PROFILES]
-            .select { filter { eq("uid", uid) } }
-            .decodeList<StudentProfileView>()
-            .firstOrNull()
+        val client = SupabaseManager.requireClient()
+        Log.d(TAG, "getStudentProfile for uid=$uid")
+
+        val fromView = runCatching {
+            client.postgrest[SupabaseTableData.Views.V_STUDENT_PROFILES]
+                .select { filter { eq("student_uid", uid) } }
+                .decodeList<StudentProfileView>()
+                .firstOrNull()
+        }
+
+        if (fromView.isSuccess && fromView.getOrNull() != null) {
+            val prof = fromView.getOrThrow()
+            if (prof != null && prof.name.isNullOrBlank()) {
+                // The view can serve a row whose `name` is still NULL (student row written before
+                // the name was captured). The `students` table is authoritative, so backfill it
+                // here rather than greeting the user as "Student" for the rest of the session.
+                val tabledName = runCatching {
+                    client.postgrest[SupabaseTableData.Tables.STUDENTS]
+                        .select { filter { eq("uid", uid) } }
+                        .decodeList<StudentRow>()
+                        .firstOrNull()?.name
+                }.getOrNull()
+                if (!tabledName.isNullOrBlank()) {
+                    Log.i(TAG, "Student name backfilled from students table")
+                    return@query prof.copy(name = tabledName)
+                }
+            }
+            Log.i(TAG, "Student profile loaded from v_student_profiles (classId=${prof?.classId})")
+            return@query prof
+        } else {
+            Log.w(TAG, "v_student_profiles query returned null/failed: ${fromView.exceptionOrNull()?.message}")
+        }
+
+        // Fallback: Query students table & enrollments
+        val fromStudentTable = runCatching {
+            client.postgrest[SupabaseTableData.Tables.STUDENTS]
+                .select { filter { eq("uid", uid) } }
+                .decodeList<StudentRow>()
+                .firstOrNull()
+        }.getOrNull()
+
+        if (fromStudentTable != null) {
+            val enrollment = runCatching {
+                client.postgrest[SupabaseTableData.Tables.ENROLLMENTS]
+                    .select { filter { eq("student_uid", uid) } }
+                    .decodeList<EnrollmentRow>()
+                    .firstOrNull()
+            }.getOrNull()
+
+            Log.i(TAG, "Student profile resolved from students table (classId=${enrollment?.classId})")
+            return@query StudentProfileView(
+                studentUid = fromStudentTable.uid,
+                name = fromStudentTable.name,
+                serialNo = fromStudentTable.serialNo,
+                fatherName = fromStudentTable.fatherName,
+                studentPhoneNo = fromStudentTable.studentPhoneNo,
+                fatherPhoneNo = fromStudentTable.fatherPhoneNo,
+                studentEmail = fromStudentTable.studentEmail,
+                groupName = fromStudentTable.groupName,
+                isLocked = fromStudentTable.isLocked,
+                isPtm = fromStudentTable.isPtm,
+                classId = enrollment?.classId
+            )
+        }
+
+        null
     }
 
     suspend fun getStudentSubjects(classId: Int): Result<List<ClassSubjectView>> = query {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_CLASS_SUBJECTS]
-            .select { filter { eq("class_id", classId) } }
-            .decodeList<ClassSubjectView>()
+        if (classId <= 0) {
+            Log.w(TAG, "getStudentSubjects: student has no class yet (classId=$classId); skipping subject query.")
+            return@query emptyList()
+        }
+
+        val client = SupabaseManager.requireClient()
+        val tokenInfo = SupabaseManager.getAuthTokenInfo()
+        Log.d(TAG, "getStudentSubjects: Querying v_class_subjects for classId=$classId. Auth Token Info: $tokenInfo")
+
+        val responseResult = runCatching {
+            client.postgrest[SupabaseTableData.Views.V_CLASS_SUBJECTS]
+                .select { filter { eq("class_id", classId) } }
+        }
+
+        if (responseResult.isSuccess) {
+            val response = responseResult.getOrThrow()
+            val list = runCatching { response.decodeList<ClassSubjectView>() }.getOrDefault(emptyList())
+
+            if (list.isEmpty()) {
+                Log.w(
+                    TAG,
+                    "v_class_subjects LIST IS EMPTY!\n" +
+                    "HTTP Status: 200 (Success)\n" +
+                    "classId: $classId\n" +
+                    "Authorization Header Token Info: $tokenInfo"
+                )
+            } else {
+                Log.i(
+                    TAG,
+                    "v_class_subjects returned ${list.size} subject cards.\n" +
+                    "HTTP Status: 200 (Success)\n" +
+                    "classId: $classId\n" +
+                    "Authorization Header Token Info: $tokenInfo"
+                )
+            }
+            return@query list
+        } else {
+            val error = responseResult.exceptionOrNull()
+            val httpStatus = if (error is PostgrestRestException) {
+                error.statusCode.toString()
+            } else {
+                "UNKNOWN"
+            }
+
+            Log.e(
+                TAG,
+                "v_class_subjects QUERY FAILED!\n" +
+                "HTTP Status: $httpStatus\n" +
+                "classId: $classId\n" +
+                "Authorization Header Token Info: $tokenInfo\n" +
+                "Error: ${error?.message}",
+                error
+            )
+            return@query emptyList()
+        }
     }
 
     suspend fun getStudentAttendance(uid: String): Result<List<AttendanceSummaryView>> = query {
@@ -68,7 +185,7 @@ object PortalRepository {
     }
 
     suspend fun getTeacherSubjects(teacherId: Int): Result<List<ClassSubjectView>> = query {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_CLASS_SUBJECTS]
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_SUBJECT_TEACHERS]
             .select { filter { eq("teacher_id", teacherId) } }
             .decodeList<ClassSubjectView>()
     }
@@ -220,7 +337,7 @@ object PortalRepository {
     }
 
     suspend fun getSubjectTeachers(classId: Int): Result<List<ClassSubjectView>> = query {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_CLASS_SUBJECTS]
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_SUBJECT_TEACHERS]
             .select { filter { eq("class_id", classId) } }
             .decodeList<ClassSubjectView>()
     }
