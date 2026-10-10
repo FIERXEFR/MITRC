@@ -15,6 +15,10 @@ static const unsigned char enc_supabaseServiceKey[] = { 0x70, 0x6C, 0x5F, 0x7D, 
 static const int len_supabaseServiceKey = 219;
 static const unsigned char key_supabaseServiceKey = 21;
 
+static const unsigned char enc_imagekitPrivateKey[] = { 0xAF, 0xAD, 0xB6, 0xA9, 0xBE, 0xAB, 0xBA, 0x80, 0x86, 0xBD, 0x94, 0xA6, 0xF4, 0x9C, 0x96, 0x94, 0x92, 0xBB, 0x95, 0xB3, 0x9D, 0x87, 0xAC, 0x8F, 0xB5, 0xF0, 0xB9, 0xE6, 0xBD, 0x8D, 0xEE, 0x87, 0xA6, 0xB3, 0x9A, 0xE2 };
+static const int len_imagekitPrivateKey = 36;
+static const unsigned char key_imagekitPrivateKey = 223;
+
 static const unsigned char enc_appName[] = { 0x03, 0x07, 0x1A, 0x1C, 0x0D };
 static const int len_appName = 5;
 static const unsigned char key_appName = 78;
@@ -41,6 +45,11 @@ Java_com_mitrc_ac_in_utils_NativeUtils_getSupabaseAnonKey(JNIEnv* env, jobject) 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_mitrc_ac_in_utils_NativeUtils_getSupabaseServiceKey(JNIEnv* env, jobject) {
     return env->NewStringUTF(xor_decode(enc_supabaseServiceKey, len_supabaseServiceKey, key_supabaseServiceKey).c_str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_mitrc_ac_in_utils_NativeUtils_getImagekitPrivateKey(JNIEnv* env, jobject) {
+    return env->NewStringUTF(xor_decode(enc_imagekitPrivateKey, len_imagekitPrivateKey, key_imagekitPrivateKey).c_str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL

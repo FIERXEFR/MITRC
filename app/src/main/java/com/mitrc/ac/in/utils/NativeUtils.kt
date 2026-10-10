@@ -9,4 +9,5 @@ object NativeUtils {
     external fun getSupabaseAnonKey(): String
     external fun getSupabaseServiceKey(): String
     external fun getAppName(): String
+    external fun getImagekitPrivateKey(): String
 }
