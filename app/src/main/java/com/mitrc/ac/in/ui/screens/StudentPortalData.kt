@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.mitrc.ac.`in`.auth.AuthRepository
 import com.mitrc.ac.`in`.data.*
 import com.mitrc.ac.`in`.ui.theme.DarkTextMuted
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
@@ -206,20 +207,20 @@ fun List<NoteRow>.toPortalPdfNotes(
 
     return sortedByDescending { it.createdAt.orEmpty() } // ISO-8601 sorts correctly as plain text
         .mapNotNull { row ->
-            val subject = enrolledBySubjectId[row.classSubjectId] ?: return@mapNotNull null
+            val subject = enrolledBySubjectId[row.classSubjectId]
             if (!row.isVisible) return@mapNotNull null
             if (row.title.isBlank() || row.driveUrl.isBlank()) return@mapNotNull null
 
             PortalPdfNote(
                 id = row.id,
                 classSubjectId = row.classSubjectId,
-                subjectName = subject.subjectName,
-                subjectCode = subject.subjectCode,
+                subjectName = subject?.subjectName ?: "Subject #${row.classSubjectId}",
+                subjectCode = subject?.subjectCode ?: "NOTES",
                 title = row.title,
                 description = row.description,
                 category = row.category,
                 driveUrl = row.driveUrl,
-                teacherName = subject.teacherName.ifBlank { "Faculty" },
+                teacherName = subject?.teacherName?.ifBlank { "Faculty" } ?: "Faculty",
                 createdAt = formatNoteDate(row.createdAt)
             )
         }
@@ -438,6 +439,26 @@ fun firstNameOf(fullName: String?): String {
     return trimmed.split(Regex("\\s+")).first()
 }
 
+/**
+ * Name for the portal header and avatar.
+ *
+ * The profile row is the source of truth, but it is not the only place the student's name lives:
+ * the admin panel writes the name into Firebase's `displayName` when it creates the account, and
+ * the sign-in address always has a usable local part. Falling back through those keeps the header
+ * from greeting a student as "Student" whenever `students.name` comes back NULL.
+ */
+fun portalDisplayName(profile: StudentProfileView?): String {
+    profile?.name?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+
+    val user = AuthRepository.currentUser
+    user?.displayName?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+    user?.email?.substringBefore('@')?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+
+    profile?.studentEmail?.substringBefore('@')?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+
+    return "Student"
+}
+
 /** 1 = Monday ... 7 = Sunday, matching `MyTimetableEntryView.dayOfWeek`. */
 fun currentDayOfWeek(): Int = Calendar.getInstance().get(Calendar.DAY_OF_WEEK).let {
     if (it == Calendar.SUNDAY) 7 else it
@@ -453,6 +474,223 @@ val streakDays: List<Pair<String, Boolean>>
 /** Attendance for each of the last 7 days, used by the small bar chart. */
 val weekBars: List<Pair<String, Int>>
     get() = listOf("Mon" to 7, "Tue" to 6, "Wed" to 6, "Thu" to 5, "Fri" to 6, "Sat" to 4, "Sun" to 0)
+
+// ---------------------------------------------------------------------------------------------
+// Mock list content - stands in for the Timetable and Notes segments until those tables have rows
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Placeholder weekly timetable for the Timetable segment.
+ *
+ * Rendered through the very same day-card UI the real `v_my_timetable` rows use, so the list
+ * design can be reviewed (and adjusted) before the timetable table is populated. The segment
+ * only falls back to this when the real query came back empty.
+ */
+fun sampleTimetableEntries(): List<MyTimetableEntryView> {
+    fun entry(
+        id: Int,
+        day: Int,
+        start: Int,
+        end: Int,
+        code: String,
+        name: String,
+        kind: String,
+        teacher: String,
+        room: String,
+        group: String? = null
+    ) = MyTimetableEntryView(
+        entryId = id,
+        timetableId = 1,
+        classId = 1,
+        effectiveFrom = "2026-07-01",
+        isPublished = true,
+        dayOfWeek = day,
+        startPeriod = start,
+        endPeriod = end,
+        subjectCode = code,
+        subjectName = name,
+        subjectKind = kind,
+        teacherName = teacher,
+        room = room,
+        groupName = group
+    )
+
+    return listOf(
+        // Monday
+        entry(101, 1, 1, 2, "CS-301", "Data Structures & Algorithms", "theory", "Dr. Meena Sharma", "A-204"),
+        entry(102, 1, 3, 4, "CS-303", "Database Management Systems", "theory", "Mr. Rahul Verma", "A-204"),
+        entry(103, 1, 5, 6, "MA-201", "Applied Mathematics-III", "theory", "Prof. R. K. Sinha", "B-105"),
+
+        // Tuesday
+        entry(111, 2, 1, 2, "CS-302", "Operating Systems", "theory", "Dr. Anjali Gupta", "A-206"),
+        entry(112, 2, 3, 4, "CS-304", "Computer Networks", "theory", "Mr. Sandeep Yadav", "A-206"),
+        entry(113, 2, 5, 6, "CSL-303", "DBMS Laboratory", "lab", "Mr. Rahul Verma", "Lab-2", "Group A"),
+
+        // Wednesday
+        entry(121, 3, 1, 2, "CS-305", "Machine Learning", "theory", "Ms. Kavita Joshi", "B-105"),
+        entry(122, 3, 3, 4, "CS-301", "Data Structures & Algorithms", "theory", "Dr. Meena Sharma", "A-204"),
+        entry(123, 3, 5, 6, "IT-201", "Software Engineering", "theory", "Mr. Sandeep Yadav", "A-206"),
+
+        // Thursday
+        entry(131, 4, 1, 2, "CS-302", "Operating Systems", "theory", "Dr. Anjali Gupta", "A-206"),
+        entry(132, 4, 3, 4, "CSL-301", "Data Structures Laboratory", "lab", "Dr. Meena Sharma", "Lab-3", "Group A"),
+        entry(133, 4, 5, 6, "CS-304", "Computer Networks", "theory", "Mr. Sandeep Yadav", "A-204"),
+
+        // Friday
+        entry(141, 5, 1, 2, "CS-303", "Database Management Systems", "theory", "Mr. Rahul Verma", "A-204"),
+        entry(142, 5, 3, 4, "CS-305", "Machine Learning", "theory", "Ms. Kavita Joshi", "B-105"),
+        entry(143, 5, 5, 6, "MA-201", "Applied Mathematics-III", "theory", "Prof. R. K. Sinha", "B-105"),
+
+        // Saturday
+        entry(151, 6, 1, 2, "CS-301", "Data Structures & Algorithms", "theory", "Dr. Meena Sharma", "A-204"),
+        entry(152, 6, 3, 4, "IT-201", "Software Engineering", "theory", "Mr. Sandeep Yadav", "A-206"),
+        entry(153, 6, 5, 6, "CSL-304", "Computer Networks Laboratory", "lab", "Mr. Sandeep Yadav", "Lab-3", "Group B")
+    )
+}
+
+/**
+ * Placeholder enrolled subjects for the Notes segment's subject/faculty cards and filter chips.
+ */
+fun sampleSubjectCards(): List<ClassSubjectView> = listOf(
+    ClassSubjectView(
+        rawClassSubjectId = 901,
+        rawSubjectCode = "CS-301",
+        rawSubjectName = "Data Structures & Algorithms",
+        rawSubjectKind = "theory",
+        rawTeacherName = "Dr. Meena Sharma",
+        rawTeacherEmail = "meena.sharma@mitrc.ac.in"
+    ),
+    ClassSubjectView(
+        rawClassSubjectId = 902,
+        rawSubjectCode = "CS-302",
+        rawSubjectName = "Operating Systems",
+        rawSubjectKind = "theory",
+        rawTeacherName = "Dr. Anjali Gupta",
+        rawTeacherEmail = "anjali.gupta@mitrc.ac.in"
+    ),
+    ClassSubjectView(
+        rawClassSubjectId = 903,
+        rawSubjectCode = "CS-303",
+        rawSubjectName = "Database Management Systems",
+        rawSubjectKind = "theory",
+        rawTeacherName = "Mr. Rahul Verma",
+        rawTeacherEmail = "rahul.verma@mitrc.ac.in"
+    ),
+    ClassSubjectView(
+        rawClassSubjectId = 904,
+        rawSubjectCode = "CS-304",
+        rawSubjectName = "Computer Networks",
+        rawSubjectKind = "theory",
+        rawTeacherName = "Mr. Sandeep Yadav",
+        rawTeacherEmail = "sandeep.yadav@mitrc.ac.in"
+    ),
+    ClassSubjectView(
+        rawClassSubjectId = 905,
+        rawSubjectCode = "CSL-303",
+        rawSubjectName = "DBMS Laboratory",
+        rawSubjectKind = "lab",
+        rawTeacherName = "Mr. Rahul Verma",
+        rawTeacherEmail = "rahul.verma@mitrc.ac.in"
+    )
+)
+
+/**
+ * Placeholder study material for the Notes segment's PDF cards, spread over the subject and
+ * category filters so every chip has something to show.
+ */
+fun samplePdfNotes(): List<PortalPdfNote> = listOf(
+    PortalPdfNote(
+        id = 9001,
+        classSubjectId = 901,
+        subjectName = "Data Structures & Algorithms",
+        subjectCode = "CS-301",
+        title = "Unit 3 - Trees, Heaps & Hashing",
+        description = "Lecture notes covering traversals, BST operations, heap property and collision handling.",
+        category = "notes",
+        driveUrl = "https://drive.google.com/file/d/sample-dsa-unit3/view",
+        teacherName = "Dr. Meena Sharma",
+        createdAt = "2026-10-04T10:30:00+00:00"
+    ),
+    PortalPdfNote(
+        id = 9002,
+        classSubjectId = 902,
+        subjectName = "Operating Systems",
+        subjectCode = "CS-302",
+        title = "Assignment 2 - CPU Scheduling Algorithms",
+        description = "Compare FCFS, SJF, Round Robin and Priority scheduling with solved examples.",
+        category = "assignment",
+        driveUrl = "https://drive.google.com/file/d/sample-os-assign2/view",
+        teacherName = "Dr. Anjali Gupta",
+        createdAt = "2026-10-03T09:15:00+00:00"
+    ),
+    PortalPdfNote(
+        id = 9003,
+        classSubjectId = 903,
+        subjectName = "Database Management Systems",
+        subjectCode = "CS-303",
+        title = "Mid Semester Question Paper 2026",
+        description = "Previous year paper with section-wise marking scheme and important questions.",
+        category = "question_paper",
+        driveUrl = "https://drive.google.com/file/d/sample-dbms-midsem/view",
+        teacherName = "Mr. Rahul Verma",
+        createdAt = "2026-09-28T14:00:00+00:00"
+    ),
+    PortalPdfNote(
+        id = 9004,
+        classSubjectId = 905,
+        subjectName = "DBMS Laboratory",
+        subjectCode = "CSL-303",
+        title = "Lab Manual - SQL & Normalisation Exercises",
+        description = "Step by step instructions for all 12 lab sessions with sample schemas.",
+        category = "lab_manual",
+        driveUrl = "https://drive.google.com/file/d/sample-dbms-labmanual/view",
+        teacherName = "Mr. Rahul Verma",
+        createdAt = "2026-09-25T11:45:00+00:00"
+    ),
+    PortalPdfNote(
+        id = 9005,
+        classSubjectId = 904,
+        subjectName = "Computer Networks",
+        subjectCode = "CS-304",
+        title = "Unit 2 - OSI & TCP/IP Reference Models",
+        description = "Layer by layer notes with diagrams for encapsulation, addressing and routing.",
+        category = "notes",
+        driveUrl = "https://drive.google.com/file/d/sample-cn-unit2/view",
+        teacherName = "Mr. Sandeep Yadav",
+        createdAt = "2026-09-22T16:20:00+00:00"
+    ),
+    PortalPdfNote(
+        id = 9006,
+        classSubjectId = 901,
+        subjectName = "Data Structures & Algorithms",
+        subjectCode = "CS-301",
+        title = "Revised Syllabus & Reference Books",
+        description = "Course structure, internal marks split and the prescribed reference list.",
+        category = "syllabus",
+        driveUrl = "https://drive.google.com/file/d/sample-dsa-syllabus/view",
+        teacherName = "Dr. Meena Sharma",
+        createdAt = "2026-09-15T08:00:00+00:00"
+    )
+)
+
+/** Placeholder entries for the notebook's "Saved notes" list. */
+fun samplePersonalNotes(): List<PortalNote> = listOf(
+    PortalNote(
+        id = 9001,
+        title = "OS unit 2 - CPU scheduling",
+        body = "Revise RR time quantum edge cases before the mid sem."
+    ),
+    PortalNote(
+        id = 9002,
+        title = "DBMS assignment",
+        body = "Normalise the given relation up to BCNF and draw the dependency diagram."
+    ),
+    PortalNote(
+        id = 9003,
+        title = "Lab record",
+        body = "Submit the CN lab record to Mr. Yadav before Friday."
+    )
+)
 
 // ---------------------------------------------------------------------------------------------
 // Skeleton Previews for Cards across Home, Events & Notifications

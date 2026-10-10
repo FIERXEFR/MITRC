@@ -56,6 +56,10 @@ object AdminRepository {
         apiKey = runCatching { context.applicationContext.getString(R.string.google_api_key) }.getOrDefault("")
     }
 
+    suspend fun isAdmin(uid: String?, email: String?): Boolean {
+        return resolveStaffGate(uid, email) is StaffGate.Admin
+    }
+
     suspend fun resolveStaffGate(uid: String?, email: String?): StaffGate {
         val id = uid?.trim().orEmpty()
         val mail = email?.trim().orEmpty().lowercase()
@@ -148,9 +152,50 @@ object AdminRepository {
     }
 
     // --- Creation Helpers ---
+    suspend fun createStudentAccount(entry: StudentEntry): Result<String> {
+        if (!SupabaseManager.isConfigured) return Result.failure(IllegalStateException("Supabase not configured"))
+        val created = createAuthAccount(entry.email, entry.password, entry.name).getOrElse { return Result.failure(it) }
+        val studentRow = StudentRow(
+            uid = created.uid,
+            name = entry.name.blankToNull(),
+            serialNo = entry.serialNo.blankToNull(),
+            fatherName = entry.fatherName.blankToNull(),
+            studentPhoneNo = entry.studentPhoneNo.blankToNull(),
+            fatherPhoneNo = entry.fatherPhoneNo.blankToNull(),
+            studentEmail = entry.email.blankToNull()
+        )
+        val inserted = runCatching {
+            SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.STUDENTS].insert(studentRow)
+        }
+        if (inserted.isFailure) {
+            deleteAuthAccount(created.idToken)
+            return Result.failure(IllegalStateException("DB Failure: ${inserted.exceptionOrNull()?.message}"))
+        }
+        val classId = entry.classId
+        if (classId != null && classId > 0) {
+            val enrollmentRow = EnrollmentRow(
+                studentUid = created.uid,
+                classId = classId,
+                groupId = entry.groupId
+            )
+            runCatching {
+                SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.ENROLLMENTS].insert(enrollmentRow)
+            }
+        }
+        return Result.success(created.uid)
+    }
+
     suspend fun createStaffAccount(entry: StaffEntry): Result<String> =
         createAccountAndRow(entry.email, entry.password, entry.name, SupabaseTableData.Tables.FACULTY_MASTER) { uid ->
-            FacultyMasterRow(firebaseUid = uid, email = entry.email.blankToNull(), name = entry.name.blankToNull(), role = entry.role.blankToNull())
+            FacultyMasterRow(
+                firebaseUid = uid,
+                email = entry.email.blankToNull(),
+                name = entry.name.blankToNull(),
+                phoneNo = entry.phoneNo.blankToNull(),
+                department = entry.department.blankToNull(),
+                designation = entry.designation.blankToNull(),
+                role = entry.role.blankToNull()
+            )
         }
 
     private suspend fun createAccountAndRow(email: String, password: String, name: String, table: String, buildRow: (String) -> Any): Result<String> {
@@ -167,6 +212,7 @@ object AdminRepository {
     suspend fun getCourses(): List<CourseRow> = runCatching { SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.COURSES].select().decodeList<CourseRow>() }.getOrDefault(emptyList())
     suspend fun getBranches(cid: Int): List<BranchRow> = runCatching { SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.BRANCHES].select { filter { eq("course_id", cid) } }.decodeList<BranchRow>() }.getOrDefault(emptyList())
     suspend fun getClasses(): List<ClassRow> = runCatching { SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.CLASSES].select().decodeList<ClassRow>() }.getOrDefault(emptyList())
+    suspend fun getClassesForBranch(bid: Int): List<ClassRow> = runCatching { SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.CLASSES].select { filter { eq("branch_id", bid) } }.decodeList<ClassRow>() }.getOrDefault(emptyList())
     suspend fun getClassGroups(cid: Int): List<ClassGroupRow> = runCatching { SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.CLASS_GROUPS].select { filter { eq("class_id", cid) } }.decodeList<ClassGroupRow>() }.getOrDefault(emptyList())
 
     private data class CreatedAccount(val uid: String, val idToken: String)
@@ -190,5 +236,25 @@ object AdminRepository {
     @Serializable private data class FirebaseErrorBody(val message: String)
 }
 
-data class StudentEntry(val email: String, val password: String, val name: String, val serialNo: String = "", val classId: Int? = null, val groupId: Int? = null)
-data class StaffEntry(val email: String, val password: String, val name: String, val department: String = "", val role: String = "")
+data class StudentEntry(
+    val email: String,
+    val password: String,
+    val name: String,
+    val serialNo: String = "",
+    val fatherName: String = "",
+    val studentPhoneNo: String = "",
+    val fatherPhoneNo: String = "",
+    val classId: Int? = null,
+    val groupId: Int? = null
+)
+
+data class StaffEntry(
+    val email: String,
+    val password: String,
+    val name: String,
+    val department: String = "",
+    val role: String = "",
+    val phoneNo: String = "",
+    val gender: String = "",
+    val designation: String = ""
+)
