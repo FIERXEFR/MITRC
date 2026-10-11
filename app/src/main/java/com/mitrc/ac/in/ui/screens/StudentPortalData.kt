@@ -147,11 +147,12 @@ enum class StudentTab(val label: String, val icon: ImageVector) {
     }
 }
 
-/** Attendance, the weekly timetable and the notebook share one navigation entry. */
+/** Attendance, weekly timetable, study notes and exam results share one navigation entry. */
 enum class ScheduleMode(val label: String) {
     ATTENDANCE("Attendance"),
     TIMETABLE("Timetable"),
-    NOTES("Notes");
+    NOTES("Notes"),
+    EXAMS("Exams Results");
 
     companion object {
         fun fromName(name: String?): ScheduleMode =

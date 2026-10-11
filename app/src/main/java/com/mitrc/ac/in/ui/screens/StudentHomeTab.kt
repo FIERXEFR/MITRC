@@ -135,10 +135,7 @@ fun StudentHomeTab(
                 }
                 Spacer(Modifier.height(14.dp))
 
-                Stagger(1, animateEntrance) { StreakCard(totalPresent = totalAttended) }
-                Spacer(Modifier.height(14.dp))
-
-                Stagger(2, animateEntrance) {
+                Stagger(1, animateEntrance) {
                     OverallAttendanceCard(percent = overallPct, attended = totalAttended, total = totalClasses)
                 }
                 Spacer(Modifier.height(20.dp))
@@ -267,118 +264,9 @@ private fun StatCell(
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Streak
-// ---------------------------------------------------------------------------------------------
 
-@Composable
-private fun StreakCard(totalPresent: Int) {
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = PortalCard,
-        border = androidx.compose.foundation.BorderStroke(1.dp, PortalStroke),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    shape = CircleShape,
-                    color = PortalAmber.copy(alpha = 0.16f),
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Outlined.LocalFireDepartment,
-                            contentDescription = null,
-                            tint = PortalAmber,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
-                Spacer(Modifier.width(14.dp))
-                Column {
-                    Text(
-                        text = "Attendance Streak",
-                        color = PortalTextSecondary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "12 Days",
-                        color = PortalBlue,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                }
-                Spacer(Modifier.weight(1f))
-                Text(
-                    text = "Keep it up!",
-                    color = PortalGreen,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
 
-            Spacer(Modifier.height(16.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                streakDays.forEach { (day, done) ->
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Surface(
-                            shape = CircleShape,
-                            color = if (done) PortalBlue else PortalTrack,
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                if (done) {
-                                    Icon(
-                                        Icons.Outlined.CheckCircle,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .background(PortalTextSecondary.copy(alpha = 0.5f), CircleShape)
-                                    )
-                                }
-                            }
-                        }
-                        Spacer(Modifier.height(5.dp))
-                        Text(text = day, color = PortalTextSecondary, fontSize = 9.5.sp)
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                MiniStat("Current Streak", "12", Modifier.weight(1f))
-                MiniStat("Longest Streak", "21", Modifier.weight(1f))
-                MiniStat("Total Present", "$totalPresent", Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-@Composable
-private fun MiniStat(label: String, value: String, modifier: Modifier = Modifier) {
-    Surface(shape = RoundedCornerShape(12.dp), color = PortalCardAlt, modifier = modifier) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp)) {
-            Text(text = value, color = PortalTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(2.dp))
-            Text(text = label, color = PortalTextSecondary, fontSize = 9.5.sp, maxLines = 1)
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------------------------
 // Overall attendance - donut + weekly bars
