@@ -1210,20 +1210,42 @@ fun StudentSettingsTab(data: StudentPortalData, scroll: ScrollState, onSignedOut
         )
     }
 
-    if (showProfileSheet) {
-        ProfileDetailsSheet(profile = profile, onDismiss = { showProfileSheet = false })
+    PortalSheet(
+        visible = showProfileSheet,
+        onDismiss = { showProfileSheet = false }
+    ) {
+        ProfileDetailsSheet(
+            profile = profile,
+            onDismiss = { showProfileSheet = false }
+        )
     }
 
-    if (showFacultySheet) {
-        ContactFacultySheet(facultyList = data.faculty, onDismiss = { showFacultySheet = false })
+    PortalSheet(
+        visible = showFacultySheet,
+        onDismiss = { showFacultySheet = false }
+    ) {
+        ContactFacultySheet(
+            facultyList = data.faculty,
+            onDismiss = { showFacultySheet = false }
+        )
     }
 
-    if (showCollegeContactsSheet) {
-        CollegeContactsSheet(onDismiss = { showCollegeContactsSheet = false })
+    PortalSheet(
+        visible = showCollegeContactsSheet,
+        onDismiss = { showCollegeContactsSheet = false }
+    ) {
+        CollegeContactsSheet(
+            onDismiss = { showCollegeContactsSheet = false }
+        )
     }
 
-    if (showAboutAppSheet) {
-        AboutAppSheet(onDismiss = { showAboutAppSheet = false })
+    PortalSheet(
+        visible = showAboutAppSheet,
+        onDismiss = { showAboutAppSheet = false }
+    ) {
+        AboutAppSheet(
+            onDismiss = { showAboutAppSheet = false }
+        )
     }
 }
 

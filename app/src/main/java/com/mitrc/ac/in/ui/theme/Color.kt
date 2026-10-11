@@ -16,6 +16,7 @@ val TextSecondary = Color(0xFF64748B)
 val DividerSoft = Color(0xFFE2E8F0)
 val ErrorRed = Color(0xFFDC2626)
 val SuccessGreen = Color(0xFF16A34A)
+val WarningAmber = Gold
 
 val DarkBackground = Color(0xFF0B1220)
 val DarkSurface = Color(0xFF111C33)
