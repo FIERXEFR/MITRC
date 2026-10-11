@@ -167,10 +167,35 @@ object PortalRepository {
             .decodeList<MyTimetableEntryView>()
     }
 
-    suspend fun getPublishedNotes(): Result<List<NoteRow>> = query {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.NOTES]
+    suspend fun getPublishedNotes(): Result<List<VNoteView>> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_NOTES]
             .select { filter { eq("is_visible", true) } }
-            .decodeList<NoteRow>()
+            .decodeList<VNoteView>()
+    }
+
+    suspend fun createNote(note: NoteInsertRow): Result<Unit> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.NOTES]
+            .insert(note)
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Auth & Portals RPCs
+    // -----------------------------------------------------------------------------------------
+
+    suspend fun linkMyFacultyAccount(): Result<Unit> = query {
+        Log.d(TAG, "Calling link_my_faculty_account RPC...")
+        SupabaseManager.requireClient().postgrest.rpc("link_my_faculty_account")
+    }
+
+    suspend fun getMyPortals(): Result<MyPortalsResponse> = query {
+        Log.d(TAG, "Calling my_portals RPC...")
+        val response = SupabaseManager.requireClient().postgrest.rpc("my_portals")
+        // my_portals returns a single row or a list of one row depending on PostgREST version
+        runCatching {
+            response.decodeAs<MyPortalsResponse>()
+        }.getOrElse {
+            response.decodeList<MyPortalsResponse>().firstOrNull() ?: MyPortalsResponse()
+        }
     }
 
     // -----------------------------------------------------------------------------------------
@@ -184,9 +209,9 @@ object PortalRepository {
             .firstOrNull()
     }
 
-    suspend fun getTeacherSubjects(teacherId: Int): Result<List<ClassSubjectView>> = query {
+    suspend fun getTeacherSubjects(facultyId: Int): Result<List<ClassSubjectView>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_SUBJECT_TEACHERS]
-            .select { filter { eq("teacher_id", teacherId) } }
+            .select { filter { eq("faculty_id", facultyId) } }
             .decodeList<ClassSubjectView>()
     }
 
@@ -254,25 +279,37 @@ object PortalRepository {
     }
 
     // -----------------------------------------------------------------------------------------
-    // Coordinator Queries
+    // Coordinator & Mentee Queries
     // -----------------------------------------------------------------------------------------
 
-    suspend fun getCoordinatorProfile(uid: String): Result<FacultyMasterRow?> = query {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
-            .select { 
-                filter { 
-                    eq("firebase_uid", uid) 
-                    eq("is_coordinator", true)
-                } 
-            }
-            .decodeList<FacultyMasterRow>()
-            .firstOrNull()
+    suspend fun getMyCoordinatorClasses(): Result<List<MyCoordinatorClassView>> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_MY_COORDINATOR_CLASSES]
+            .select()
+            .decodeList<MyCoordinatorClassView>()
     }
 
-    suspend fun getCoordinators(): Result<List<FacultyMasterRow>> = query {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
-            .select { filter { eq("is_coordinator", true) } }
-            .decodeList<FacultyMasterRow>()
+    suspend fun getCoordinatorsList(): Result<List<CoordinatorView>> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_COORDINATORS]
+            .select()
+            .decodeList<CoordinatorView>()
+    }
+
+    suspend fun getStaffDirectory(): Result<List<StaffDirectoryView>> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STAFF_DIRECTORY]
+            .select()
+            .decodeList<StaffDirectoryView>()
+    }
+
+    suspend fun getMyMentees(): Result<List<MyMenteeView>> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_MY_MENTEES]
+            .select()
+            .decodeList<MyMenteeView>()
+    }
+
+    suspend fun getMyMenteesAttendance(): Result<List<MyMenteeAttendanceView>> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_MY_MENTEES_ATTENDANCE]
+            .select()
+            .decodeList<MyMenteeAttendanceView>()
     }
 
     suspend fun getTimetables(classId: Int? = null): Result<List<TimetableRow>> = query {

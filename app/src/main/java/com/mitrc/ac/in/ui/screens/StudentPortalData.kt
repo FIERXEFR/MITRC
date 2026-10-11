@@ -227,6 +227,35 @@ fun List<NoteRow>.toPortalPdfNotes(
         }
 }
 
+@JvmName("vNoteViewToPortalPdfNotes")
+fun List<com.mitrc.ac.`in`.data.VNoteView>.toPortalPdfNotes(
+    subjects: List<ClassSubjectView>
+): List<PortalPdfNote> {
+    if (isEmpty()) return emptyList()
+
+    val enrolledBySubjectId = subjects.associateBy { it.classSubjectId }
+
+    return sortedByDescending { it.createdAt.orEmpty() }
+        .mapNotNull { row ->
+            val subject = enrolledBySubjectId[row.classSubjectId]
+            if (!row.isVisible) return@mapNotNull null
+            if (row.title.isBlank() || row.driveUrl.isBlank()) return@mapNotNull null
+
+            PortalPdfNote(
+                id = row.id,
+                classSubjectId = row.classSubjectId,
+                subjectName = row.subjectName.ifBlank { subject?.subjectName ?: "Subject #${row.classSubjectId}" },
+                subjectCode = row.subjectCode.ifBlank { subject?.subjectCode ?: "NOTES" },
+                title = row.title,
+                description = row.description,
+                category = row.category,
+                driveUrl = row.driveUrl,
+                teacherName = row.teacherName?.ifBlank { subject?.teacherName ?: "Faculty" } ?: "Faculty",
+                createdAt = formatNoteDate(row.createdAt)
+            )
+        }
+}
+
 /** `2026-09-20T11:32:00+00:00` -> `20 Sep 2026`; anything unparseable is passed through. */
 private fun formatNoteDate(raw: String?): String {
     val iso = raw?.trim().orEmpty()

@@ -12,38 +12,54 @@ object SupabaseTableData {
     object Tables {
         const val ADMIN_DB = "admin_db"
         const val STUDENTS = "students"
-        const val FACULTY = "faculty"
         const val FACULTY_MASTER = "faculty_master"
+        const val DEPARTMENTS = "departments"
         const val COURSES = "courses"
         const val BRANCHES = "branches"
-        const val SUBJECTS = "subjects"
         const val CLASSES = "classes"
-        const val CLASS_SUBJECTS = "class_subjects"
-        const val CLASS_SUBJECT_TEACHERS = "class_subject_teachers"
         const val CLASS_GROUPS = "class_groups"
+        const val SUBJECTS = "subjects"
+        const val CLASS_SUBJECTS = "class_subjects"
         const val ENROLLMENTS = "enrollments"
-        const val ASSESSMENTS = "assessments"
-        const val MARKS = "marks"
-        const val ATTENDANCE_SESSIONS = "attendance_sessions"
-        const val ATTENDANCE_RECORDS = "attendance_records"
+        const val COURSE_HODS = "course_hods"
+        const val COURSE_COORDINATORS = "course_coordinators"
+        const val CLASS_SUBJECT_TEACHERS = "class_subject_teachers"
+        const val CLASS_MENTORS = "class_mentors"
         const val TIMETABLES = "timetables"
         const val TIMETABLE_PERIODS = "timetable_periods"
         const val TIMETABLE_ENTRIES = "timetable_entries"
+        const val ATTENDANCE_SESSIONS = "attendance_sessions"
+        const val ATTENDANCE_RECORDS = "attendance_records"
+        const val ASSESSMENTS = "assessments"
+        const val MARKS = "marks"
         const val NOTES = "notes"
+        const val APP_UPDATE = "app_update"
     }
 
     object Views {
         const val V_STUDENT_DIRECTORY = "v_student_directory"
         const val V_STUDENT_PROFILES = "v_student_profiles"
         const val V_STUDENT_SUBJECTS = "v_student_subjects"
-        const val V_CLASS_SUBJECTS = "v_class_subjects"
-        const val V_SUBJECT_TEACHERS = "v_subject_teachers"
-        const val V_STAFF_DIRECTORY = "v_staff_directory"
+        const val V_MY_SUBJECT_CARDS = "v_my_subject_cards"
         const val V_ATTENDANCE_SUMMARY = "v_attendance_summary"
         const val V_MARKS = "v_marks"
+        const val V_CLASSES = "v_classes"
+        const val V_CLASS_SUBJECTS = "v_class_subjects"
+        const val V_SUBJECT_TEACHERS = "v_subject_teachers"
+        const val V_NOTES = "v_notes"
         const val V_ACTIVE_TIMETABLES = "v_active_timetables"
         const val V_TIMETABLE_ENTRIES = "v_timetable_entries"
         const val V_MY_TIMETABLE = "v_my_timetable"
+        const val V_FACULTY = "v_faculty"
+        const val V_STAFF_DIRECTORY = "v_staff_directory"
+        const val V_COORDINATORS = "v_coordinators"
+        const val V_COURSE_HODS = "v_course_hods"
+        const val V_CLASS_MENTORS = "v_class_mentors"
+        const val V_MY_MENTOR = "v_my_mentor"
+        const val V_MY_MENTEES = "v_my_mentees"
+        const val V_MY_MENTEES_ATTENDANCE = "v_my_mentees_attendance"
+        const val V_STUDENTS_WITHOUT_MENTOR = "v_students_without_mentor"
+        const val V_MY_COORDINATOR_CLASSES = "v_my_coordinator_classes"
     }
 }
 
@@ -81,12 +97,22 @@ data class FacultyMasterRow(
     @SerialName("id") val id: Int = 0,
     @SerialName("firebase_uid") val firebaseUid: String? = null,
     @SerialName("email") val email: String? = null,
-    @SerialName("name") val name: String? = null,
     @SerialName("phone_no") val phoneNo: String? = null,
-    @SerialName("department") val department: String? = null,
+    @SerialName("title") val title: String? = null,
+    @SerialName("name") val name: String? = null,
     @SerialName("designation") val designation: String? = null,
-    @SerialName("role") val role: String? = null,
-    @SerialName("is_coordinator") val isCoordinator: Boolean = false,
+    @SerialName("department_id") val departmentId: Int? = null,
+    @SerialName("is_active") val isActive: Boolean = true,
+    @SerialName("gender") val gender: String? = null,
+    @SerialName("qualification") val qualification: String? = null,
+    @SerialName("profile_url") val profileUrl: String? = null,
+)
+
+@Serializable
+data class DepartmentRow(
+    @SerialName("id") val id: Int = 0,
+    @SerialName("code") val code: String = "",
+    @SerialName("name") val name: String = "",
 )
 
 @Serializable
@@ -140,6 +166,39 @@ data class EnrollmentRow(
     @SerialName("class_id") val classId: Int,
     @SerialName("enrolled_at") val enrolledAt: String? = null,
     @SerialName("group_id") val groupId: Int? = null,
+)
+
+@Serializable
+data class CourseHodRow(
+    @SerialName("course_id") val courseId: Int,
+    @SerialName("faculty_id") val facultyId: Int,
+)
+
+@Serializable
+data class CourseCoordinatorRow(
+    @SerialName("id") val id: Int = 0,
+    @SerialName("course_id") val courseId: Int,
+    @SerialName("faculty_id") val facultyId: Int,
+    @SerialName("study_year") val studyYear: Int? = null,
+    @SerialName("semester") val semester: Int? = null,
+    @SerialName("is_tb_incharge") val isTbIncharge: Boolean = false,
+    @SerialName("have_rights") val haveRights: Boolean = true,
+    @SerialName("is_active") val isActive: Boolean = true,
+)
+
+@Serializable
+data class ClassSubjectTeacherRow(
+    @SerialName("class_subject_id") val classSubjectId: Int,
+    @SerialName("faculty_id") val facultyId: Int,
+)
+
+@Serializable
+data class ClassMentorRow(
+    @SerialName("id") val id: Int = 0,
+    @SerialName("faculty_id") val facultyId: Int,
+    @SerialName("class_id") val classId: Int,
+    @SerialName("group_id") val groupId: Int? = null,
+    @SerialName("is_active") val isActive: Boolean = true,
 )
 
 @Serializable
@@ -207,13 +266,65 @@ data class TimetableEntryRow(
     @SerialName("end_period") val endPeriod: Int,
     @SerialName("class_subject_id") val classSubjectId: Int,
     @SerialName("group_id") val groupId: Int? = null,
-    @SerialName("teacher_id") val teacherId: Int? = null,
+    @SerialName("faculty_id") val facultyId: Int? = null,
     @SerialName("room") val room: String? = null,
 )
 
+@Serializable
+data class NoteRow(
+    @SerialName("id") val id: Int = 0,
+    @SerialName("class_subject_id") val classSubjectId: Int,
+    @SerialName("group_id") val groupId: Int? = null,
+    @SerialName("title") val title: String,
+    @SerialName("description") val description: String? = null,
+    @SerialName("category") val category: String = "notes",
+    @SerialName("drive_url") val driveUrl: String,
+    @SerialName("faculty_id") val facultyId: Int? = null,
+    @SerialName("uploaded_by") val uploadedBy: String? = null,
+    @SerialName("is_visible") val isVisible: Boolean = true,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null
+)
+
+/** Omit faculty_id and uploaded_by on note inserts; the database fills them. */
+@Serializable
+data class NoteInsertRow(
+    @SerialName("class_subject_id") val classSubjectId: Int,
+    @SerialName("group_id") val groupId: Int? = null,
+    @SerialName("title") val title: String,
+    @SerialName("description") val description: String? = null,
+    @SerialName("category") val category: String = "notes",
+    @SerialName("drive_url") val driveUrl: String,
+    @SerialName("is_visible") val isVisible: Boolean = true,
+)
+
+@Serializable
+data class AppUpdateRow(
+    @SerialName("version_code") val versionCode: Int = 0,
+    @SerialName("version_name") val versionName: String = "",
+    @SerialName("min_version_code") val minVersionCode: Int = 0,
+    @SerialName("apk_url") val apkUrl: String? = null,
+    @SerialName("changelog") val changelog: String? = null,
+    @SerialName("is_mandatory") val isMandatory: Boolean = false,
+)
+
 // ---------------------------------------------------------------------------------------------
-// Row shapes - Views
+// Row shapes - Views & RPC Responses
 // ---------------------------------------------------------------------------------------------
+
+@Serializable
+data class MyPortalsResponse(
+    @SerialName("role") val role: String = "student",
+    @SerialName("is_admin") val isAdmin: Boolean = false,
+    @SerialName("is_student") val isStudent: Boolean = false,
+    @SerialName("is_faculty") val isFaculty: Boolean = false,
+    @SerialName("is_teacher") val isTeacher: Boolean = false,
+    @SerialName("is_mentor") val isMentor: Boolean = false,
+    @SerialName("is_coordinator") val isCoordinator: Boolean = false,
+    @SerialName("is_hod") val isHod: Boolean = false,
+    @SerialName("is_tb_incharge") val isTbIncharge: Boolean = false,
+    @SerialName("faculty_id") val facultyId: Int? = null,
+)
 
 @Serializable
 data class StudentProfileView(
@@ -224,6 +335,7 @@ data class StudentProfileView(
     @SerialName("student_phone_no") val studentPhoneNo: String? = null,
     @SerialName("father_phone_no") val fatherPhoneNo: String? = null,
     @SerialName("student_email") val studentEmail: String? = null,
+    @SerialName("group_id") val groupId: Int? = null,
     @SerialName("group_name") val groupName: String? = null,
     @SerialName("is_locked") val isLocked: Boolean? = null,
     @SerialName("is_ptm") val isPtm: Boolean? = null,
@@ -236,6 +348,18 @@ data class StudentProfileView(
 ) {
     val uid: String get() = studentUid
 }
+
+@Serializable
+data class MyCoordinatorClassView(
+    @SerialName("class_id") val classId: Int,
+    @SerialName("course_id") val courseId: Int,
+    @SerialName("course") val course: String? = null,
+    @SerialName("branch_id") val branchId: Int? = null,
+    @SerialName("branch") val branch: String? = null,
+    @SerialName("semester") val semester: Int,
+    @SerialName("section") val section: String,
+    @SerialName("academic_year") val academicYear: String? = null,
+)
 
 @Serializable
 data class AttendanceSummaryView(
@@ -271,7 +395,8 @@ data class ClassSubjectView(
     @SerialName("name") val rawName: String? = null,
     @SerialName("subject_kind") val rawSubjectKind: String? = null,
     @SerialName("kind") val rawKind: String? = null,
-    @SerialName("teacher_id") val rawTeacherId: Int? = null,
+    @SerialName("faculty_id") val rawFacultyId: Int? = null,
+    @SerialName("teacher_id") val legacyTeacherId: Int? = null,
     @SerialName("teacher_name") val rawTeacherName: String? = null,
     @SerialName("teacher_names") val rawTeacherNames: String? = null,
     @SerialName("teacher_email") val rawTeacherEmail: String? = null,
@@ -282,7 +407,8 @@ data class ClassSubjectView(
     val subjectCode: String get() = rawSubjectCode ?: rawCode ?: "SUB"
     val subjectName: String get() = rawSubjectName ?: rawName ?: "Subject"
     val subjectKind: String get() = rawSubjectKind ?: rawKind ?: "theory"
-    val teacherId: Int get() = rawTeacherId ?: 0
+    val facultyId: Int get() = rawFacultyId ?: legacyTeacherId ?: 0
+    val teacherId: Int get() = facultyId
     val teacherName: String get() = rawTeacherNames ?: rawTeacherName ?: "Faculty Not Assigned"
     val teacherNames: String get() = teacherName
     val teacherEmail: String? get() = rawTeacherEmail
@@ -290,16 +416,25 @@ data class ClassSubjectView(
 }
 
 @Serializable
-data class StaffDirectoryView(
+data class VNoteView(
     @SerialName("id") val id: Int,
-    @SerialName("firebase_uid") val firebaseUid: String? = null,
-    @SerialName("name") val name: String? = null,
-    @SerialName("email") val email: String? = null,
-    @SerialName("phone_no") val phoneNo: String? = null,
-    @SerialName("department") val department: String? = null,
-    @SerialName("designation") val designation: String? = null,
-    @SerialName("is_coordinator") val isCoordinator: Boolean = false,
-    @SerialName("mentor_class_id") val mentorClassId: Int? = null,
+    @SerialName("class_subject_id") val classSubjectId: Int,
+    @SerialName("class_id") val classId: Int,
+    @SerialName("subject_code") val subjectCode: String,
+    @SerialName("subject_name") val subjectName: String,
+    @SerialName("subject_kind") val subjectKind: String,
+    @SerialName("group_id") val groupId: Int? = null,
+    @SerialName("group_name") val groupName: String? = null,
+    @SerialName("title") val title: String,
+    @SerialName("description") val description: String? = null,
+    @SerialName("category") val category: String = "notes",
+    @SerialName("drive_url") val driveUrl: String,
+    @SerialName("faculty_id") val facultyId: Int? = null,
+    @SerialName("teacher_name") val teacherName: String? = null,
+    @SerialName("uploaded_by") val uploadedBy: String? = null,
+    @SerialName("is_visible") val isVisible: Boolean = true,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
 )
 
 @Serializable
@@ -329,6 +464,7 @@ data class TimetableEntryView(
     @SerialName("subject_kind") val subjectKind: String,
     @SerialName("group_id") val groupId: Int? = null,
     @SerialName("group_name") val groupName: String? = null,
+    @SerialName("faculty_id") val facultyId: Int? = null,
     @SerialName("teacher_name") val teacherName: String? = null,
     @SerialName("room") val room: String? = null,
 )
@@ -352,8 +488,139 @@ data class MyTimetableEntryView(
     @SerialName("subject_kind") val subjectKind: String,
     @SerialName("group_id") val groupId: Int? = null,
     @SerialName("group_name") val groupName: String? = null,
+    @SerialName("faculty_id") val facultyId: Int? = null,
     @SerialName("teacher_name") val teacherName: String? = null,
     @SerialName("room") val room: String? = null,
+)
+
+@Serializable
+data class VFacultyView(
+    @SerialName("id") val id: Int,
+    @SerialName("title") val title: String? = null,
+    @SerialName("name") val name: String? = null,
+    @SerialName("display_name") val displayName: String? = null,
+    @SerialName("gender") val gender: String? = null,
+    @SerialName("designation") val designation: String? = null,
+    @SerialName("department_id") val departmentId: Int? = null,
+    @SerialName("department_code") val departmentCode: String? = null,
+    @SerialName("department") val department: String? = null,
+    @SerialName("email") val email: String? = null,
+    @SerialName("phone_no") val phoneNo: String? = null,
+    @SerialName("profile_url") val profileUrl: String? = null,
+    @SerialName("qualification") val qualification: String? = null,
+    @SerialName("is_active") val isActive: Boolean = true,
+    @SerialName("firebase_uid") val firebaseUid: String? = null,
+)
+
+@Serializable
+data class StaffDirectoryView(
+    @SerialName("faculty_id") val facultyId: Int,
+    @SerialName("firebase_uid") val firebaseUid: String? = null,
+    @SerialName("title") val title: String? = null,
+    @SerialName("name") val name: String? = null,
+    @SerialName("display_name") val displayName: String? = null,
+    @SerialName("email") val email: String? = null,
+    @SerialName("phone_no") val phoneNo: String? = null,
+    @SerialName("designation") val designation: String? = null,
+    @SerialName("qualification") val qualification: String? = null,
+    @SerialName("profile_url") val profileUrl: String? = null,
+    @SerialName("department_id") val departmentId: Int? = null,
+    @SerialName("department_code") val departmentCode: String? = null,
+    @SerialName("department_name") val departmentName: String? = null,
+    @SerialName("is_active") val isActive: Boolean = true,
+    @SerialName("mentor_class_id") val mentorClassId: Int? = null,
+    @SerialName("mentor_group_id") val mentorGroupId: Int? = null,
+    @SerialName("is_coordinator") val isCoordinator: Boolean = false,
+    @SerialName("is_hod") val isHod: Boolean = false,
+)
+
+@Serializable
+data class CoordinatorView(
+    @SerialName("id") val id: Int,
+    @SerialName("faculty_id") val facultyId: Int,
+    @SerialName("name") val name: String? = null,
+    @SerialName("email") val email: String? = null,
+    @SerialName("phone_no") val phoneNo: String? = null,
+    @SerialName("designation") val designation: String? = null,
+    @SerialName("department") val department: String? = null,
+    @SerialName("profile_url") val profileUrl: String? = null,
+    @SerialName("have_rights") val haveRights: Boolean = true,
+    @SerialName("is_tbincharge") val isTbIncharge: Boolean = false,
+    @SerialName("course_id") val courseId: Int,
+    @SerialName("course") val course: String? = null,
+    @SerialName("study_year") val studyYear: Int? = null,
+    @SerialName("semester") val semester: Int? = null,
+    @SerialName("role_label") val roleLabel: String? = null,
+)
+
+@Serializable
+data class CourseHodView(
+    @SerialName("course_id") val courseId: Int,
+    @SerialName("course") val course: String? = null,
+    @SerialName("faculty_id") val facultyId: Int,
+    @SerialName("hod_name") val hodName: String? = null,
+    @SerialName("designation") val designation: String? = null,
+    @SerialName("email") val email: String? = null,
+    @SerialName("phone_no") val phoneNo: String? = null,
+    @SerialName("profile_url") val profileUrl: String? = null,
+)
+
+@Serializable
+data class ClassMentorView(
+    @SerialName("id") val id: Int,
+    @SerialName("faculty_id") val facultyId: Int,
+    @SerialName("mentor_title") val mentorTitle: String? = null,
+    @SerialName("mentor_name") val mentorName: String? = null,
+    @SerialName("designation") val designation: String? = null,
+    @SerialName("email") val email: String? = null,
+    @SerialName("phone_no") val phoneNo: String? = null,
+    @SerialName("profile_url") val profileUrl: String? = null,
+    @SerialName("class_id") val classId: Int,
+    @SerialName("course") val course: String? = null,
+    @SerialName("branch") val branch: String? = null,
+    @SerialName("semester") val semester: Int,
+    @SerialName("section") val section: String,
+    @SerialName("academic_year") val academicYear: String? = null,
+    @SerialName("group_id") val groupId: Int? = null,
+    @SerialName("group_name") val groupName: String? = null,
+    @SerialName("is_active") val isActive: Boolean = true,
+    @SerialName("assigned_at") val assignedAt: String? = null,
+    @SerialName("ended_at") val endedAt: String? = null,
+)
+
+@Serializable
+data class MyMenteeView(
+    @SerialName("student_uid") val studentUid: String,
+    @SerialName("name") val name: String? = null,
+    @SerialName("serial_no") val serialNo: String? = null,
+    @SerialName("father_name") val fatherName: String? = null,
+    @SerialName("student_phone_no") val studentPhoneNo: String? = null,
+    @SerialName("father_phone_no") val fatherPhoneNo: String? = null,
+    @SerialName("student_email") val studentEmail: String? = null,
+    @SerialName("is_ptm") val isPtm: Boolean? = null,
+    @SerialName("is_locked") val isLocked: Boolean? = null,
+    @SerialName("class_id") val classId: Int,
+    @SerialName("course") val course: String? = null,
+    @SerialName("branch") val branch: String? = null,
+    @SerialName("semester") val semester: Int,
+    @SerialName("section") val section: String,
+    @SerialName("academic_year") val academicYear: String? = null,
+    @SerialName("group_id") val groupId: Int? = null,
+    @SerialName("group_name") val groupName: String? = null,
+    @SerialName("class_mentor_id") val classMentorId: Int? = null,
+)
+
+@Serializable
+data class MyMenteeAttendanceView(
+    @SerialName("student_uid") val studentUid: String,
+    @SerialName("name") val name: String? = null,
+    @SerialName("serial_no") val serialNo: String? = null,
+    @SerialName("class_id") val classId: Int,
+    @SerialName("group_id") val groupId: Int? = null,
+    @SerialName("group_name") val groupName: String? = null,
+    @SerialName("attended") val attended: Long,
+    @SerialName("total") val total: Long,
+    @SerialName("percentage") val percentage: Double,
 )
 
 // ---------------------------------------------------------------------------------------------
@@ -364,22 +631,6 @@ data class MyTimetableEntryView(
 data class TakeAttendanceRecord(
     @SerialName("uid") val uid: String,
     @SerialName("status") val status: String, // 'P'|'A'|'L'|'OD'
-)
-
-@Serializable
-data class NoteRow(
-    @SerialName("id") val id: Int = 0,
-    @SerialName("class_subject_id") val classSubjectId: Int,
-    @SerialName("group_id") val groupId: Int? = null,
-    @SerialName("title") val title: String,
-    @SerialName("description") val description: String? = null,
-    @SerialName("category") val category: String = "notes",
-    @SerialName("drive_url") val driveUrl: String,
-    @SerialName("teacher_id") val teacherId: Int,
-    @SerialName("uploaded_by") val uploadedBy: String? = null,
-    @SerialName("is_visible") val isVisible: Boolean = true,
-    @SerialName("created_at") val createdAt: String? = null,
-    @SerialName("updated_at") val updatedAt: String? = null
 )
 
 typealias StudentDirectoryView = StudentProfileView

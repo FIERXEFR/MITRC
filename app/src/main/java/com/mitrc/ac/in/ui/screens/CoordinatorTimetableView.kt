@@ -71,7 +71,9 @@ fun CoordinatorTimetableView(userUid: String) {
     val scope = rememberCoroutineScope()
 
     var loading by remember { mutableStateOf(true) }
-    var coordinator by remember { mutableStateOf<FacultyMasterRow?>(null) }
+    var isCoordinatorAllowed by remember { mutableStateOf(false) }
+    var coordinatorProfile by remember { mutableStateOf<FacultyMasterRow?>(null) }
+    var ruledClasses by remember { mutableStateOf<List<com.mitrc.ac.`in`.data.MyCoordinatorClassView>>(emptyList()) }
     var timetables by remember { mutableStateOf<List<TimetableRow>>(emptyList()) }
     var selectedTimetable by remember { mutableStateOf<TimetableRow?>(null) }
 
@@ -87,13 +89,21 @@ fun CoordinatorTimetableView(userUid: String) {
 
     LaunchedEffect(userUid) {
         loading = true
-        val cRes = PortalRepository.getCoordinatorProfile(userUid)
-        coordinator = cRes.getOrNull()
+        val portals = PortalRepository.getMyPortals().getOrNull()
+        isCoordinatorAllowed = portals?.isCoordinator == true || portals?.isAdmin == true
 
-        val ttRes = PortalRepository.getTimetables()
-        timetables = ttRes.getOrDefault(emptyList())
-        if (timetables.isNotEmpty()) {
-            selectedTimetable = timetables.first()
+        if (isCoordinatorAllowed) {
+            val profRes = PortalRepository.getTeacherProfile(userUid)
+            coordinatorProfile = profRes.getOrNull()
+
+            val classesRes = PortalRepository.getMyCoordinatorClasses()
+            ruledClasses = classesRes.getOrDefault(emptyList())
+
+            val ttRes = PortalRepository.getTimetables()
+            timetables = ttRes.getOrDefault(emptyList())
+            if (timetables.isNotEmpty()) {
+                selectedTimetable = timetables.first()
+            }
         }
         loading = false
     }
@@ -125,8 +135,7 @@ fun CoordinatorTimetableView(userUid: String) {
         return
     }
 
-    val coord = coordinator
-    if (coord == null || !coord.isCoordinator) {
+    if (!isCoordinatorAllowed) {
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
@@ -141,7 +150,7 @@ fun CoordinatorTimetableView(userUid: String) {
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "Your account does not have active coordinator rights. Contact admin.",
+                    text = "Your account does not have active coordinator rights in course_coordinators. Contact admin.",
                     fontSize = 13.sp,
                     color = TextSecondary
                 )
@@ -378,15 +387,12 @@ fun CoordinatorTimetableView(userUid: String) {
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column {
-                        Text(text = coord.name ?: "Coordinator", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text(text = coordinatorProfile?.name ?: "Course Coordinator", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                         Text(
-                            text = "Coordinator",
+                            text = coordinatorProfile?.designation ?: "Coordinator",
                             fontSize = 11.sp,
                             color = TextSecondary
                         )
-                    }
-                    if (!coord.department.isNullOrBlank()) {
-                        Text(text = coord.department.orEmpty(), fontSize = 12.sp, color = Navy, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }

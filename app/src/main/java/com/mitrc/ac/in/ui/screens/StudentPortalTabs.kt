@@ -1137,35 +1137,35 @@ fun StudentSettingsTab(data: StudentPortalData, scroll: ScrollState, onSignedOut
 
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             SettingsOptionCard(
-                title = "1. My Profile",
+                title = "My Profile",
                 subtitle = "View personal & academic details",
                 icon = Icons.Outlined.Person,
                 onClick = { showProfileSheet = true }
             )
 
             SettingsOptionCard(
-                title = "2. Contact Assigned Faculty",
+                title = "Contact Assigned Faculty",
                 subtitle = "Course teachers & contact details",
                 icon = Icons.Outlined.School,
                 onClick = { showFacultySheet = true }
             )
 
             SettingsOptionCard(
-                title = "3. College Contacts",
+                title = "College Contacts",
                 subtitle = "Official phone numbers & email addresses",
                 icon = Icons.Outlined.Phone,
                 onClick = { showCollegeContactsSheet = true }
             )
 
             SettingsOptionCard(
-                title = "4. About MITRC App",
+                title = "About MITRC App",
                 subtitle = "App version, platform & details",
                 icon = Icons.Outlined.Info,
                 onClick = { showAboutAppSheet = true }
             )
 
             SettingsOptionCard(
-                title = "5. Check for Update",
+                title = "Check for Update",
                 subtitle = updateStatusText ?: "Check for latest app release",
                 icon = Icons.Outlined.Refresh,
                 onClick = {
@@ -1186,7 +1186,7 @@ fun StudentSettingsTab(data: StudentPortalData, scroll: ScrollState, onSignedOut
             },
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = PortalRose,
+                containerColor = PortalBlue,
                 contentColor = Color.White
             ),
             modifier = Modifier

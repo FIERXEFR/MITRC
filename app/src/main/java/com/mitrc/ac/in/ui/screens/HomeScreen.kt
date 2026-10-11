@@ -37,21 +37,39 @@ fun HomeScreen(onSignedOut: () -> Unit) {
             return@LaunchedEffect
         }
 
-        // 1. Check for Student Profile
+        // 1. If faculty, link Firebase account to faculty_master by verified email (ignore error for students/admins)
+        runCatching {
+            PortalRepository.linkMyFacultyAccount()
+        }
+
+        // 2. Fetch my_portals RPC to inspect all role flags
+        val portals = PortalRepository.getMyPortals().getOrNull()
+
+        if (portals != null) {
+            when {
+                portals.isCoordinator -> {
+                    resolvedRole = StaffRole.COORDINATOR
+                    return@LaunchedEffect
+                }
+                portals.isTeacher || portals.isFaculty || portals.isMentor || portals.isHod -> {
+                    resolvedRole = StaffRole.TEACHER
+                    return@LaunchedEffect
+                }
+                portals.isStudent -> {
+                    resolvedRole = StaffRole.STUDENT
+                    return@LaunchedEffect
+                }
+            }
+        }
+
+        // 3. Fallback: Check for Student Profile directly
         val student = PortalRepository.getStudentProfile(userUid).getOrNull()
         if (student != null) {
             resolvedRole = StaffRole.STUDENT
             return@LaunchedEffect
         }
 
-        // 2. Check for Teacher/Coordinator Profile in Faculty Master
-        val faculty = PortalRepository.getTeacherProfile(userUid).getOrNull()
-        if (faculty != null) {
-            resolvedRole = if (faculty.isCoordinator) StaffRole.COORDINATOR else StaffRole.TEACHER
-            return@LaunchedEffect
-        }
-
-        // Fallback or No profile found
+        // Fallback or No profile found: Student portal
         resolvedRole = StaffRole.STUDENT 
     }
 

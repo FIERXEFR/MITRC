@@ -10,6 +10,7 @@ import com.mitrc.ac.`in`.data.ClassRow
 import com.mitrc.ac.`in`.data.CourseRow
 import com.mitrc.ac.`in`.data.EnrollmentRow
 import com.mitrc.ac.`in`.data.FacultyMasterRow
+import com.mitrc.ac.`in`.data.PortalRepository
 import com.mitrc.ac.`in`.data.StudentRow
 import com.mitrc.ac.`in`.data.SupabaseManager
 import com.mitrc.ac.`in`.data.SupabaseTableData
@@ -107,7 +108,25 @@ object AdminRepository {
             return StaffGate.Admin
         }
 
-        // 2. Check Faculty Master
+        // 2. Check Faculty Master & Portals
+        Log.d(TAG, "Linking faculty account via link_my_faculty_account RPC...")
+        runCatching {
+            PortalRepository.linkMyFacultyAccount()
+        }.onFailure {
+            Log.w(TAG, "link_my_faculty_account note: ${it.message}")
+        }
+
+        // Call my_portals to verify faculty roles
+        val portalsRes = PortalRepository.getMyPortals()
+        if (portalsRes.isSuccess) {
+            val portals = portalsRes.getOrThrow()
+            if (portals.isFaculty || portals.isTeacher || portals.isCoordinator || portals.isHod || portals.isMentor) {
+                Log.i(TAG, "Staff resolution: SUCCESS via my_portals (isCoordinator=${portals.isCoordinator}, isTeacher=${portals.isTeacher})")
+                return StaffGate.Staff
+            }
+        }
+
+        // Fallback: Check faculty_master directly
         Log.d(TAG, "Probing faculty_master for staff record...")
         val facultyRows = try {
             client.postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
@@ -121,22 +140,13 @@ object AdminRepository {
                 }
                 .decodeList<FacultyMasterRow>()
         } catch (e: Exception) {
-            Log.e(TAG, "CRITICAL: faculty_master query failed. Is Supabase JWT Issuer set to Firebase?", e)
-            throw e 
+            Log.e(TAG, "faculty_master query failed", e)
+            emptyList()
         }
 
-        Log.d(TAG, "faculty_master query returned ${facultyRows.size} matches")
         val matchingStaff = facultyRows.firstOrNull()
-
         if (matchingStaff != null) {
             Log.i(TAG, "Staff resolution: SUCCESS (Faculty: ${matchingStaff.name})")
-            if (id.isNotEmpty() && matchingStaff.firebaseUid.isNullOrEmpty()) {
-                Log.i(TAG, "Linking missing Firebase UID $id to email $mail")
-                runCatching {
-                    client.postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
-                        .update({ set("firebase_uid", id) }) { filter { ilike("email", matchingStaff.email ?: mail) } }
-                }
-            }
             return StaffGate.Staff
         }
 
@@ -192,9 +202,8 @@ object AdminRepository {
                 email = entry.email.blankToNull(),
                 name = entry.name.blankToNull(),
                 phoneNo = entry.phoneNo.blankToNull(),
-                department = entry.department.blankToNull(),
                 designation = entry.designation.blankToNull(),
-                role = entry.role.blankToNull()
+                gender = entry.gender.blankToNull()
             )
         }
 

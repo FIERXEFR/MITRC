@@ -3,11 +3,14 @@ package com.mitrc.ac.`in`.ui.screens
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.gestures.Orientation
@@ -190,6 +193,7 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
     // Reloadable: a transient failure (e.g. a token that expired mid-session) can be retried
     // from the error screen instead of leaving the user stranded.
     var reloadKey by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(userUid, reloadKey) {
         data = null
@@ -200,6 +204,25 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
     // instead of blanking out to the full-screen loading skeleton.
     val refreshData: suspend () -> Unit = {
         data = loadPortalData(userUid)
+    }
+
+    val pagerState = rememberPagerState(
+        initialPage = StudentTab.entries.indexOf(tab).coerceAtLeast(0),
+        pageCount = { StudentTab.entries.size }
+    )
+
+    LaunchedEffect(tab) {
+        val targetIndex = StudentTab.entries.indexOf(tab)
+        if (pagerState.currentPage != targetIndex) {
+            pagerState.animateScrollToPage(targetIndex, animationSpec = tween(300, easing = FastOutSlowInEasing))
+        }
+    }
+
+    LaunchedEffect(pagerState.currentPage) {
+        val newTab = StudentTab.entries.getOrElse(pagerState.currentPage) { StudentTab.HOME }
+        if (newTab.name != tabName) {
+            tabName = newTab.name
+        }
     }
 
     Box(
@@ -240,20 +263,11 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
                         PortalNoProfileState()
                     }
                 } else {
-                    AnimatedContent(
-                        targetState = tab,
-                        // The outgoing tab has to be gone *before* the incoming one turns visible.
-                        // Fading both at once (160ms out / 320ms in) left the previous tab's cards
-                        // drawn at partial alpha under the new ones - a ghost card behind every card.
-                        // 120ms out, then the new content fades in over it.
-                        transitionSpec = {
-                            fadeIn(tween(280, delayMillis = 120))
-                                .togetherWith(fadeOut(tween(120)))
-                        },
-                        modifier = Modifier.fillMaxSize(),
-                        label = "studentTabSwitch"
-                    ) { active ->
-                        when (active) {
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize()
+                    ) { page ->
+                        when (StudentTab.entries[page]) {
                             StudentTab.HOME -> StudentHomeTab(
                                 data = current,
                                 scroll = homeScroll,
@@ -261,6 +275,9 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
                                 onNavigate = { nextTab, mode ->
                                     if (mode != null) scheduleModeName = mode.name
                                     tabName = nextTab.name
+                                    scope.launch {
+                                        pagerState.animateScrollToPage(StudentTab.entries.indexOf(nextTab), animationSpec = tween(300, easing = FastOutSlowInEasing))
+                                    }
                                 }
                             )
 
@@ -287,7 +304,12 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
 
             StudentBottomBar(
                 selected = tab,
-                onSelect = { tabName = it.name }
+                onSelect = { selectedTab ->
+                    tabName = selectedTab.name
+                    scope.launch {
+                        pagerState.animateScrollToPage(StudentTab.entries.indexOf(selectedTab), animationSpec = tween(300, easing = FastOutSlowInEasing))
+                    }
+                }
             )
         }
 
