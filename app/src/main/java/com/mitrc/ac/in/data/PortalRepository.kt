@@ -312,6 +312,35 @@ object PortalRepository {
             .decodeList<MyMenteeAttendanceView>()
     }
 
+    /**
+     * Query students across specified class IDs (from v_my_coordinator_classes).
+     * Returns student directory records belonging only to the coordinator's ruled scope.
+     */
+    suspend fun getStudentsForClasses(classIds: List<Int>): Result<List<StudentProfileView>> = query {
+        if (classIds.isEmpty()) return@query emptyList()
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_DIRECTORY]
+            .select {
+                filter {
+                    isIn("class_id", classIds)
+                }
+            }
+            .decodeList<StudentProfileView>()
+    }
+
+    suspend fun updateStudentLockStatus(studentUid: String, isLocked: Boolean): Result<Unit> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.STUDENTS]
+            .update({ set("is_locked", isLocked) }) {
+                filter { eq("uid", studentUid) }
+            }
+    }
+
+    suspend fun updateStudentPtmStatus(studentUid: String, isPtm: Boolean): Result<Unit> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.STUDENTS]
+            .update({ set("is_ptm", isPtm) }) {
+                filter { eq("uid", studentUid) }
+            }
+    }
+
     suspend fun getTimetables(classId: Int? = null): Result<List<TimetableRow>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.TIMETABLES]
             .select {
