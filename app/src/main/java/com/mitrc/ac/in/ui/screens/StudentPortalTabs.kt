@@ -3,7 +3,11 @@ package com.mitrc.ac.`in`.ui.screens
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -12,6 +16,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
@@ -61,6 +69,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -76,6 +85,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
@@ -90,6 +100,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.mitrc.ac.`in`.auth.AuthRepository
 import com.mitrc.ac.`in`.data.*
@@ -130,6 +142,29 @@ fun StudentScheduleTab(
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
+    val schedulePagerState = rememberPagerState(
+        initialPage = ScheduleMode.entries.indexOf(mode).coerceAtLeast(0),
+        pageCount = { ScheduleMode.entries.size }
+    )
+
+    LaunchedEffect(mode) {
+        val targetIdx = ScheduleMode.entries.indexOf(mode)
+        if (schedulePagerState.currentPage != targetIdx && !schedulePagerState.isScrollInProgress) {
+            schedulePagerState.animateScrollToPage(targetIdx, animationSpec = tween(300, easing = FastOutSlowInEasing))
+        }
+    }
+
+    LaunchedEffect(schedulePagerState) {
+        snapshotFlow { schedulePagerState.settledPage }
+            .distinctUntilChanged()
+            .collect { page ->
+                val newMode = ScheduleMode.entries.getOrElse(page) { ScheduleMode.ATTENDANCE }
+                if (newMode.name != mode.name) {
+                    onModeChange(newMode)
+                }
+            }
+    }
+
     PullToRefreshBox(
         isRefreshing = isRefreshing,
         onRefresh = {
@@ -145,29 +180,39 @@ fun StudentScheduleTab(
         },
         modifier = Modifier.fillMaxSize()
     ) {
-        PortalTabScaffold(scroll = scroll) {
-            ScheduleSegmentedControl(mode = mode, onModeChange = onModeChange)
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp, vertical = 18.dp)
+        ) {
+            ScheduleSegmentedControl(
+                mode = mode,
+                onModeChange = { selectedMode ->
+                    onModeChange(selectedMode)
+                    scope.launch {
+                        schedulePagerState.animateScrollToPage(
+                            ScheduleMode.entries.indexOf(selectedMode),
+                            animationSpec = tween(300, easing = FastOutSlowInEasing)
+                        )
+                    }
+                }
+            )
             Spacer(Modifier.height(18.dp))
 
-            AnimatedContent(
-                targetState = mode,
-                transitionSpec = {
-                    if (targetState.ordinal > initialState.ordinal) {
-                        (slideInHorizontally(tween(280)) { it } + fadeIn(tween(280)))
-                            .togetherWith(slideOutHorizontally(tween(200)) { -it } + fadeOut(tween(200)))
-                    } else {
-                        (slideInHorizontally(tween(280)) { -it } + fadeIn(tween(280)))
-                            .togetherWith(slideOutHorizontally(tween(200)) { it } + fadeOut(tween(200)))
+            HorizontalPager(
+                state = schedulePagerState,
+                beyondViewportPageCount = 1,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) { page ->
+                Column(modifier = Modifier.fillMaxSize().verticalScroll(scroll)) {
+                    when (ScheduleMode.entries[page]) {
+                        ScheduleMode.ATTENDANCE -> AttendanceContent(data = data)
+                        ScheduleMode.TIMETABLE -> TimetableContent(data = data)
+                        ScheduleMode.NOTES -> NotesContent(data = data, notes = notes)
+                        ScheduleMode.EXAMS -> ExamsResultsContent(data = data)
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                label = "scheduleModeTransition"
-            ) { targetMode ->
-                when (targetMode) {
-                    ScheduleMode.ATTENDANCE -> AttendanceContent(data = data)
-                    ScheduleMode.TIMETABLE -> TimetableContent(data = data)
-                    ScheduleMode.NOTES -> NotesContent(data = data, notes = notes)
-                    ScheduleMode.EXAMS -> ExamsResultsContent(data = data)
                 }
             }
         }
@@ -1043,6 +1088,9 @@ fun StudentSettingsTab(data: StudentPortalData, scroll: ScrollState, onSignedOut
     var showCollegeContactsSheet by remember { mutableStateOf(false) }
     var showAboutAppSheet by remember { mutableStateOf(false) }
     var updateStatusText by remember { mutableStateOf<String?>(null) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
+    var signingOut by remember { mutableStateOf(false) }
+    var signOutComplete by remember { mutableStateOf(false) }
 
     PortalTabScaffold(scroll = scroll) {
         // --- 1. PROFILE HEADER CARD (Matching Image 2 in Prompt) ---
@@ -1178,12 +1226,7 @@ fun StudentSettingsTab(data: StudentPortalData, scroll: ScrollState, onSignedOut
 
         // --- 3. SIGN OUT BUTTON ---
         Button(
-            onClick = {
-                scope.launch {
-                    AuthRepository.signOut()
-                    onSignedOut()
-                }
-            },
+            onClick = { showLogoutDialog = true },
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = PortalBlue,
@@ -1246,6 +1289,172 @@ fun StudentSettingsTab(data: StudentPortalData, scroll: ScrollState, onSignedOut
         AboutAppSheet(
             onDismiss = { showAboutAppSheet = false }
         )
+    }
+
+    if (showLogoutDialog) {
+        LogoutConfirmDialog(
+            signingOut = signingOut,
+            signOutComplete = signOutComplete,
+            onConfirm = {
+                signingOut = true
+                scope.launch {
+                    AuthRepository.signOut()
+                    delay(250)
+                    signOutComplete = true
+                }
+            },
+            onDismiss = { if (!signingOut) showLogoutDialog = false },
+            onExitAnimated = onSignedOut
+        )
+    }
+}
+
+@Composable
+private fun LogoutConfirmDialog(
+    signingOut: Boolean,
+    signOutComplete: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    onExitAnimated: () -> Unit
+) {
+    var visible by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { visible = true }
+
+    // Once sign-out is done, play the dialog's scale-down/fade exit before the screen swaps.
+    LaunchedEffect(signOutComplete) {
+        if (signOutComplete) {
+            visible = false
+            delay(200)
+            onExitAnimated()
+        }
+    }
+
+    val animateOutThenDismiss: () -> Unit = {
+        visible = false
+        scope.launch { delay(190); onDismiss() }
+    }
+
+    Dialog(
+        onDismissRequest = { if (!signingOut) animateOutThenDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.45f))
+                .padding(horizontal = 36.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            AnimatedVisibility(
+                visible = visible,
+                enter = scaleIn(
+                    initialScale = 0.88f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                ) + fadeIn(tween(220, easing = FastOutSlowInEasing)),
+                exit = scaleOut(
+                    targetScale = 0.92f,
+                    animationSpec = tween(170, easing = FastOutSlowInEasing)
+                ) + fadeOut(tween(150))
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(26.dp),
+                    color = PortalCard,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(60.dp)
+                                .clip(CircleShape)
+                                .background(Brush.linearGradient(listOf(NavySoft, NavyDeep))),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Outlined.Logout,
+                                contentDescription = null,
+                                tint = GoldLight,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+
+                        Text(
+                            text = "Sign Out?",
+                            color = PortalTextPrimary,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+
+                        Spacer(Modifier.height(8.dp))
+
+                        Text(
+                            text = "You'll be signed out of your portal.\nYou can sign back in anytime.",
+                            color = PortalTextSecondary,
+                            fontSize = 13.5.sp,
+                            lineHeight = 19.sp,
+                            textAlign = TextAlign.Center
+                        )
+
+                        Spacer(Modifier.height(24.dp))
+
+                        if (signingOut) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(
+                                    color = PortalBlue,
+                                    strokeWidth = 2.5.dp,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Text(
+                                    text = "Signing out...",
+                                    color = PortalTextSecondary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = animateOutThenDismiss,
+                                    shape = RoundedCornerShape(14.dp),
+                                    border = BorderStroke(1.dp, PortalStroke),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = PortalTextPrimary),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                ) {
+                                    Text("Cancel", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                }
+                                Button(
+                                    onClick = onConfirm,
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = PortalBlue,
+                                        contentColor = Color.White
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                ) {
+                                    Text("Sign Out", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

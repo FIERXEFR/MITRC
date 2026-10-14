@@ -11,6 +11,8 @@ import com.mitrc.ac.`in`.data.CourseRow
 import com.mitrc.ac.`in`.data.EnrollmentRow
 import com.mitrc.ac.`in`.data.FacultyMasterRow
 import com.mitrc.ac.`in`.data.PortalRepository
+import com.mitrc.ac.`in`.data.StaffDbRow
+import com.mitrc.ac.`in`.data.StaffDirectoryView
 import com.mitrc.ac.`in`.data.StudentRow
 import com.mitrc.ac.`in`.data.SupabaseManager
 import com.mitrc.ac.`in`.data.SupabaseTableData
@@ -78,21 +80,28 @@ object AdminRepository {
 
     private suspend fun resolveStaffGateOnce(id: String, mail: String): StaffGate {
         val client = SupabaseManager.requireClient()
+        Log.d(TAG, "Resolving staff gate for UID: '$id', Email: '$mail'")
 
-        // 1. Check Admin Table
+        // 1. Check Admin Table (admin_db)
         val adminRows = try {
             client.postgrest[SupabaseTableData.Tables.ADMIN_DB]
                 .select {
                     filter {
-                        or {
-                            if (id.isNotEmpty()) eq("uid", id)
-                            if (mail.isNotEmpty()) ilike("email", mail)
+                        if (id.isNotEmpty() && mail.isNotEmpty()) {
+                            or {
+                                eq("uid", id)
+                                ilike("email", mail)
+                            }
+                        } else if (id.isNotEmpty()) {
+                            eq("uid", id)
+                        } else if (mail.isNotEmpty()) {
+                            ilike("email", mail)
                         }
                     }
                 }
                 .decodeList<AdminDbRow>()
         } catch (e: Exception) {
-            Log.w(TAG, "Admin table check skipped/failed: ${e.message}")
+            Log.w(TAG, "admin_db check skipped/failed: ${e.message}")
             emptyList()
         }
 
@@ -102,13 +111,13 @@ object AdminRepository {
             if (id.isNotEmpty() && !matchingAdmin.uid.equals(id, ignoreCase = true)) {
                 runCatching {
                     client.postgrest[SupabaseTableData.Tables.ADMIN_DB]
-                        .update({ set("uid", id) }) { filter { eq("email", matchingAdmin.email ?: mail) } }
+                        .update({ set("uid", id) }) { filter { ilike("email", matchingAdmin.email ?: mail) } }
                 }
             }
             return StaffGate.Admin
         }
 
-        // 2. Check Faculty Master & Portals
+        // 2. Link faculty account via RPC
         Log.d(TAG, "Linking faculty account via link_my_faculty_account RPC...")
         runCatching {
             PortalRepository.linkMyFacultyAccount()
@@ -116,7 +125,7 @@ object AdminRepository {
             Log.w(TAG, "link_my_faculty_account note: ${it.message}")
         }
 
-        // Call my_portals to verify faculty roles
+        // 3. Call my_portals RPC to verify faculty / teacher / coordinator / hod / mentor roles
         val portalsRes = PortalRepository.getMyPortals()
         if (portalsRes.isSuccess) {
             val portals = portalsRes.getOrThrow()
@@ -126,31 +135,145 @@ object AdminRepository {
             }
         }
 
-        // Fallback: Check faculty_master directly
-        Log.d(TAG, "Probing faculty_master for staff record...")
+        // 4. Probing faculty table directly
+        Log.d(TAG, "Probing faculty table for staff record...")
         val facultyRows = try {
-            client.postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
+            client.postgrest[SupabaseTableData.Tables.FACULTY]
                 .select {
                     filter {
-                        or {
-                            if (id.isNotEmpty()) eq("firebase_uid", id)
-                            if (mail.isNotEmpty()) ilike("email", mail)
+                        if (id.isNotEmpty() && mail.isNotEmpty()) {
+                            or {
+                                eq("firebase_uid", id)
+                                ilike("email", mail)
+                            }
+                        } else if (id.isNotEmpty()) {
+                            eq("firebase_uid", id)
+                        } else if (mail.isNotEmpty()) {
+                            ilike("email", mail)
                         }
                     }
                 }
                 .decodeList<FacultyMasterRow>()
         } catch (e: Exception) {
-            Log.e(TAG, "faculty_master query failed", e)
+            Log.w(TAG, "faculty table query skipped/failed: ${e.message}")
             emptyList()
         }
 
-        val matchingStaff = facultyRows.firstOrNull()
-        if (matchingStaff != null) {
-            Log.i(TAG, "Staff resolution: SUCCESS (Faculty: ${matchingStaff.name})")
+        val matchingFaculty = facultyRows.firstOrNull()
+        if (matchingFaculty != null) {
+            Log.i(TAG, "Staff resolution: SUCCESS (Faculty: ${matchingFaculty.name})")
+            if (id.isNotEmpty() && matchingFaculty.firebaseUid.isNullOrEmpty() && mail.isNotEmpty()) {
+                runCatching {
+                    client.postgrest[SupabaseTableData.Tables.FACULTY]
+                        .update({ set("firebase_uid", id) }) { filter { ilike("email", mail) } }
+                }
+            }
             return StaffGate.Staff
         }
 
-        Log.w(TAG, "Staff resolution: FAILED (No matching record for Email: $mail)")
+        // 5. Probing v_staff_directory view
+        Log.d(TAG, "Probing v_staff_directory view...")
+        val staffDirRows = try {
+            client.postgrest[SupabaseTableData.Views.V_STAFF_DIRECTORY]
+                .select {
+                    filter {
+                        if (id.isNotEmpty() && mail.isNotEmpty()) {
+                            or {
+                                eq("firebase_uid", id)
+                                ilike("email", mail)
+                            }
+                        } else if (id.isNotEmpty()) {
+                            eq("firebase_uid", id)
+                        } else if (mail.isNotEmpty()) {
+                            ilike("email", mail)
+                        }
+                    }
+                }
+                .decodeList<StaffDirectoryView>()
+        } catch (e: Exception) {
+            Log.w(TAG, "v_staff_directory query skipped/failed: ${e.message}")
+            emptyList()
+        }
+
+        val matchingStaffDir = staffDirRows.firstOrNull()
+        if (matchingStaffDir != null) {
+            Log.i(TAG, "Staff resolution: SUCCESS (Staff Directory: ${matchingStaffDir.name})")
+            if (id.isNotEmpty() && mail.isNotEmpty()) {
+                runCatching {
+                    client.postgrest[SupabaseTableData.Tables.FACULTY]
+                        .update({ set("firebase_uid", id) }) { filter { ilike("email", mail) } }
+                }
+            }
+            return StaffGate.Staff
+        }
+
+        // 6. Probing faculty_master table as fallback
+        Log.d(TAG, "Probing faculty_master table...")
+        val facultyMasterRows = try {
+            client.postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
+                .select {
+                    filter {
+                        if (id.isNotEmpty() && mail.isNotEmpty()) {
+                            or {
+                                eq("firebase_uid", id)
+                                ilike("email", mail)
+                            }
+                        } else if (id.isNotEmpty()) {
+                            eq("firebase_uid", id)
+                        } else if (mail.isNotEmpty()) {
+                            ilike("email", mail)
+                        }
+                    }
+                }
+                .decodeList<FacultyMasterRow>()
+        } catch (e: Exception) {
+            Log.w(TAG, "faculty_master query skipped/failed: ${e.message}")
+            emptyList()
+        }
+
+        val matchingFacultyMaster = facultyMasterRows.firstOrNull()
+        if (matchingFacultyMaster != null) {
+            Log.i(TAG, "Staff resolution: SUCCESS (Faculty Master: ${matchingFacultyMaster.name})")
+            if (id.isNotEmpty() && mail.isNotEmpty()) {
+                runCatching {
+                    client.postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
+                        .update({ set("firebase_uid", id) }) { filter { ilike("email", mail) } }
+                }
+            }
+            return StaffGate.Staff
+        }
+
+        // 7. Probing staff_db table as fallback
+        Log.d(TAG, "Probing staff_db table...")
+        val staffDbRows = try {
+            client.postgrest[SupabaseTableData.Tables.STAFF_DB]
+                .select {
+                    filter {
+                        if (id.isNotEmpty() && mail.isNotEmpty()) {
+                            or {
+                                eq("uid", id)
+                                ilike("email_id", mail)
+                            }
+                        } else if (id.isNotEmpty()) {
+                            eq("uid", id)
+                        } else if (mail.isNotEmpty()) {
+                            ilike("email_id", mail)
+                        }
+                    }
+                }
+                .decodeList<StaffDbRow>()
+        } catch (e: Exception) {
+            Log.w(TAG, "staff_db query skipped/failed: ${e.message}")
+            emptyList()
+        }
+
+        val matchingStaffDb = staffDbRows.firstOrNull()
+        if (matchingStaffDb != null) {
+            Log.i(TAG, "Staff resolution: SUCCESS (Staff DB: ${matchingStaffDb.name})")
+            return StaffGate.Staff
+        }
+
+        Log.w(TAG, "Staff resolution: FAILED (No matching record for UID: '$id', Email: '$mail')")
         return StaffGate.Neither
     }
 

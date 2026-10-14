@@ -1,5 +1,6 @@
 package com.mitrc.ac.`in`.ui.screens
 
+import android.net.Uri
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -9,7 +10,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,41 +22,64 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.outlined.EventNote
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Analytics
 import androidx.compose.material.icons.outlined.AssignmentInd
 import androidx.compose.material.icons.outlined.Badge
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Campaign
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Class
 import androidx.compose.material.icons.outlined.Dashboard
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.outlined.Group
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.MarkEmailRead
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Phone
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -65,12 +91,20 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mitrc.ac.`in`.auth.AuthRepository
+import com.mitrc.ac.`in`.data.ClassSubjectView
+import com.mitrc.ac.`in`.data.NoteInsertRow
+import com.mitrc.ac.`in`.data.PortalRepository
+import com.mitrc.ac.`in`.data.StudentProfileView
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
+import com.mitrc.ac.`in`.ui.theme.ErrorRed
 import com.mitrc.ac.`in`.ui.theme.Gold
 import com.mitrc.ac.`in`.ui.theme.GoldDeep
 import com.mitrc.ac.`in`.ui.theme.GoldLight
@@ -84,12 +118,16 @@ import com.mitrc.ac.`in`.ui.theme.TextPrimary
 import com.mitrc.ac.`in`.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 sealed class CoordinatorTab(val route: String, val label: String, val icon: ImageVector) {
-    data object Dashboard : CoordinatorTab("dashboard", "Overview", Icons.Outlined.Dashboard)
-    data object Timetable : CoordinatorTab("timetable", "Schedule", Icons.Outlined.CalendarMonth)
-    data object Faculty : CoordinatorTab("faculty", "Staff", Icons.Outlined.Badge)
-    data object Notices : CoordinatorTab("notices", "Broadcast", Icons.Outlined.Campaign)
+    data object Overview : CoordinatorTab("overview", "Overview", Icons.Outlined.Dashboard)
+    data object Students : CoordinatorTab("students", "Students", Icons.Outlined.Group)
+    data object Timetable : CoordinatorTab("timetable", "Timetable", Icons.Outlined.CalendarMonth)
+    data object Resources : CoordinatorTab("resources", "Resources", Icons.Outlined.Description)
+    data object Settings : CoordinatorTab("settings", "Settings", Icons.Outlined.Settings)
 }
 
 @Composable
@@ -98,7 +136,11 @@ fun CoordinatorPortalShell(
     onSignedOut: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var selectedTab by remember { mutableStateOf<CoordinatorTab>(CoordinatorTab.Dashboard) }
+    var selectedTab by remember { mutableStateOf<CoordinatorTab>(CoordinatorTab.Overview) }
+
+    var showNotificationsSheet by remember { mutableStateOf(false) }
+    var showProfileSheet by remember { mutableStateOf(false) }
+    var showPostNoticeDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         bottomBar = {
@@ -108,10 +150,11 @@ fun CoordinatorPortalShell(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 val tabs = listOf(
-                    CoordinatorTab.Dashboard,
+                    CoordinatorTab.Overview,
+                    CoordinatorTab.Students,
                     CoordinatorTab.Timetable,
-                    CoordinatorTab.Faculty,
-                    CoordinatorTab.Notices
+                    CoordinatorTab.Resources,
+                    CoordinatorTab.Settings
                 )
 
                 tabs.forEach { tab ->
@@ -123,13 +166,13 @@ fun CoordinatorPortalShell(
                             Icon(
                                 imageVector = tab.icon,
                                 contentDescription = tab.label,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                         },
                         label = {
                             Text(
                                 text = tab.label,
-                                fontSize = 11.sp,
+                                fontSize = 10.5.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                             )
                         },
@@ -137,10 +180,29 @@ fun CoordinatorPortalShell(
                             selectedIconColor = Navy,
                             selectedTextColor = Navy,
                             indicatorColor = Gold.copy(alpha = 0.2f),
-                            unselectedIconColor = Color.Gray,
-                            unselectedTextColor = Color.Gray
+                            unselectedIconColor = TextSecondary,
+                            unselectedTextColor = TextSecondary
                         )
                     )
+                }
+            }
+        },
+        floatingActionButton = {
+            if (selectedTab == CoordinatorTab.Overview || selectedTab == CoordinatorTab.Resources) {
+                FloatingActionButton(
+                    onClick = { showPostNoticeDialog = true },
+                    containerColor = Gold,
+                    contentColor = NavyDeep,
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Outlined.Campaign, contentDescription = "Post Notice")
+                        Text("Post Notice", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -151,247 +213,351 @@ fun CoordinatorPortalShell(
                 .background(Slate)
                 .padding(innerPadding)
         ) {
-            AnimatedContent(
-                targetState = selectedTab,
-                transitionSpec = {
-                    fadeIn().togetherWith(fadeOut())
-                },
-                label = "CoordinatorPortalContent"
-            ) { targetTab ->
-                when (targetTab) {
-                    CoordinatorTab.Dashboard -> {
-                        CoordinatorDashboardView(
-                            onSignOut = {
-                                scope.launch {
-                                    AuthRepository.signOut()
-                                    onSignedOut()
-                                }
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Shared Navy Hero Header (Same style as Student Portal)
+                CoordinatorHeroHeader(
+                    userUid = userUid,
+                    activeTab = selectedTab,
+                    onBellClick = { showNotificationsSheet = true },
+                    onAvatarClick = { showProfileSheet = true }
+                )
+
+                AnimatedContent(
+                    targetState = selectedTab,
+                    transitionSpec = {
+                        fadeIn(tween(260)).togetherWith(fadeOut(tween(180)))
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                    label = "CoordinatorPortalContent"
+                ) { targetTab ->
+                    when (targetTab) {
+                        CoordinatorTab.Overview -> {
+                            CoordinatorOverviewView(
+                                onNavigateStudents = { selectedTab = CoordinatorTab.Students },
+                                onNavigateTimetable = { selectedTab = CoordinatorTab.Timetable },
+                                onPostNotice = { showPostNoticeDialog = true }
+                            )
+                        }
+                        CoordinatorTab.Students -> {
+                            CoordinatorStudentsView(userUid = userUid)
+                        }
+                        CoordinatorTab.Timetable -> {
+                            Box(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                                CoordinatorTimetableView(userUid = userUid)
                             }
-                        )
-                    }
-                    CoordinatorTab.Timetable -> {
-                        Box(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                            CoordinatorTimetableView(userUid = userUid)
+                        }
+                        CoordinatorTab.Resources -> {
+                            CoordinatorResourcesView(onPostNotice = { showPostNoticeDialog = true })
+                        }
+                        CoordinatorTab.Settings -> {
+                            CoordinatorSettingsView(
+                                userUid = userUid,
+                                onSignedOut = {
+                                    scope.launch {
+                                        AuthRepository.signOut()
+                                        onSignedOut()
+                                    }
+                                }
+                            )
                         }
                     }
-                    CoordinatorTab.Faculty -> {
-                        PlaceholderView("Faculty Directory & Assignment")
-                    }
-                    CoordinatorTab.Notices -> {
-                        PlaceholderView("Official Notices & Circulars")
-                    }
                 }
+            }
+
+            if (showPostNoticeDialog) {
+                PostNoticeDialog(
+                    onDismiss = { showPostNoticeDialog = false },
+                    onPosted = { showPostNoticeDialog = false }
+                )
             }
         }
     }
 }
 
 @Composable
-fun CoordinatorDashboardView(onSignOut: () -> Unit) {
-    var entranceVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        delay(100)
-        entranceVisible = true
-    }
+private fun CoordinatorHeroHeader(
+    userUid: String,
+    activeTab: CoordinatorTab,
+    onBellClick: () -> Unit,
+    onAvatarClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Brush.verticalGradient(listOf(NavyDeep, Navy)))
+            .statusBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 16.dp)
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "COORDINATOR PORTAL",
+                        color = GoldLight,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.2.sp
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = "Management Desk",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
 
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.12f))
+                            .clickable(onClick = onBellClick),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Outlined.Notifications,
+                            contentDescription = "Notifications",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Gold.copy(alpha = 0.2f))
+                            .border(1.5.dp, GoldLight, CircleShape)
+                            .clickable(onClick = onAvatarClick),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Outlined.Person,
+                            contentDescription = "Profile",
+                            tint = GoldLight,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = SimpleDateFormat("EEE, dd MMM yyyy", Locale.getDefault()).format(Date()),
+                color = Color.White.copy(alpha = 0.75f),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+fun CoordinatorOverviewView(
+    onNavigateStudents: () -> Unit,
+    onNavigateTimetable: () -> Unit,
+    onPostNotice: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Premium Mesh Header
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    brush = Brush.verticalGradient(listOf(NavyDeep, Navy)),
-                    shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp)
-                )
-                .padding(top = 54.dp, bottom = 40.dp, start = 24.dp, end = 24.dp)
-        ) {
-            // Ambient Decorative Circle
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .size(160.dp)
-                    .offset(x = 40.dp, y = (-50).dp)
-                    .background(Gold.copy(alpha = 0.08f), CircleShape)
-            )
+        // --- 1. DAILY SUMMARY SNAPSHOT ---
+        Text(
+            text = "DAILY ACADEMIC SUMMARY",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextSecondary,
+            letterSpacing = 1.2.sp
+        )
 
-            Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            MetricCard(
+                title = "Total Students",
+                value = "426",
+                subtext = "Active Cohort",
+                icon = Icons.Outlined.Group,
+                color = NavySoft,
+                modifier = Modifier.weight(1f)
+            )
+            MetricCard(
+                title = "Today Present",
+                value = "382",
+                subtext = "89.6% Attendance",
+                icon = Icons.Outlined.CheckCircle,
+                color = SuccessGreen,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        // Summary Bar Card
+        ElevatedCard(
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.elevatedCardColors(containerColor = SurfaceWhite),
+            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 3.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(
-                            text = "MANAGEMENT DESK",
-                            color = GoldLight,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 2.sp
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = "Hi, Coordinator",
-                            color = Color.White,
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = (-0.5).sp
-                        )
-                    }
-
-                    Surface(
-                        shape = CircleShape,
-                        color = Gold.copy(alpha = 0.15f),
-                        border = androidx.compose.foundation.BorderStroke(1.5.dp, GoldLight),
-                        modifier = Modifier.size(46.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Outlined.Person,
-                                contentDescription = null,
-                                tint = GoldLight,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
+                    Text("Everyday Summary", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text("382 / 426 Present", fontSize = 12.sp, color = PortalBlue, fontWeight = FontWeight.Bold)
                 }
-                
-                Spacer(Modifier.height(18.dp))
-                
-                Text(
-                    text = "Welcome to your workspace. Monitor academics and manage faculty schedules from one central place.",
-                    color = Color.White.copy(alpha = 0.7f),
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp
+                Spacer(Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { 0.896f },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(CircleShape),
+                    color = SuccessGreen,
+                    trackColor = DividerSoft
                 )
             }
         }
 
-        AnimatedVisibility(
-            visible = entranceVisible,
-            enter = fadeIn(animationSpec = tween(600)) + slideInVertically(
-                initialOffsetY = { 40 },
-                animationSpec = tween(600, easing = FastOutSlowInEasing)
+        Spacer(Modifier.height(8.dp))
+
+        // --- 2. RECENT ACTIVITIES & LEAVE APPLICATIONS ---
+        Text(
+            text = "RECENT ACTIVITIES & LEAVE REQUESTS",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextSecondary,
+            letterSpacing = 1.2.sp
+        )
+
+        val leaveRequests = remember {
+            listOf(
+                LeaveItem("Rahul Sharma", "Sem 3 - Sec A", "Medical Leave (12 Oct - 14 Oct)", "Pending"),
+                LeaveItem("Priya Verma", "Sem 5 - Sec B", "SIH Hackathon Duty Leave (15 Oct)", "Pending"),
+                LeaveItem("Aman Gupta", "Sem 3 - Sec A", "Family Emergency Leave (10 Oct)", "Approved")
             )
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            leaveRequests.forEach { leave ->
+                LeaveRequestCard(leave)
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // --- 3. QUICK ACTIONS GRID ---
+        Text(
+            text = "QUICK MANAGEMENT ACTIONS",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextSecondary,
+            letterSpacing = 1.2.sp
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Column(
+            ActionCard(
+                title = "Students",
+                desc = "Search & PTM",
+                icon = Icons.Outlined.Group,
+                onClick = onNavigateStudents,
+                modifier = Modifier.weight(1f)
+            )
+            ActionCard(
+                title = "Timetable",
+                desc = "Edit schedules",
+                icon = Icons.Outlined.CalendarMonth,
+                onClick = onNavigateTimetable,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun LeaveRequestCard(leave: LeaveItem) {
+    var status by remember { mutableStateOf(leave.status) }
+
+    ElevatedCard(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = SurfaceWhite),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp)
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Navy.copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "ACADEMIC SNAPSHOT",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextSecondary,
-                    letterSpacing = 1.2.sp
-                )
-                Spacer(Modifier.height(14.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    MetricCard(
-                        title = "Students",
-                        value = "426",
-                        subtext = "Active III/IV Yr",
-                        icon = Icons.Outlined.Group,
-                        color = NavySoft,
-                        modifier = Modifier.weight(1f)
-                    )
-                    MetricCard(
-                        title = "Attendance",
-                        value = "89.4%",
-                        subtext = "Daily Average",
-                        icon = Icons.Outlined.Analytics,
-                        color = SuccessGreen,
-                        modifier = Modifier.weight(1f)
-                    )
+                Icon(Icons.AutoMirrored.Outlined.EventNote, contentDescription = null, tint = Navy, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(leave.studentName, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                Text("${leave.section} · ${leave.reason}", fontSize = 12.sp, color = TextSecondary)
+            }
+            if (status == "Pending") {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(SuccessGreen.copy(alpha = 0.15f))
+                            .clickable { status = "Approved" }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text("Approve", color = SuccessGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(ErrorRed.copy(alpha = 0.15f))
+                            .clickable { status = "Rejected" }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text("Reject", color = ErrorRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
-
-                Spacer(Modifier.height(14.dp))
-
-                MetricCardFullWidth(
-                    title = "Academic Notice Approvals Pending",
-                    value = "4 Drafts for Review",
-                    progress = 0.65f,
-                    icon = Icons.Outlined.NotificationsActive
-                )
-
-                Spacer(Modifier.height(28.dp))
-
-                Text(
-                    text = "QUICK MANAGEMENT ACTIONS",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextSecondary,
-                    letterSpacing = 1.2.sp
-                )
-                Spacer(Modifier.height(12.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    ActionCard(
-                        title = "Broadcast",
-                        desc = "Push notices",
-                        icon = Icons.Outlined.Campaign,
-                        modifier = Modifier.weight(1f)
-                    )
-                    ActionCard(
-                        title = "Timetable",
-                        desc = "Edit schedules",
-                        icon = Icons.Outlined.CalendarMonth,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    ActionCard(
-                        title = "Assign Staff",
-                        desc = "Faculty links",
-                        icon = Icons.Outlined.AssignmentInd,
-                        modifier = Modifier.weight(1f)
-                    )
-                    ActionCard(
-                        title = "Exams",
-                        desc = "Mid-term dates",
-                        icon = Icons.Outlined.Class,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Spacer(Modifier.height(32.dp))
-
-                Button(
-                    onClick = onSignOut,
+            } else {
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFFEE2E2),
-                        contentColor = Color(0xFFDC2626)
-                    )
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (status == "Approved") SuccessGreen.copy(alpha = 0.15f) else ErrorRed.copy(alpha = 0.15f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
-                    Icon(Icons.AutoMirrored.Outlined.Logout, null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(10.dp))
-                    Text(text = "Sign Out from Portal", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(status.uppercase(), color = if (status == "Approved") SuccessGreen else ErrorRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
-
-                Spacer(Modifier.height(20.dp))
             }
         }
     }
 }
+
+private data class LeaveItem(
+    val studentName: String,
+    val section: String,
+    val reason: String,
+    val status: String
+)
 
 @Composable
 private fun MetricCard(
@@ -402,13 +568,13 @@ private fun MetricCard(
     color: Color,
     modifier: Modifier = Modifier
 ) {
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ElevatedCard(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = SurfaceWhite),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 3.dp),
         modifier = modifier
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Box(
                 modifier = Modifier
                     .size(36.dp)
@@ -417,56 +583,11 @@ private fun MetricCard(
             ) {
                 Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
             }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
             Text(text = value, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
             Spacer(Modifier.height(2.dp))
             Text(text = title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
-            Text(text = subtext, fontSize = 10.sp, color = TextSecondary.copy(alpha = 0.7f))
-        }
-    }
-}
-
-@Composable
-private fun MetricCardFullWidth(
-    title: String,
-    value: String,
-    progress: Float,
-    icon: ImageVector
-) {
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier.padding(18.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .background(Gold.copy(alpha = 0.1f), RoundedCornerShape(12.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(icon, contentDescription = null, tint = GoldDeep, modifier = Modifier.size(22.dp))
-            }
-            Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = title, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
-                Spacer(Modifier.height(4.dp))
-                Text(text = value, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                Spacer(Modifier.height(8.dp))
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(6.dp)
-                        .clip(CircleShape),
-                    color = Gold,
-                    trackColor = DividerSoft
-                )
-            }
+            Text(text = subtext, fontSize = 10.5.sp, color = TextSecondary.copy(alpha = 0.7f))
         }
     }
 }
@@ -476,135 +597,223 @@ private fun ActionCard(
     title: String,
     desc: String,
     icon: ImageVector,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var isPressed by remember { mutableStateOf(false) }
-    val cardScale by animateFloatAsState(if (isPressed) 0.97f else 1f, label = "actionScale")
-
-    Card(
+    ElevatedCard(
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = modifier
-            .scale(cardScale)
-            .clickable {
-                isPressed = true
-                isPressed = false
-            }
+        colors = CardDefaults.elevatedCardColors(containerColor = SurfaceWhite),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        modifier = modifier.clickable(onClick = onClick)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = Navy,
-                modifier = Modifier.size(24.dp)
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = title,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = desc,
-                fontSize = 11.sp,
-                color = TextSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                lineHeight = 14.sp
-            )
+        Column(modifier = Modifier.padding(16.dp)) {
+            Icon(imageVector = icon, contentDescription = null, tint = Navy, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.height(8.dp))
+            Text(text = title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+            Text(text = desc, fontSize = 11.sp, color = TextSecondary)
         }
     }
 }
 
 @Composable
-private fun NoticeListItem(
-    tag: String,
-    title: String,
-    time: String
-) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .background(
-                        color = if (tag == "CRITICAL") Color(0xFFFEE2E2) else Slate,
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    text = tag,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (tag == "CRITICAL") Color(0xFFEF4444) else NavySoft
-                )
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TextPrimary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = time,
-                    fontSize = 11.sp,
-                    color = TextSecondary
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun PlaceholderView(title: String) {
-    Box(
+private fun CoordinatorResourcesView(onPostNotice: () -> Unit) {
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                Icons.Outlined.Analytics,
-                contentDescription = null,
-                modifier = Modifier.size(64.dp),
-                tint = Navy.copy(alpha = 0.3f)
-            )
-            Spacer(Modifier.height(16.dp))
-            Text(
-                text = title,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = Navy.copy(alpha = 0.6f)
-            )
-            Text(
-                text = "Module coming soon in the next update.",
-                fontSize = 13.sp,
-                color = Color.Gray
-            )
+        Text("RESOURCES & OFFICIAL BROADCASTS", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextSecondary, letterSpacing = 1.2.sp)
+
+        ElevatedCard(
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.elevatedCardColors(containerColor = SurfaceWhite),
+            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 3.dp),
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onPostNotice)
+        ) {
+            Row(modifier = Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier.size(44.dp).clip(CircleShape).background(Gold.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Outlined.Campaign, null, tint = Navy, modifier = Modifier.size(22.dp))
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Broadcast New Notice", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text("Push official announcements to student portal", fontSize = 12.sp, color = TextSecondary)
+                }
+                Icon(Icons.Outlined.Add, null, tint = Navy)
+            }
         }
     }
+}
+
+@Composable
+private fun CoordinatorSettingsView(
+    userUid: String,
+    onSignedOut: () -> Unit
+) {
+    var updateStatusText by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        ElevatedCard(
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.elevatedCardColors(containerColor = SurfaceWhite),
+            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(60.dp)
+                            .clip(CircleShape)
+                            .border(2.dp, Gold, CircleShape)
+                            .background(Navy.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Outlined.Person, null, tint = Navy, modifier = Modifier.size(32.dp))
+                    }
+                    Column {
+                        Text("Coordinator Profile", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text("Academic Management Desk", fontSize = 12.5.sp, color = Navy, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+
+        Text("SETTINGS & SERVICES", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextSecondary, letterSpacing = 1.2.sp)
+
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            CoordinatorSettingsCard("Check for Update", updateStatusText ?: "Check latest app release", Icons.Outlined.Refresh) {
+                updateStatusText = "App is up to date (v2.4.1)"
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        Button(
+            onClick = onSignedOut,
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = ErrorRed, contentColor = Color.White),
+            modifier = Modifier.fillMaxWidth().height(50.dp)
+        ) {
+            Icon(Icons.AutoMirrored.Outlined.Logout, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Sign Out", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        Text(
+            text = "\u00a9 2026 MITRC Alwar. All rights reserved.",
+            color = TextSecondary,
+            fontSize = 11.5.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun CoordinatorSettingsCard(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit) {
+    ElevatedCard(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = SurfaceWhite),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+    ) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = Navy, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(subtitle, color = TextSecondary, fontSize = 11.5.sp)
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = TextSecondary, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun PostNoticeDialog(
+    onDismiss: () -> Unit,
+    onPosted: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    var title by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    var driveUrl by remember { mutableStateOf("") }
+    var posting by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Post Notice to Student Portal", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Notice Title") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Notice Body / Message") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = driveUrl,
+                    onValueChange = { driveUrl = it },
+                    label = { Text("Resource Link (Optional)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (title.isNotBlank()) {
+                        scope.launch {
+                            posting = true
+                            PortalRepository.createNote(
+                                NoteInsertRow(
+                                    classSubjectId = 1,
+                                    title = title,
+                                    description = description,
+                                    category = "notes",
+                                    driveUrl = driveUrl.ifBlank { "https://mitrc.ac.in" }
+                                )
+                            )
+                            posting = false
+                            onPosted()
+                        }
+                    }
+                },
+                enabled = !posting && title.isNotBlank()
+            ) {
+                Text(if (posting) "Posting..." else "Post Notice")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

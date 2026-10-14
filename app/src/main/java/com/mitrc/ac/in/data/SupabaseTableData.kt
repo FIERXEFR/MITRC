@@ -12,7 +12,9 @@ object SupabaseTableData {
     object Tables {
         const val ADMIN_DB = "admin_db"
         const val STUDENTS = "students"
+        const val FACULTY = "faculty"
         const val FACULTY_MASTER = "faculty_master"
+        const val STAFF_DB = "staff_db"
         const val DEPARTMENTS = "departments"
         const val COURSES = "courses"
         const val BRANCHES = "branches"
@@ -41,6 +43,7 @@ object SupabaseTableData {
         const val V_STUDENT_PROFILES = "v_student_profiles"
         const val V_STUDENT_SUBJECTS = "v_student_subjects"
         const val V_MY_SUBJECT_CARDS = "v_my_subject_cards"
+        const val V_STAFF_DIRECTORY = "v_staff_directory"
         const val V_ATTENDANCE_SUMMARY = "v_attendance_summary"
         const val V_MARKS = "v_marks"
         const val V_CLASSES = "v_classes"
@@ -51,7 +54,6 @@ object SupabaseTableData {
         const val V_TIMETABLE_ENTRIES = "v_timetable_entries"
         const val V_MY_TIMETABLE = "v_my_timetable"
         const val V_FACULTY = "v_faculty"
-        const val V_STAFF_DIRECTORY = "v_staff_directory"
         const val V_COORDINATORS = "v_coordinators"
         const val V_COURSE_HODS = "v_course_hods"
         const val V_CLASS_MENTORS = "v_class_mentors"
@@ -106,6 +108,18 @@ data class FacultyMasterRow(
     @SerialName("gender") val gender: String? = null,
     @SerialName("qualification") val qualification: String? = null,
     @SerialName("profile_url") val profileUrl: String? = null,
+)
+
+@Serializable
+data class StaffDbRow(
+    @SerialName("uid") val uid: String = "",
+    @SerialName("email_id") val emailId: String? = null,
+    @SerialName("department") val department: String? = null,
+    @SerialName("role") val role: String? = null,
+    @SerialName("name") val name: String? = null,
+    @SerialName("phone_no") val phoneNo: String? = null,
+    @SerialName("gender") val gender: String? = null,
+    @SerialName("designation") val designation: String? = null,
 )
 
 @Serializable

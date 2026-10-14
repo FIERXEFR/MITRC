@@ -56,6 +56,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -131,13 +132,8 @@ fun CoordinatorStudentsView(userUid: String) {
         loading = true
         errorMsg = null
         val classResult = PortalRepository.getMyCoordinatorClasses()
-        classResult.onFailure { errorMsg = it.message; loading = false; return@LaunchedEffect }
         val classIds = classResult.getOrElse { emptyList() }.map { it.classId }
-        if (classIds.isEmpty()) {
-            allStudents = emptyList()
-            loading = false
-            return@LaunchedEffect
-        }
+
         val studentsResult = PortalRepository.getStudentsForClasses(classIds)
         studentsResult
             .onSuccess { allStudents = it }
@@ -145,16 +141,18 @@ fun CoordinatorStudentsView(userUid: String) {
         loading = false
     }
 
-    // ---- filtered list ----
+    // ---- filtered list sorted A-Z alphabetically ----
     val filtered = remember(allStudents, searchQuery) {
         val q = searchQuery.trim().lowercase()
-        if (q.isEmpty()) allStudents
+        val list = if (q.isEmpty()) allStudents
         else allStudents.filter {
             it.name?.lowercase()?.contains(q) == true ||
                     it.serialNo?.lowercase()?.contains(q) == true ||
+                    it.studentEmail?.lowercase()?.contains(q) == true ||
                     it.section?.lowercase()?.contains(q) == true ||
                     it.branch?.lowercase()?.contains(q) == true
         }
+        list.sortedBy { it.name?.lowercase() ?: "" }
     }
 
     // ---- UI ----
@@ -174,7 +172,7 @@ fun CoordinatorStudentsView(userUid: String) {
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
         )
 
-        // Body
+        // Body //
         when {
             loading -> LoadingState()
             errorMsg != null -> ErrorState(message = errorMsg!!, onRetry = { /* recompose trigger */ })
@@ -360,13 +358,13 @@ private fun StudentList(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StudentCard(student: StudentProfileView, onClick: () -> Unit) {
-    Card(
+    ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = SurfaceWhite),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp)
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -624,7 +622,7 @@ private fun StudentDetailSheet(
         Spacer(Modifier.height(32.dp))
     }
 
-    // ---- Lock confirmation dialog ----
+    // ---- Lock confirmation dialog ---- //
     if (showLockDialog) {
         val targetLocked = student.isLocked != true
         ConfirmDialog(

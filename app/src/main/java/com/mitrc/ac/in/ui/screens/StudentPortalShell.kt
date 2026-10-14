@@ -11,6 +11,9 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.gestures.Orientation
@@ -213,15 +216,29 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
 
     LaunchedEffect(tab) {
         val targetIndex = StudentTab.entries.indexOf(tab)
-        if (pagerState.currentPage != targetIndex) {
+        if (pagerState.currentPage != targetIndex && !pagerState.isScrollInProgress) {
             pagerState.animateScrollToPage(targetIndex, animationSpec = tween(300, easing = FastOutSlowInEasing))
         }
     }
 
-    LaunchedEffect(pagerState.currentPage) {
-        val newTab = StudentTab.entries.getOrElse(pagerState.currentPage) { StudentTab.HOME }
-        if (newTab.name != tabName) {
-            tabName = newTab.name
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.settledPage }
+            .distinctUntilChanged()
+            .collect { page ->
+                val settledTab = StudentTab.entries.getOrElse(page) { StudentTab.HOME }
+                if (settledTab.name != tabName) {
+                    tabName = settledTab.name
+                }
+            }
+    }
+
+    // Back never exits the student portal: it closes any open overlay, otherwise returns to the
+    // Home tab; on Home itself the press is swallowed entirely.
+    BackHandler {
+        when {
+            showNotifications -> showNotifications = false
+            showProfile -> showProfile = false
+            tab != StudentTab.HOME -> tabName = StudentTab.HOME.name
         }
     }
 
@@ -265,6 +282,7 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
                 } else {
                     HorizontalPager(
                         state = pagerState,
+                        beyondViewportPageCount = 3,
                         modifier = Modifier.fillMaxSize()
                     ) { page ->
                         when (StudentTab.entries[page]) {

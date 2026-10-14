@@ -3,6 +3,7 @@ package com.mitrc.ac.`in`.data
 import android.util.Log
 import io.github.jan.supabase.postgrest.exception.PostgrestRestException
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.postgrest.rpc
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
@@ -196,7 +197,7 @@ object PortalRepository {
         }.getOrElse {
             response.decodeList<MyPortalsResponse>().firstOrNull() ?: MyPortalsResponse()
         }
-    }
+    }.onFailure { Log.w(TAG, "my_portals RPC failed: ${it::class.simpleName}: ${it.message}") }
 
     // -----------------------------------------------------------------------------------------
     // Teacher / Faculty Queries
@@ -207,6 +208,46 @@ object PortalRepository {
             .select { filter { eq("firebase_uid", uid) } }
             .decodeList<FacultyMasterRow>()
             .firstOrNull()
+    }
+
+    /**
+     * Resolves the signed-in user's faculty_master row by firebase_uid first, then by verified
+     * email. A staff account whose firebase_uid link hasn't landed yet (the link write is
+     * blocked unless an UPDATE policy or SECURITY DEFINER RPC exists) is only reachable by
+     * email - without this every role probe downstream silently resolves to "student".
+     */
+    suspend fun getFacultyByUidOrEmail(uid: String, email: String): Result<FacultyMasterRow?> = query {
+        val table = SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
+        val byUid = if (uid.isNotBlank()) {
+            runCatching {
+                table.select { filter { eq("firebase_uid", uid) } }
+                    .decodeList<FacultyMasterRow>()
+                    .firstOrNull()
+            }.getOrNull()
+        } else null
+        byUid ?: if (email.isNotBlank()) {
+            runCatching {
+                table.select { filter { ilike("email", email.trim()) } }
+                    .decodeList<FacultyMasterRow>()
+                    .firstOrNull()
+            }.getOrNull()
+        } else null
+    }
+
+    /**
+     * Best-effort backlink of [uid] onto the faculty_master row for [email], only when the row
+     * has no firebase_uid yet (never clobbers an existing link). Silently no-ops under RLS when
+     * no UPDATE policy exists - the RPC or a policy is the durable fix.
+     */
+    suspend fun linkFacultyUidByEmail(uid: String, email: String): Result<Unit> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
+            .update({ set("firebase_uid", uid) }) {
+                filter {
+                    ilike("email", email.trim())
+                    // PostgREST `is.null`; supabase-kt 3.1.1 has no isNull() helper.
+                    filter("firebase_uid", FilterOperator.IS, null)
+                }
+            }
     }
 
     suspend fun getTeacherSubjects(facultyId: Int): Result<List<ClassSubjectView>> = query {

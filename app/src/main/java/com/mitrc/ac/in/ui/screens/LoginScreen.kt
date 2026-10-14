@@ -1,5 +1,6 @@
 package com.mitrc.ac.`in`.ui.screens
 
+import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -80,6 +81,8 @@ import com.mitrc.ac.`in`.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
+private const val TAG = "LoginScreen"
+
 /**
  * @param onLoggedIn routed to the normal student/co-ordinator portal.
  * @param onAdminLoggedIn routed to [com.mitrc.ac.in.AdminPanelActivity] when the signed-in UID
@@ -141,17 +144,23 @@ fun LoginScreen(onLoggedIn: () -> Unit, onAdminLoggedIn: () -> Unit) {
                             }
 
                             AdminRepository.StaffGate.Neither -> {
-                                // Sign out from Firebase so an invalid staff attempt doesn't stay logged in
-                                AuthRepository.signOut()
+                                // faculty_master (and the other staff probes) are gated by the
+                                // `is_college_user()` RLS policy, so a legitimate staff account can
+                                // still come back unmatched here - e.g. an unlinked firebase_uid or a
+                                // slow first token. Signing out and hard-blocking locked staff out of
+                                // the portal. Sign in anyway and let HomeScreen's role router link the
+                                // account and pick the right portal; RLS still protects every row.
+                                Log.i(TAG, "Staff gate unmatched for uid=${user.uid}; deferring role to HomeScreen")
                                 loading = false
-                                error = "Not a registered staff member (uid ${user.uid})"
+                                onLoggedIn()
                             }
 
                             is AdminRepository.StaffGate.Failed -> {
-                                // Sign out from Firebase so a failed check doesn't auto-navigate on restart
-                                AuthRepository.signOut()
+                                // Transient auth/RLS/network failure while checking - the portal's own
+                                // error recovery handles it, so don't bounce the user back to login.
+                                Log.w(TAG, "Staff gate check failed (${gate.reason}); deferring role to HomeScreen")
                                 loading = false
-                                error = "Admin check failed: ${gate.reason}"
+                                onLoggedIn()
                             }
                         }
                     }

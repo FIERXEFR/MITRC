@@ -10,6 +10,7 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
@@ -71,8 +72,9 @@ fun MitrcRoot(
         }
         composable(
             route = MainActivity.ROUTE_LOGIN,
+            // Long, eased cross-fade so signing out dissolves into the login screen.
             enterTransition = {
-                fadeIn(tween(450, easing = FastOutSlowInEasing))
+                fadeIn(tween(650, easing = FastOutSlowInEasing))
             }
         ) {
             val context = LocalContext.current
@@ -99,7 +101,12 @@ fun MitrcRoot(
                 }
             )
         }
-        composable(MainActivity.ROUTE_HOME) {
+        composable(
+            route = MainActivity.ROUTE_HOME,
+            exitTransition = {
+                fadeOut(tween(550, easing = FastOutSlowInEasing))
+            }
+        ) {
             HomeScreen(
                 onSignedOut = {
                     navController.navigate(MainActivity.ROUTE_LOGIN) {
