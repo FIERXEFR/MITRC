@@ -98,9 +98,7 @@ import com.mitrc.ac.`in`.ui.theme.DividerSoft
 import com.mitrc.ac.`in`.ui.theme.ErrorRed
 import com.mitrc.ac.`in`.ui.theme.Gold
 import com.mitrc.ac.`in`.ui.theme.GoldDeep
-import com.mitrc.ac.`in`.ui.theme.GoldLight
 import com.mitrc.ac.`in`.ui.theme.Navy
-import com.mitrc.ac.`in`.ui.theme.NavyDeep
 import com.mitrc.ac.`in`.ui.theme.NavySoft
 import com.mitrc.ac.`in`.ui.theme.Slate
 import com.mitrc.ac.`in`.ui.theme.SuccessGreen
@@ -127,17 +125,24 @@ fun CoordinatorStudentsView(userUid: String) {
     var errorMsg by remember { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // ---- load ----
-    LaunchedEffect(Unit) {
-        loading = true
+    // Identity (name, roll, phone, email, group, lock/PTM flags) is read from the `students`
+    // table; the class mapping comes from v_student_directory. The repository merges the two,
+    // with `students` winning on every identity field.
+    suspend fun loadStudents() {
         errorMsg = null
-        val classResult = PortalRepository.getMyCoordinatorClasses()
-        val classIds = classResult.getOrElse { emptyList() }.map { it.classId }
+        val classIds = PortalRepository.getMyCoordinatorClasses()
+            .getOrElse { emptyList() }
+            .map { it.classId }
 
-        val studentsResult = PortalRepository.getStudentsForClasses(classIds)
-        studentsResult
+        PortalRepository.getStudentsForClasses(classIds)
             .onSuccess { allStudents = it }
             .onFailure { errorMsg = it.message }
+    }
+
+    // ---- load ----
+    LaunchedEffect(userUid) {
+        loading = true
+        loadStudents()
         loading = false
     }
 
@@ -156,40 +161,52 @@ fun CoordinatorStudentsView(userUid: String) {
     }
 
     // ---- UI ----
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Slate)
+    // The tab title lives in the portal hero now; this tab deliberately has no second header.
+    CoordinatorRefreshBox(
+        onRefresh = { loadStudents() },
+        skeleton = { CoordinatorStudentListSkeleton() }
     ) {
-        // Header
-        StudentsHeader(count = filtered.size, totalCount = allStudents.size)
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Slate)
+        ) {
+            SearchBar(
+                query = searchQuery,
+                onQueryChange = { searchQuery = it },
+                onClear = { searchQuery = "" },
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+            )
 
-        // Search bar
-        SearchBar(
-            query = searchQuery,
-            onQueryChange = { searchQuery = it },
-            onClear = { searchQuery = "" },
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-        )
+            StudentsCountRow(count = filtered.size, totalCount = allStudents.size)
 
-        // Body //
-        when {
-            loading -> LoadingState()
-            errorMsg != null -> ErrorState(message = errorMsg!!, onRetry = { /* recompose trigger */ })
-            filtered.isEmpty() && allStudents.isEmpty() -> EmptyState(
-                icon = Icons.Outlined.Group,
-                title = "No Students Yet",
-                subtitle = "No students are enrolled in your assigned classes."
-            )
-            filtered.isEmpty() -> EmptyState(
-                icon = Icons.Outlined.Search,
-                title = "No Results",
-                subtitle = "Try a different name, roll number, or section."
-            )
-            else -> StudentList(
-                students = filtered,
-                onStudentClick = { selectedStudent = it }
-            )
+            when {
+                loading -> LoadingState()
+                errorMsg != null -> ErrorState(
+                    message = errorMsg!!,
+                    onRetry = {
+                        scope.launch {
+                            loading = true
+                            loadStudents()
+                            loading = false
+                        }
+                    }
+                )
+                filtered.isEmpty() && allStudents.isEmpty() -> EmptyState(
+                    icon = Icons.Outlined.Group,
+                    title = "No Students Yet",
+                    subtitle = "No students are enrolled in your assigned classes."
+                )
+                filtered.isEmpty() -> EmptyState(
+                    icon = Icons.Outlined.Search,
+                    title = "No Results",
+                    subtitle = "Try a different name, roll number, or section."
+                )
+                else -> StudentList(
+                    students = filtered,
+                    onStudentClick = { selectedStudent = it }
+                )
+            }
         }
     }
 
@@ -236,57 +253,21 @@ fun CoordinatorStudentsView(userUid: String) {
 }
 
 // ---------------------------------------------------------------------------
-// Header
+// Count line (replaces the old second hero header)
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun StudentsHeader(count: Int, totalCount: Int) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                brush = Brush.verticalGradient(listOf(NavyDeep, Navy)),
-                shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp)
-            )
-            .padding(top = 36.dp, bottom = 28.dp, start = 24.dp, end = 24.dp)
-    ) {
-        // ambient circle
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .size(120.dp)
-                .background(Gold.copy(alpha = 0.07f), CircleShape)
-        )
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Outlined.Group,
-                    contentDescription = null,
-                    tint = Gold,
-                    modifier = Modifier.size(22.dp)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "Students & Batches",
-                    color = Gold,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.5.sp
-                )
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "My Students",
-                color = SurfaceWhite,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
-            Spacer(Modifier.height(4.dp))
-            val subtitle = if (count == totalCount) "$totalCount enrolled"
-            else "$count of $totalCount students"
-            Text(subtitle, color = SurfaceWhite.copy(alpha = 0.65f), fontSize = 13.sp)
-        }
-    }
+private fun StudentsCountRow(count: Int, totalCount: Int) {
+    val label = if (count == totalCount) "$totalCount enrolled"
+    else "$count of $totalCount students"
+
+    Text(
+        text = label,
+        color = TextSecondary,
+        fontSize = 11.5.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp)
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +287,7 @@ private fun SearchBar(
         modifier = modifier.fillMaxWidth(),
         placeholder = {
             Text(
-                "Search by name, roll no, section…",
+                "Search by name, roll no, sectionâ€¦",
                 color = TextSecondary.copy(alpha = 0.6f),
                 fontSize = 14.sp
             )
@@ -326,10 +307,22 @@ private fun SearchBar(
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         keyboardActions = KeyboardActions(onSearch = {}),
         colors = OutlinedTextFieldDefaults.colors(
+            // The Material defaults inherit onSurface from the (dark-capable) app theme, which
+            // rendered white text on this white card. Pin every slot to the portal palette.
+            focusedTextColor = TextPrimary,
+            unfocusedTextColor = TextPrimary,
+            disabledTextColor = TextPrimary.copy(alpha = 0.6f),
+            cursorColor = Navy,
             focusedBorderColor = Navy,
             unfocusedBorderColor = DividerSoft,
             focusedContainerColor = SurfaceWhite,
-            unfocusedContainerColor = SurfaceWhite
+            unfocusedContainerColor = SurfaceWhite,
+            focusedLeadingIconColor = Navy,
+            unfocusedLeadingIconColor = Navy,
+            focusedTrailingIconColor = TextSecondary,
+            unfocusedTrailingIconColor = TextSecondary,
+            focusedPlaceholderColor = TextSecondary.copy(alpha = 0.6f),
+            unfocusedPlaceholderColor = TextSecondary.copy(alpha = 0.6f)
         )
     )
 }
@@ -401,8 +394,8 @@ private fun StudentCard(student: StudentProfileView, onClick: () -> Unit) {
                 Text(
                     text = buildString {
                         student.serialNo?.let { append("Roll: $it") }
-                        student.section?.let { if (isNotEmpty()) append(" · "); append("Sec $it") }
-                        student.semester?.let { if (isNotEmpty()) append(" · "); append("Sem $it") }
+                        student.section?.let { if (isNotEmpty()) append(" Â· "); append("Sec $it") }
+                        student.semester?.let { if (isNotEmpty()) append(" Â· "); append("Sem $it") }
                     },
                     color = TextSecondary,
                     fontSize = 12.sp
@@ -857,7 +850,7 @@ private fun MarksSubjectSection(subject: String, rows: List<MarkView>) {
                     )
                     val display = if (mark.marks != null && mark.maxMarks != null)
                         "${"%.1f".format(mark.marks)} / ${"%.0f".format(mark.maxMarks)}"
-                    else "—"
+                    else "â€”"
                     Text(display, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
                 if (rows.last() != mark) Divider(color = DividerSoft, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 2.dp))
@@ -920,7 +913,7 @@ private fun LoadingState() {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator(color = Navy, strokeWidth = 3.dp)
             Spacer(Modifier.height(12.dp))
-            Text("Loading students…", color = TextSecondary, fontSize = 14.sp)
+            Text("Loading studentsâ€¦", color = TextSecondary, fontSize = 14.sp)
         }
     }
 }
@@ -934,6 +927,14 @@ private fun ErrorState(message: String, onRetry: () -> Unit) {
             Text("Couldn't load students", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
             Text(message, color = TextSecondary, fontSize = 13.sp, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = onRetry,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Navy)
+            ) {
+                Text("Retry", fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }

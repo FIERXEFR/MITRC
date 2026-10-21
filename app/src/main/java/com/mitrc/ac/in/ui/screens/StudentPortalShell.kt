@@ -384,8 +384,6 @@ private fun PortalHeader(
     onBellClick: () -> Unit,
     onAvatarClick: () -> Unit
 ) {
-    val unread = remember { sampleNotifications().count { it.unread } }
-
     // "Welcome" the first open of the day, "HEY" for every later open - resolved once and
     // held for the lifetime of the shell.
     val greeting = remember { GreetingStore.greeting() }
@@ -397,6 +395,38 @@ private fun PortalHeader(
         tab == StudentTab.ATTENDANCE -> scheduleMode.label
         else -> tab.label
     }
+
+    PortalHeroHeader(
+        overline = "STUDENT PORTAL",
+        title = title,
+        name = name,
+        scrolledPx = { scroll.value.toFloat() },
+        // The Settings tab already lists the profile in full, so the avatar duplicate is
+        // hidden there.
+        showAvatar = tab != StudentTab.SETTINGS,
+        onBellClick = onBellClick,
+        onAvatarClick = onAvatarClick
+    )
+}
+
+/**
+ * The shared collapsible navy hero: identical logo, type scale, gold orb and fold distance in
+ * both portals, so the coordinator header is not a lookalike but the same composable.
+ *
+ * [scrolledPx] is deliberately read *only* inside the layout / graphicsLayer lambdas - neither
+ * is composition - so scrolling never recomposes the header.
+ */
+@Composable
+internal fun PortalHeroHeader(
+    overline: String,
+    title: String,
+    name: String?,
+    scrolledPx: () -> Float,
+    showAvatar: Boolean = true,
+    onBellClick: () -> Unit,
+    onAvatarClick: () -> Unit
+) {
+    val unread = remember { sampleNotifications().count { it.unread } }
 
     val headerShape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
     val verticalPad = 6.dp
@@ -411,9 +441,9 @@ private fun PortalHeader(
     val foldDistancePx = with(density) { 96.dp.toPx() }
     val fullHeaderHeightPx = with(density) { fullHeaderHeight.toPx() }
 
-    // `scroll.value` is deliberately read *only* inside the offset / layer / measure lambdas:
-    // none of them are composition, so scrolling the list no longer recomposes the header on
-    // every frame. That per-frame recomposition was the source of the stutter.
+    // The scroll offset is deliberately read *only* inside the offset / layer / measure
+    // lambdas: none of them are composition, so scrolling the list no longer recomposes the
+    // header on every frame. That per-frame recomposition was the source of the stutter.
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -424,7 +454,7 @@ private fun PortalHeader(
             )
             .statusBarsPadding()
             .layout { measurable, constraints ->
-                val collapse = (scroll.value / foldDistancePx).coerceIn(0f, 1f)
+                val collapse = (scrolledPx() / foldDistancePx).coerceIn(0f, 1f)
                 val heightPx = (fullHeaderHeightPx * (1f - collapse))
                     .roundToInt()
                     .coerceIn(0, constraints.maxHeight)
@@ -449,7 +479,7 @@ private fun PortalHeader(
                 // Draw-phase only: the roll-up and the fade happen on the graphics layer, so a
                 // scroll frame never re-lays out the hero column (nor recomposes the header).
                 .graphicsLayer {
-                    val collapse = (scroll.value / foldDistancePx).coerceIn(0f, 1f)
+                    val collapse = (scrolledPx() / foldDistancePx).coerceIn(0f, 1f)
                     translationY = -fullHeaderHeightPx * collapse
                     alpha = 1f - collapse
                 },
@@ -469,7 +499,7 @@ private fun PortalHeader(
                 Spacer(Modifier.height(4.dp))
 
                 Text(
-                    text = "STUDENT PORTAL",
+                    text = overline,
                     color = GoldLight,
                     fontSize = 10.sp,
                     lineHeight = 12.sp,
@@ -526,9 +556,7 @@ private fun PortalHeader(
 
             Spacer(Modifier.width(6.dp))
 
-            // The Settings tab already lists the profile in full, so the avatar duplicate is
-            // hidden there.
-            if (tab != StudentTab.SETTINGS) {
+            if (showAvatar) {
                 Box(modifier = Modifier.padding(top = 18.dp)) {
                     StudentAvatar(name = name, onClick = onAvatarClick)
                 }
@@ -1056,7 +1084,7 @@ internal fun PortalNoProfileState() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NotificationsScreen(onBack: () -> Unit) {
+internal fun NotificationsScreen(onBack: () -> Unit) {
     var isRefreshing by remember { mutableStateOf(false) }
     // Brief first-paint skeleton so the list doesn't pop in fully formed.
     var isLoading by remember { mutableStateOf(true) }

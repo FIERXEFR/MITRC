@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -25,7 +27,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -124,14 +125,7 @@ fun CoordinatorTimetableView(userUid: String) {
     }
 
     if (loading) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(32.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            CircularProgressIndicator(color = Navy)
-        }
+        CoordinatorTimetableSkeleton()
         return
     }
 
@@ -159,15 +153,33 @@ fun CoordinatorTimetableView(userUid: String) {
         return
     }
 
-    Column(modifier = Modifier.padding(16.dp)) {
-        Text(
-            text = "TIMETABLE MANAGER & DRAFTS",
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = TextSecondary,
-            letterSpacing = 1.5.sp
-        )
-        Spacer(Modifier.height(10.dp))
+    CoordinatorRefreshBox(
+        onRefresh = {
+            val refreshed = PortalRepository.getTimetables()
+            timetables = refreshed.getOrDefault(emptyList())
+            val current = selectedTimetable ?: timetables.firstOrNull()
+            if (current != null) {
+                entries = PortalRepository.getTimetableEntries(current.id).getOrDefault(emptyList())
+                subjects = PortalRepository.getSubjectTeachers(current.classId).getOrDefault(emptyList())
+                groups = AdminRepository.getClassGroups(current.classId)
+            }
+        },
+        skeleton = { CoordinatorTimetableSkeleton() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
+            Text(
+                text = "TIMETABLE MANAGER & DRAFTS",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextSecondary,
+                letterSpacing = 1.5.sp
+            )
+            Spacer(Modifier.height(10.dp))
 
         if (timetables.isEmpty()) {
             Card(
@@ -396,6 +408,7 @@ fun CoordinatorTimetableView(userUid: String) {
                     }
                 }
             }
+        }
         }
     }
 }

@@ -257,9 +257,10 @@ object PortalRepository {
     }
 
     suspend fun getEnrolledStudentsForClass(classId: Int): Result<List<StudentProfileView>> = query {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_PROFILES]
+        val rows = SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_PROFILES]
             .select { filter { eq("class_id", classId) } }
             .decodeList<StudentProfileView>()
+        withStudentIdentities(rows)
     }
 
     suspend fun getExistingAttendance(classSubjectId: Int, date: String, period: Int): Result<List<AttendanceRecordRow>> = query {
@@ -355,17 +356,58 @@ object PortalRepository {
 
     /**
      * Query students across specified class IDs (from v_my_coordinator_classes).
-     * Returns student directory records belonging only to the coordinator's ruled scope.
+     *
+     * `v_student_directory` supplies the class/semester/section mapping, while the `students`
+     * table is authoritative for the person: name, roll number, emails, phone numbers, lab
+     * group and the lock/PTM flags. The directory can lag behind an admin edit (or serve a row
+     * written before the name was captured), so the identity fields are re-read from `students`
+     * and win field-by-field.
      */
     suspend fun getStudentsForClasses(classIds: List<Int>): Result<List<StudentProfileView>> = query {
         if (classIds.isEmpty()) return@query emptyList()
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_DIRECTORY]
+        val rows = SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_DIRECTORY]
             .select {
                 filter {
                     isIn("class_id", classIds)
                 }
             }
             .decodeList<StudentProfileView>()
+        withStudentIdentities(rows)
+    }
+
+    /**
+     * Overlays each directory row with its `students` row. Best-effort: if the identity query is
+     * blocked or fails, the directory rows are returned untouched so the caller still renders.
+     */
+    private suspend fun withStudentIdentities(
+        rows: List<StudentProfileView>
+    ): List<StudentProfileView> {
+        val uids = rows.map { it.studentUid }.filter { it.isNotBlank() }.distinct()
+        if (uids.isEmpty()) return rows
+
+        val identities = runCatching {
+            SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.STUDENTS]
+                .select { filter { isIn("uid", uids) } }
+                .decodeList<StudentRow>()
+                .associateBy { it.uid }
+        }.getOrDefault(emptyMap<String, StudentRow>())
+
+        if (identities.isEmpty()) return rows
+
+        return rows.map { row ->
+            val identity = identities[row.studentUid] ?: return@map row
+            row.copy(
+                name = identity.name ?: row.name,
+                serialNo = identity.serialNo ?: row.serialNo,
+                fatherName = identity.fatherName ?: row.fatherName,
+                studentPhoneNo = identity.studentPhoneNo ?: row.studentPhoneNo,
+                fatherPhoneNo = identity.fatherPhoneNo ?: row.fatherPhoneNo,
+                studentEmail = identity.studentEmail ?: row.studentEmail,
+                groupName = identity.groupName ?: row.groupName,
+                isLocked = identity.isLocked ?: row.isLocked,
+                isPtm = identity.isPtm ?: row.isPtm
+            )
+        }
     }
 
     suspend fun updateStudentLockStatus(studentUid: String, isLocked: Boolean): Result<Unit> = query {
