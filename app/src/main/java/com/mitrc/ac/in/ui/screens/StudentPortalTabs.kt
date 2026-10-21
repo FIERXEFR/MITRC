@@ -406,7 +406,7 @@ private fun SubjectAttendanceCard(item: AttendanceSummaryView) {
 // ---------------------------------------------------------------------------------------------
 // Timetable - a week strip plus a single-day timeline, so the student reads one day at a time
 // instead of scanning six stacked day cards.
-// ---------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------
 
 private val scheduleDayNames =
     listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
