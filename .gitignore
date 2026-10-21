@@ -19,6 +19,7 @@ captures/
 *.aab
 *.ap_
 app/release/
+
 ../AndroidStudioProjects/FIERXETOOL/
 ../AndroidStudioProjects/FIERXETOOL2/
 # Signing keystores (create locally, never commit)
