@@ -481,9 +481,9 @@ private fun CoordinatorProfileSheet(
                     Text(
                         text = buildString {
                             append(item.course ?: "Class #${item.classId}")
-                            if (!item.branch.isNullOrBlank()) append(" Â· ").append(item.branch)
-                            append(" Â· Sem ").append(item.semester)
-                            append(" Â· Sec ").append(item.section)
+                            if (!item.branch.isNullOrBlank()) append(" · ").append(item.branch)
+                            append(" · Sem ").append(item.semester)
+                            append(" · Sec ").append(item.section)
                         },
                         color = PortalTextPrimary,
                         fontSize = 12.5.sp,
@@ -779,7 +779,7 @@ private fun LeaveRequestCard(leave: LeaveItem) {
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(leave.studentName, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                Text("${leave.section} Â· ${leave.reason}", fontSize = 12.sp, color = TextSecondary)
+                Text("${leave.section} · ${leave.reason}", fontSize = 12.sp, color = TextSecondary)
             }
             if (status == "Pending") {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

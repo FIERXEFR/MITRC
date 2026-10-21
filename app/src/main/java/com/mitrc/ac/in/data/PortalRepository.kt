@@ -260,7 +260,8 @@ object PortalRepository {
         val rows = SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_PROFILES]
             .select { filter { eq("class_id", classId) } }
             .decodeList<StudentProfileView>()
-        withStudentIdentities(rows)
+        val identities = fetchStudentIdentities(rows.map { it.studentUid })
+        rows.map { overlayIdentity(it, identities[it.studentUid]) }
     }
 
     suspend fun getExistingAttendance(classSubjectId: Int, date: String, period: Int): Result<List<AttendanceRecordRow>> = query {
@@ -355,59 +356,149 @@ object PortalRepository {
     }
 
     /**
-     * Query students across specified class IDs (from v_my_coordinator_classes).
+     * Query students across the coordinator's classes.
      *
-     * `v_student_directory` supplies the class/semester/section mapping, while the `students`
-     * table is authoritative for the person: name, roll number, emails, phone numbers, lab
-     * group and the lock/PTM flags. The directory can lag behind an admin edit (or serve a row
-     * written before the name was captured), so the identity fields are re-read from `students`
-     * and win field-by-field.
+     * Membership is resolved from several sources and unioned, so one restricted source cannot
+     * blank the list:
+     * - `v_student_directory` provides the class/semester/section mapping and the person's name;
+     * - `v_student_profiles` backs it up when the directory view is not readable by faculty;
+     * - `enrollments` provides the authoritative uid ↔ class_id mapping;
+     * - `students` is authoritative for identity fields (name, roll number, emails, phone
+     *   numbers, lab group, lock/PTM flags) and wins field-by-field when present.
+     *
+     * A student enrolled in one of [classes] but missing from the directory view still renders a
+     * complete card built from `students` + the class metadata. If every source is empty, the
+     * result is empty; a failure of `students` alone never hides directory rows.
      */
-    suspend fun getStudentsForClasses(classIds: List<Int>): Result<List<StudentProfileView>> = query {
-        if (classIds.isEmpty()) return@query emptyList()
-        val rows = SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_DIRECTORY]
-            .select {
-                filter {
-                    isIn("class_id", classIds)
-                }
+    suspend fun getStudentsForClasses(
+        classes: List<MyCoordinatorClassView>
+    ): Result<List<StudentProfileView>> = query {
+        if (classes.isEmpty()) return@query emptyList()
+        val classIds = classes.map { it.classId }
+        val classById = classes.associateBy { it.classId }
+        val client = SupabaseManager.requireClient()
+
+        val directory = runCatching {
+            client.postgrest[SupabaseTableData.Views.V_STUDENT_DIRECTORY]
+                .select { filter { isIn("class_id", classIds) } }
+                .decodeList<StudentProfileView>()
+        }.getOrElse {
+            Log.w(TAG, "v_student_directory query failed: ${it.message}")
+            emptyList()
+        }
+
+        // The directory view can be restricted for faculty accounts. v_student_profiles carries
+        // the same class mapping for a faculty-visible roster, so it backs up an empty directory.
+        val profiles = if (directory.isEmpty()) {
+            runCatching {
+                client.postgrest[SupabaseTableData.Views.V_STUDENT_PROFILES]
+                    .select { filter { isIn("class_id", classIds) } }
+                    .decodeList<StudentProfileView>()
+            }.getOrElse {
+                Log.w(TAG, "v_student_profiles query failed: ${it.message}")
+                emptyList()
             }
-            .decodeList<StudentProfileView>()
-        withStudentIdentities(rows)
+        } else {
+            emptyList()
+        }
+
+        val enrollments = runCatching {
+            client.postgrest[SupabaseTableData.Tables.ENROLLMENTS]
+                .select { filter { isIn("class_id", classIds) } }
+                .decodeList<EnrollmentRow>()
+                .filter { classById.containsKey(it.classId) }
+        }.getOrElse {
+            Log.w(TAG, "enrollments query failed: ${it.message}")
+            emptyList()
+        }
+
+        val identities = fetchStudentIdentities(
+            directory.map { it.studentUid } +
+                profiles.map { it.studentUid } +
+                enrollments.map { it.studentUid }
+        )
+
+        Log.d(
+            TAG,
+            "getStudentsForClasses: classes=${classes.size}, directory=${directory.size}, " +
+                "profiles=${profiles.size}, enrollments=${enrollments.size}, " +
+                "identities=${identities.size}"
+        )
+
+        if (directory.isEmpty() && profiles.isEmpty() && enrollments.isEmpty()) {
+            return@query emptyList()
+        }
+
+        val rows = LinkedHashMap<String, StudentProfileView>()
+        directory.forEach { rows[it.studentUid] = it }
+        profiles.forEach { if (!rows.containsKey(it.studentUid)) rows[it.studentUid] = it }
+
+        enrollments.forEach { enrollment ->
+            val uid = enrollment.studentUid
+            if (uid.isBlank() || rows.containsKey(uid)) return@forEach
+            val klass = classById[enrollment.classId] ?: return@forEach
+            val identity = identities[uid]
+            rows[uid] = StudentProfileView(
+                studentUid = uid,
+                name = identity?.name,
+                serialNo = identity?.serialNo,
+                fatherName = identity?.fatherName,
+                studentPhoneNo = identity?.studentPhoneNo,
+                fatherPhoneNo = identity?.fatherPhoneNo,
+                studentEmail = identity?.studentEmail,
+                groupName = identity?.groupName,
+                isLocked = identity?.isLocked,
+                isPtm = identity?.isPtm,
+                course = klass.course,
+                branch = klass.branch,
+                semester = klass.semester,
+                section = klass.section,
+                academicYear = klass.academicYear,
+                classId = klass.classId
+            )
+        }
+
+        rows.values.map { overlayIdentity(it, identities[it.studentUid]) }
+    }
+
+    /** Reads `students` rows for [uids]. Best-effort: a blocked/failed read yields an empty map. */
+    private suspend fun fetchStudentIdentities(uids: List<String>): Map<String, StudentRow> {
+        val clean = uids.filter { it.isNotBlank() }.distinct()
+        if (clean.isEmpty()) return emptyMap()
+        return runCatching {
+            SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.STUDENTS]
+                .select { filter { isIn("uid", clean) } }
+                .decodeList<StudentRow>()
+                .associateBy { it.uid }
+        }.getOrElse {
+            Log.w(TAG, "students identity query failed: ${it.message}")
+            emptyMap()
+        }
     }
 
     /**
-     * Overlays each directory row with its `students` row. Best-effort: if the identity query is
-     * blocked or fails, the directory rows are returned untouched so the caller still renders.
+     * Overlays the `students` row on a directory row, field by field. Blank strings in `students`
+     * are treated as missing so they never erase a real value coming from the directory.
      */
-    private suspend fun withStudentIdentities(
-        rows: List<StudentProfileView>
-    ): List<StudentProfileView> {
-        val uids = rows.map { it.studentUid }.filter { it.isNotBlank() }.distinct()
-        if (uids.isEmpty()) return rows
+    private fun overlayIdentity(
+        row: StudentProfileView,
+        identity: StudentRow?
+    ): StudentProfileView {
+        if (identity == null) return row
+        fun String?.orCurrent(current: String?): String? =
+            this?.takeIf { it.isNotBlank() } ?: current
 
-        val identities = runCatching {
-            SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.STUDENTS]
-                .select { filter { isIn("uid", uids) } }
-                .decodeList<StudentRow>()
-                .associateBy { it.uid }
-        }.getOrDefault(emptyMap<String, StudentRow>())
-
-        if (identities.isEmpty()) return rows
-
-        return rows.map { row ->
-            val identity = identities[row.studentUid] ?: return@map row
-            row.copy(
-                name = identity.name ?: row.name,
-                serialNo = identity.serialNo ?: row.serialNo,
-                fatherName = identity.fatherName ?: row.fatherName,
-                studentPhoneNo = identity.studentPhoneNo ?: row.studentPhoneNo,
-                fatherPhoneNo = identity.fatherPhoneNo ?: row.fatherPhoneNo,
-                studentEmail = identity.studentEmail ?: row.studentEmail,
-                groupName = identity.groupName ?: row.groupName,
-                isLocked = identity.isLocked ?: row.isLocked,
-                isPtm = identity.isPtm ?: row.isPtm
-            )
-        }
+        return row.copy(
+            name = identity.name.orCurrent(row.name),
+            serialNo = identity.serialNo.orCurrent(row.serialNo),
+            fatherName = identity.fatherName.orCurrent(row.fatherName),
+            studentPhoneNo = identity.studentPhoneNo.orCurrent(row.studentPhoneNo),
+            fatherPhoneNo = identity.fatherPhoneNo.orCurrent(row.fatherPhoneNo),
+            studentEmail = identity.studentEmail.orCurrent(row.studentEmail),
+            groupName = identity.groupName.orCurrent(row.groupName),
+            isLocked = identity.isLocked ?: row.isLocked,
+            isPtm = identity.isPtm ?: row.isPtm
+        )
     }
 
     suspend fun updateStudentLockStatus(studentUid: String, isLocked: Boolean): Result<Unit> = query {

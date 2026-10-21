@@ -122,19 +122,23 @@ fun CoordinatorStudentsView(userUid: String) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedStudent by remember { mutableStateOf<StudentProfileView?>(null) }
     var loading by remember { mutableStateOf(true) }
+    var classCount by remember { mutableStateOf(0) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Identity (name, roll, phone, email, group, lock/PTM flags) is read from the `students`
-    // table; the class mapping comes from v_student_directory. The repository merges the two,
-    // with `students` winning on every identity field.
+    // table; the class mapping comes from v_student_directory (with v_student_profiles and
+    // enrollments as fallbacks). The repository merges them, with `students` winning on every
+    // identity field.
     suspend fun loadStudents() {
         errorMsg = null
-        val classIds = PortalRepository.getMyCoordinatorClasses()
-            .getOrElse { emptyList() }
-            .map { it.classId }
+        val classes = PortalRepository.getMyCoordinatorClasses().getOrElse {
+            errorMsg = it.message ?: "Couldn't load your classes."
+            return
+        }
+        classCount = classes.size
 
-        PortalRepository.getStudentsForClasses(classIds)
+        PortalRepository.getStudentsForClasses(classes)
             .onSuccess { allStudents = it }
             .onFailure { errorMsg = it.message }
     }
@@ -192,10 +196,15 @@ fun CoordinatorStudentsView(userUid: String) {
                         }
                     }
                 )
+                classCount == 0 -> EmptyState(
+                    icon = Icons.Outlined.Group,
+                    title = "No Classes Assigned",
+                    subtitle = "Your coordinator account isn't linked to any class yet."
+                )
                 filtered.isEmpty() && allStudents.isEmpty() -> EmptyState(
                     icon = Icons.Outlined.Group,
                     title = "No Students Yet",
-                    subtitle = "No students are enrolled in your assigned classes."
+                    subtitle = "No students were found in your assigned classes. Pull down to refresh."
                 )
                 filtered.isEmpty() -> EmptyState(
                     icon = Icons.Outlined.Search,
@@ -287,7 +296,7 @@ private fun SearchBar(
         modifier = modifier.fillMaxWidth(),
         placeholder = {
             Text(
-                "Search by name, roll no, sectionâ€¦",
+                "Search by name, roll no, section…",
                 color = TextSecondary.copy(alpha = 0.6f),
                 fontSize = 14.sp
             )
@@ -394,8 +403,8 @@ private fun StudentCard(student: StudentProfileView, onClick: () -> Unit) {
                 Text(
                     text = buildString {
                         student.serialNo?.let { append("Roll: $it") }
-                        student.section?.let { if (isNotEmpty()) append(" Â· "); append("Sec $it") }
-                        student.semester?.let { if (isNotEmpty()) append(" Â· "); append("Sem $it") }
+                        student.section?.let { if (isNotEmpty()) append(" · "); append("Sec $it") }
+                        student.semester?.let { if (isNotEmpty()) append(" · "); append("Sem $it") }
                     },
                     color = TextSecondary,
                     fontSize = 12.sp
@@ -850,7 +859,7 @@ private fun MarksSubjectSection(subject: String, rows: List<MarkView>) {
                     )
                     val display = if (mark.marks != null && mark.maxMarks != null)
                         "${"%.1f".format(mark.marks)} / ${"%.0f".format(mark.maxMarks)}"
-                    else "â€”"
+                    else "—"
                     Text(display, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
                 if (rows.last() != mark) Divider(color = DividerSoft, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 2.dp))
@@ -913,7 +922,7 @@ private fun LoadingState() {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator(color = Navy, strokeWidth = 3.dp)
             Spacer(Modifier.height(12.dp))
-            Text("Loading studentsâ€¦", color = TextSecondary, fontSize = 14.sp)
+            Text("Loading students…", color = TextSecondary, fontSize = 14.sp)
         }
     }
 }
