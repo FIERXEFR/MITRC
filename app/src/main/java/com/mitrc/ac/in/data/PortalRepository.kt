@@ -1,6 +1,7 @@
 package com.mitrc.ac.`in`.data
 
 import android.util.Log
+import com.google.firebase.auth.FirebaseAuth
 import io.github.jan.supabase.postgrest.exception.PostgrestRestException
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
@@ -325,10 +326,138 @@ object PortalRepository {
     // Coordinator & Mentee Queries
     // -----------------------------------------------------------------------------------------
 
+    /**
+     * Classes the signed-in coordinator is responsible for.
+     *
+     * `v_my_coordinator_classes` is the authoritative source, but it resolves the caller
+     * server-side and can come back empty when that mapping is stale (for example when
+     * `faculty_master.firebase_uid` has not been linked yet, or the view is keyed on
+     * `auth.uid()`). In that case the assignment is rebuilt client-side from
+     * `my_portals.faculty_id` -> `course_coordinators` -> `branches` -> `classes`, so the portal
+     * keeps working without any database change.
+     */
     suspend fun getMyCoordinatorClasses(): Result<List<MyCoordinatorClassView>> = query {
-        SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_MY_COORDINATOR_CLASSES]
-            .select()
-            .decodeList<MyCoordinatorClassView>()
+        val client = SupabaseManager.requireClient()
+        val fromView = runCatching {
+            client.postgrest[SupabaseTableData.Views.V_MY_COORDINATOR_CLASSES]
+                .select()
+                .decodeList<MyCoordinatorClassView>()
+        }
+        val viewRows = fromView.getOrNull().orEmpty()
+        if (viewRows.isNotEmpty()) return@query viewRows
+
+        val derived = runCatching { deriveCoordinatorClasses() }.getOrElse {
+            Log.w(TAG, "coordinator class derivation failed: ${it.message}")
+            emptyList()
+        }
+        Log.d(TAG, "getMyCoordinatorClasses: view=${viewRows.size} derived=${derived.size}")
+        if (derived.isNotEmpty()) derived else fromView.getOrElse { throw it }
+    }
+
+    /** Rebuilds the coordinator's class list from the underlying assignment tables. */
+    private suspend fun deriveCoordinatorClasses(): List<MyCoordinatorClassView> {
+        val client = SupabaseManager.requireClient()
+        val facultyId = resolveFacultyId() ?: return emptyList()
+        Log.d(TAG, "deriveCoordinatorClasses: faculty_id=$facultyId")
+
+        var assignments: List<Pair<Int, Int?>> = runCatching {
+            client.postgrest[SupabaseTableData.Tables.COURSE_COORDINATORS]
+                .select { filter { eq("faculty_id", facultyId) } }
+                .decodeList<CourseCoordinatorRow>()
+                .map { it.courseId to it.semester }
+        }.getOrElse {
+            Log.w(TAG, "course_coordinators query failed: ${it.message}")
+            emptyList()
+        }
+
+        // Retry through the coordinator view (faculty id, then email) when the table read is
+        // blocked or the assignment row was never linked to this faculty id.
+        if (assignments.isEmpty()) {
+            val email = FirebaseAuth.getInstance().currentUser?.email.orEmpty()
+            assignments = runCatching {
+                client.postgrest[SupabaseTableData.Views.V_COORDINATORS]
+                    .select()
+                    .decodeList<CoordinatorView>()
+                    .filter {
+                        it.facultyId == facultyId ||
+                            (email.isNotBlank() && it.email.equals(email, ignoreCase = true))
+                    }
+                    .map { it.courseId to it.semester }
+            }.getOrElse {
+                Log.w(TAG, "v_coordinators fallback failed: ${it.message}")
+                emptyList()
+            }
+        }
+        if (assignments.isEmpty()) return emptyList()
+
+        val courses = runCatching {
+            client.postgrest[SupabaseTableData.Tables.COURSES]
+                .select()
+                .decodeList<CourseRow>()
+        }.getOrDefault(emptyList()).associateBy { it.id }
+        val branches = runCatching {
+            client.postgrest[SupabaseTableData.Tables.BRANCHES]
+                .select()
+                .decodeList<BranchRow>()
+        }.getOrDefault(emptyList())
+        val classes = runCatching {
+            client.postgrest[SupabaseTableData.Tables.CLASSES]
+                .select()
+                .decodeList<ClassRow>()
+        }.getOrElse {
+            Log.w(TAG, "classes table query failed, trying v_classes: ${it.message}")
+            runCatching {
+                client.postgrest[SupabaseTableData.Views.V_CLASSES]
+                    .select()
+                    .decodeList<ClassRow>()
+            }.getOrDefault(emptyList())
+        }
+        val branchesByCourse = branches.groupBy { it.courseId }
+
+        return assignments.flatMap { (courseId, semester) ->
+            (branchesByCourse[courseId] ?: emptyList()).flatMap { branch ->
+                classes
+                    .filter {
+                        it.branchId == branch.id &&
+                            (semester == null || it.semester == semester)
+                    }
+                    .map { cls ->
+                        MyCoordinatorClassView(
+                            classId = cls.id,
+                            courseId = courseId,
+                            course = courses[courseId]?.name,
+                            branchId = branch.id,
+                            branch = branch.name,
+                            semester = cls.semester,
+                            section = cls.section,
+                            academicYear = cls.academicYear
+                        )
+                    }
+            }
+        }.distinctBy { it.classId }
+    }
+
+    /**
+     * Faculty row of the signed-in staff account. `my_portals.faculty_id` is preferred; when the
+     * RPC has no row (for example the account was only matched by email), `faculty_master` is
+     * looked up by firebase_uid and then by email.
+     */
+    private suspend fun resolveFacultyId(): Int? {
+        val portals = getMyPortals().getOrNull()
+        portals?.facultyId?.let { return it }
+
+        // A pure student has no faculty row; skip the extra lookups on that path.
+        if (portals != null &&
+            !portals.isFaculty && !portals.isTeacher && !portals.isMentor &&
+            !portals.isCoordinator && !portals.isHod && !portals.isTbIncharge
+        ) {
+            return null
+        }
+
+        val user = FirebaseAuth.getInstance().currentUser ?: return null
+        val email = user.email.orEmpty()
+        if (user.uid.isBlank() && email.isBlank()) return null
+        return getFacultyByUidOrEmail(user.uid, email).getOrNull()?.id
     }
 
     suspend fun getCoordinatorsList(): Result<List<CoordinatorView>> = query {

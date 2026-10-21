@@ -153,7 +153,7 @@ fun CoordinatorPortalShell(
             ?: AuthRepository.currentUser?.email?.substringBefore('@')
     }
 
-    // Same rule as the student portal: "Welcome" on the first open of the day, "HEY" after.
+    // Same rule as the student portal: "Welcome" on the first open of the day, "Hi !" after.
     val greeting = remember { GreetingStore.greeting() }
     val headerTitle = when (selectedTab) {
         CoordinatorTab.Overview -> "$greeting, ${firstNameOf(coordinatorName)} \ud83d\udc4b"
