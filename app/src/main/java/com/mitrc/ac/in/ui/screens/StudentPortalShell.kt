@@ -187,9 +187,14 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
     val scheduleMode = ScheduleMode.fromName(scheduleModeName)
 
     // One scroll position per tab so the header collapses against whichever list is on screen and
-    // switching tabs keeps each tab where the user left it.
+    // switching tabs keeps each tab where the user left it. Academics gets one state per mode:
+    // the pager composes neighbouring pages at the same time, and two scrollables writing a single
+    // ScrollState fight over its value/maxValue - that was the jitter and the lock-up.
     val homeScroll = rememberScrollState()
-    val scheduleScroll = rememberScrollState()
+    val attendanceScroll = rememberScrollState()
+    val timetableScroll = rememberScrollState()
+    val notesScroll = rememberScrollState()
+    val examsScroll = rememberScrollState()
     val eventsScroll = rememberScrollState()
     val settingsScroll = rememberScrollState()
 
@@ -254,7 +259,13 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
                 name = portalDisplayName(data?.profile),
                 scroll = when (tab) {
                     StudentTab.HOME -> homeScroll
-                    StudentTab.ATTENDANCE -> scheduleScroll
+                    StudentTab.ATTENDANCE -> when (scheduleMode) {
+                        ScheduleMode.ATTENDANCE -> attendanceScroll
+                        ScheduleMode.TIMETABLE -> timetableScroll
+                        ScheduleMode.NOTES -> notesScroll
+                        ScheduleMode.EXAMS -> examsScroll
+                    }
+
                     StudentTab.EVENTS -> eventsScroll
                     StudentTab.SETTINGS -> settingsScroll
                 },
@@ -301,7 +312,10 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
 
                             StudentTab.ATTENDANCE -> StudentScheduleTab(
                                 data = current,
-                                scroll = scheduleScroll,
+                                attendanceScroll = attendanceScroll,
+                                timetableScroll = timetableScroll,
+                                notesScroll = notesScroll,
+                                examsScroll = examsScroll,
                                 mode = scheduleMode,
                                 notes = notes,
                                 onReload = refreshData,

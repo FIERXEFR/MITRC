@@ -2,6 +2,14 @@ package com.mitrc.ac.`in`.ui.screens
 
 import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,12 +44,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,10 +73,13 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.mitrc.ac.`in`.R
 import com.mitrc.ac.`in`.auth.AdminRepository
 import com.mitrc.ac.`in`.auth.AuthRepository
 import com.mitrc.ac.`in`.data.OnboardingStore
+import com.mitrc.ac.`in`.data.PasswordResetStore
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
 import com.mitrc.ac.`in`.ui.theme.ErrorRed
 import com.mitrc.ac.`in`.ui.theme.Gold
@@ -100,6 +113,8 @@ fun LoginScreen(onLoggedIn: () -> Unit, onAdminLoggedIn: () -> Unit) {
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
+    var sendingReset by remember { mutableStateOf(false) }
+    var showResetDialog by remember { mutableStateOf(false) }
 
     fun signIn() {
         error = null
@@ -173,7 +188,7 @@ fun LoginScreen(onLoggedIn: () -> Unit, onAdminLoggedIn: () -> Unit) {
         }
     }
 
-    fun resetPassword() {
+    fun requestPasswordReset() {
         error = null
         notice = null
         val mail = email.trim()
@@ -181,12 +196,29 @@ fun LoginScreen(onLoggedIn: () -> Unit, onAdminLoggedIn: () -> Unit) {
             error = "Enter your email above first, then tap Forgot password"
             return
         }
-        loading = true
+        val waitMs = PasswordResetStore.remainingMillis(mail)
+        if (waitMs > 0L) {
+            val minutes = ((waitMs + 59_999L) / 60_000L).coerceAtLeast(1L)
+            error = "A reset link was already sent from this device. Try again in $minutes min."
+            return
+        }
+        showResetDialog = true
+    }
+
+    fun resetPassword() {
+        val mail = email.trim()
+        error = null
+        notice = null
+        sendingReset = true
         scope.launch {
             val result = AuthRepository.sendPasswordReset(mail)
-            loading = false
+            sendingReset = false
+            showResetDialog = false
             result.fold(
-                onSuccess = { notice = "Password reset link sent to $mail" },
+                onSuccess = {
+                    PasswordResetStore.markSent(mail)
+                    notice = "Password reset link sent to $mail"
+                },
                 onFailure = { error = AuthRepository.friendlyMessage(it) }
             )
         }
@@ -367,7 +399,7 @@ fun LoginScreen(onLoggedIn: () -> Unit, onAdminLoggedIn: () -> Unit) {
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        TextButton(onClick = ::resetPassword, enabled = !loading) {
+                        TextButton(onClick = ::requestPasswordReset, enabled = !loading) {
                             Text("Forgot password?", color = Navy)
                         }
                     }
@@ -452,6 +484,145 @@ fun LoginScreen(onLoggedIn: () -> Unit, onAdminLoggedIn: () -> Unit) {
                     .fillMaxWidth()
                     .padding(top = 4.dp, bottom = 28.dp)
             )
+        }
+    }
+
+    if (showResetDialog) {
+        ResetPasswordDialog(
+            email = email.trim(),
+            sending = sendingReset,
+            onDismiss = { if (!sendingReset) showResetDialog = false },
+            onConfirm = ::resetPassword
+        )
+    }
+}
+
+@Composable
+private fun ResetPasswordDialog(
+    email: String,
+    sending: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+
+    Dialog(
+        onDismissRequest = { if (!sending) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.45f))
+                .padding(horizontal = 32.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            AnimatedVisibility(
+                visible = visible,
+                enter = scaleIn(
+                    initialScale = 0.9f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                ) + fadeIn(tween(220)),
+                exit = scaleOut(targetScale = 0.92f, animationSpec = tween(160)) + fadeOut(tween(140))
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = SurfaceWhite,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(54.dp)
+                                .clip(CircleShape)
+                                .background(Brush.linearGradient(listOf(Navy, NavyDeep))),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Outlined.Lock,
+                                contentDescription = null,
+                                tint = GoldLight,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        Spacer(Modifier.height(14.dp))
+
+                        Text(
+                            text = "Send reset link?",
+                            color = TextPrimary,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+
+                        Spacer(Modifier.height(8.dp))
+
+                        Text(
+                            text = "We'll email a password reset link to\n$email",
+                            color = TextSecondary,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                            textAlign = TextAlign.Center
+                        )
+
+                        Spacer(Modifier.height(20.dp))
+
+                        if (sending) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(
+                                    color = Navy,
+                                    strokeWidth = 2.5.dp,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Text(
+                                    text = "Sending link...",
+                                    color = TextSecondary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = onDismiss,
+                                    shape = RoundedCornerShape(14.dp),
+                                    border = BorderStroke(1.dp, DividerSoft),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(46.dp)
+                                ) {
+                                    Text("Cancel", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                }
+                                Button(
+                                    onClick = onConfirm,
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Navy,
+                                        contentColor = Color.White
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(46.dp)
+                                ) {
+                                    Text("Send link", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

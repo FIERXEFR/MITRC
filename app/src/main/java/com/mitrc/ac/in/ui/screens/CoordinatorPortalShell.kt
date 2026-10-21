@@ -3,6 +3,7 @@ package com.mitrc.ac.`in`.ui.screens
 import android.net.Uri
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -68,9 +69,6 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -141,51 +139,16 @@ fun CoordinatorPortalShell(
     var showNotificationsSheet by remember { mutableStateOf(false) }
     var showProfileSheet by remember { mutableStateOf(false) }
     var showPostNoticeDialog by remember { mutableStateOf(false) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
+    var signingOut by remember { mutableStateOf(false) }
+    var signOutComplete by remember { mutableStateOf(false) }
 
     Scaffold(
         bottomBar = {
-            NavigationBar(
-                containerColor = SurfaceWhite,
-                tonalElevation = 8.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                val tabs = listOf(
-                    CoordinatorTab.Overview,
-                    CoordinatorTab.Students,
-                    CoordinatorTab.Timetable,
-                    CoordinatorTab.Resources,
-                    CoordinatorTab.Settings
-                )
-
-                tabs.forEach { tab ->
-                    val isSelected = selectedTab == tab
-                    NavigationBarItem(
-                        selected = isSelected,
-                        onClick = { selectedTab = tab },
-                        icon = {
-                            Icon(
-                                imageVector = tab.icon,
-                                contentDescription = tab.label,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        },
-                        label = {
-                            Text(
-                                text = tab.label,
-                                fontSize = 10.5.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                            )
-                        },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Navy,
-                            selectedTextColor = Navy,
-                            indicatorColor = Gold.copy(alpha = 0.2f),
-                            unselectedIconColor = TextSecondary,
-                            unselectedTextColor = TextSecondary
-                        )
-                    )
-                }
-            }
+            CoordinatorBottomBar(
+                selected = selectedTab,
+                onSelect = { selectedTab = it }
+            )
         },
         floatingActionButton = {
             if (selectedTab == CoordinatorTab.Overview || selectedTab == CoordinatorTab.Resources) {
@@ -252,12 +215,7 @@ fun CoordinatorPortalShell(
                         CoordinatorTab.Settings -> {
                             CoordinatorSettingsView(
                                 userUid = userUid,
-                                onSignedOut = {
-                                    scope.launch {
-                                        AuthRepository.signOut()
-                                        onSignedOut()
-                                    }
-                                }
+                                onSignOutRequest = { showLogoutDialog = true }
                             )
                         }
                     }
@@ -269,6 +227,103 @@ fun CoordinatorPortalShell(
                     onDismiss = { showPostNoticeDialog = false },
                     onPosted = { showPostNoticeDialog = false }
                 )
+            }
+
+            if (showLogoutDialog) {
+                LogoutConfirmDialog(
+                    signingOut = signingOut,
+                    signOutComplete = signOutComplete,
+                    onConfirm = {
+                        signingOut = true
+                        scope.launch {
+                            AuthRepository.signOut()
+                            delay(250)
+                            signOutComplete = true
+                        }
+                    },
+                    onDismiss = { if (!signingOut) showLogoutDialog = false },
+                    onExitAnimated = onSignedOut
+                )
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Bottom navigation - mirrors the student portal's light track / navy pill treatment.
+// ---------------------------------------------------------------------------------------------
+
+@Composable
+private fun CoordinatorBottomBar(
+    selected: CoordinatorTab,
+    onSelect: (CoordinatorTab) -> Unit
+) {
+    val tabs = listOf(
+        CoordinatorTab.Overview,
+        CoordinatorTab.Students,
+        CoordinatorTab.Timetable,
+        CoordinatorTab.Resources,
+        CoordinatorTab.Settings
+    )
+
+    Surface(
+        color = PortalCard,
+        shadowElevation = 16.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(PortalCardAlt, RoundedCornerShape(18.dp))
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            tabs.forEach { item ->
+                val isSelected = item == selected
+                val scale by animateFloatAsState(
+                    targetValue = if (isSelected) 1.06f else 1f,
+                    animationSpec = tween(240),
+                    label = "navScale"
+                )
+                val container by animateColorAsState(
+                    targetValue = if (isSelected) PortalBlue else Color.Transparent,
+                    animationSpec = tween(240),
+                    label = "navBg"
+                )
+                val content by animateColorAsState(
+                    targetValue = if (isSelected) Color.White else PortalTextSecondary,
+                    animationSpec = tween(240),
+                    label = "navContent"
+                )
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(container)
+                        .clickable { onSelect(item) }
+                        .padding(vertical = 9.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        item.icon,
+                        contentDescription = item.label,
+                        tint = content,
+                        modifier = Modifier
+                            .size(22.dp)
+                            .scale(scale)
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = item.label,
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                        color = content,
+                        maxLines = 1
+                    )
+                }
             }
         }
     }
@@ -653,7 +708,7 @@ private fun CoordinatorResourcesView(onPostNotice: () -> Unit) {
 @Composable
 private fun CoordinatorSettingsView(
     userUid: String,
-    onSignedOut: () -> Unit
+    onSignOutRequest: () -> Unit
 ) {
     var updateStatusText by remember { mutableStateOf<String?>(null) }
 
@@ -704,7 +759,7 @@ private fun CoordinatorSettingsView(
         Spacer(Modifier.height(16.dp))
 
         Button(
-            onClick = onSignedOut,
+            onClick = onSignOutRequest,
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(containerColor = ErrorRed, contentColor = Color.White),
             modifier = Modifier.fillMaxWidth().height(50.dp)

@@ -152,7 +152,7 @@ enum class ScheduleMode(val label: String) {
     ATTENDANCE("Attendance"),
     TIMETABLE("Timetable"),
     NOTES("Notes"),
-    EXAMS("Exams Results");
+    EXAMS("Results");
 
     companion object {
         fun fromName(name: String?): ScheduleMode =

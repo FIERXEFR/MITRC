@@ -51,12 +51,14 @@ import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.EventAvailable
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MarkEmailRead
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Button
@@ -109,6 +111,7 @@ import com.mitrc.ac.`in`.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
@@ -132,7 +135,10 @@ private fun PortalTabScaffold(
 @Composable
 fun StudentScheduleTab(
     data: StudentPortalData,
-    scroll: ScrollState,
+    attendanceScroll: ScrollState,
+    timetableScroll: ScrollState,
+    notesScroll: ScrollState,
+    examsScroll: ScrollState,
     mode: ScheduleMode,
     notes: MutableList<PortalNote>,
     onReload: suspend () -> Unit,
@@ -206,10 +212,17 @@ fun StudentScheduleTab(
                     .fillMaxWidth()
                     .weight(1f)
             ) { page ->
-                Column(modifier = Modifier.fillMaxSize().verticalScroll(scroll)) {
-                    when (ScheduleMode.entries[page]) {
+                val pageMode = ScheduleMode.entries[page]
+                val pageScroll = when (pageMode) {
+                    ScheduleMode.ATTENDANCE -> attendanceScroll
+                    ScheduleMode.TIMETABLE -> timetableScroll
+                    ScheduleMode.NOTES -> notesScroll
+                    ScheduleMode.EXAMS -> examsScroll
+                }
+                Column(modifier = Modifier.fillMaxSize().verticalScroll(pageScroll)) {
+                    when (pageMode) {
                         ScheduleMode.ATTENDANCE -> AttendanceContent(data = data)
-                        ScheduleMode.TIMETABLE -> TimetableContent(data = data)
+                        ScheduleMode.TIMETABLE -> TimetableContent(data = data, refreshing = isRefreshing)
                         ScheduleMode.NOTES -> NotesContent(data = data, notes = notes)
                         ScheduleMode.EXAMS -> ExamsResultsContent(data = data)
                     }
@@ -390,72 +403,286 @@ private fun SubjectAttendanceCard(item: AttendanceSummaryView) {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Timetable - a week strip plus a single-day timeline, so the student reads one day at a time
+// instead of scanning six stacked day cards.
+// ---------------------------------------------------------------------------------------------
+
+private val scheduleDayNames =
+    listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+
+private data class WeekDayCell(
+    val dayOfWeek: Int,
+    val shortLabel: String,
+    val dayOfMonth: Int,
+    val isToday: Boolean,
+    val hasClasses: Boolean
+)
+
+private fun currentWeekCells(timetable: List<MyTimetableEntryView>): List<WeekDayCell> {
+    val todayDow = currentDayOfWeek()
+    val monday = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, -(todayDow - 1)) }
+    val labels = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+    val busyDays = timetable.map { it.dayOfWeek }.toSet()
+
+    return (0..5).map { offset ->
+        val day = (monday.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, offset) }
+        WeekDayCell(
+            dayOfWeek = offset + 1,
+            shortLabel = labels[offset],
+            dayOfMonth = day.get(Calendar.DAY_OF_MONTH),
+            isToday = offset + 1 == todayDow,
+            hasClasses = busyDays.contains(offset + 1)
+        )
+    }
+}
+
+private fun currentWeekLabel(): String {
+    val todayDow = currentDayOfWeek()
+    val monday = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, -(todayDow - 1)) }
+    val saturday = (monday.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, 5) }
+    val format = SimpleDateFormat("d MMM", Locale.US)
+    return "${monday.get(Calendar.DAY_OF_MONTH)} – ${format.format(saturday.time)}"
+}
+
+/**
+ * The college's period clock, used whenever a timetable row has no explicit start/end time.
+ * Lunch runs 1:15 PM - 1:45 PM, which is why the 5th lecture starts at 1:45 PM.
+ */
+private val periodStartMinutes = mapOf(
+    1 to 9 * 60 + 15,
+    2 to 10 * 60 + 15,
+    3 to 11 * 60 + 15,
+    4 to 12 * 60 + 15,
+    5 to 13 * 60 + 45,
+    6 to 14 * 60 + 45
+)
+private val periodEndMinutes = mapOf(
+    1 to 10 * 60 + 15,
+    2 to 11 * 60 + 15,
+    3 to 12 * 60 + 15,
+    4 to 13 * 60 + 15,
+    5 to 14 * 60 + 45,
+    6 to 15 * 60 + 45
+)
+
+private data class ClockTime(val label: String, val suffix: String)
+
+private fun clockTimeOf(minutes: Int): ClockTime {
+    val hour24 = (minutes / 60) % 24
+    val minute = minutes % 60
+    val suffix = if (hour24 >= 12) "PM" else "AM"
+    val hour12 = if (hour24 % 12 == 0) 12 else hour24 % 12
+    return ClockTime(String.format(Locale.US, "%d:%02d", hour12, minute), suffix)
+}
+
+/** Parses a stored "HH:mm" / "H:mm:ss" value; null when the row carries no usable clock time. */
+private fun parseClock(raw: String?): ClockTime? {
+    val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val hour = value.substringBefore(':').toIntOrNull() ?: return null
+    if (hour !in 0..23) return null
+    val minute = value.substringAfter(':', "00").take(2).toIntOrNull()?.coerceIn(0, 59) ?: 0
+    return clockTimeOf(hour * 60 + minute)
+}
+
+/** Start of a class: the stored clock time when present, otherwise the period's fixed slot. */
+private fun entryStart(entry: MyTimetableEntryView): ClockTime? =
+    parseClock(entry.startTime) ?: periodStartMinutes[entry.startPeriod]?.let(::clockTimeOf)
+
+/** End of a class: the stored clock time, otherwise the end of its last period. */
+private fun entryEnd(entry: MyTimetableEntryView): ClockTime? =
+    parseClock(entry.endTime)
+        ?: periodEndMinutes[entry.endPeriod]?.let(::clockTimeOf)
+        ?: periodEndMinutes[entry.startPeriod]?.let(::clockTimeOf)
+
+private fun entryTimeRange(entry: MyTimetableEntryView): String {
+    val start = entryStart(entry) ?: return "Period ${entry.startPeriod}"
+    val end = entryEnd(entry) ?: return "${start.label} ${start.suffix}"
+    return "${start.label} ${start.suffix} – ${end.label} ${end.suffix}"
+}
+
+private fun roomLabel(value: String): String =
+    if (value.startsWith("room", ignoreCase = true)) value else "Room $value"
+
 @Composable
-private fun TimetableContent(data: StudentPortalData) {
-    Column {
-        val dayNames = remember {
-            mapOf(
-                1 to "Monday", 2 to "Tuesday", 3 to "Wednesday",
-                4 to "Thursday", 5 to "Friday", 6 to "Saturday"
+private fun TimetableContent(data: StudentPortalData, refreshing: Boolean) {
+    val timetable = remember(data.timetable) {
+        if (data.timetable.isEmpty()) sampleTimetableEntries() else data.timetable
+    }
+    val todayDow = remember { currentDayOfWeek() }
+    var selectedDay by remember { mutableStateOf(todayDow.coerceIn(1, 6)) }
+
+    val weekCells = remember(timetable, todayDow) { currentWeekCells(timetable) }
+    val weekRange = remember(todayDow) { currentWeekLabel() }
+    val dayEntries = remember(timetable, selectedDay) {
+        timetable.filter { it.dayOfWeek == selectedDay }.sortedBy { it.startPeriod }
+    }
+
+    val isToday = selectedDay == todayDow
+    val dayName = scheduleDayNames[selectedDay - 1]
+
+    if (refreshing) {
+        TimetableSkeleton()
+        return
+    }
+
+    if (data.profile?.groupName.isNullOrBlank()) {
+        LabGroupNotice()
+        Spacer(Modifier.height(14.dp))
+    }
+
+    WeekPickerCard(
+        weekRange = weekRange,
+        cells = weekCells,
+        selectedDay = selectedDay,
+        onSelect = { selectedDay = it }
+    )
+
+    Spacer(Modifier.height(20.dp))
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = if (isToday) "Today's Classes" else "$dayName's Classes",
+            color = PortalTextPrimary,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.ExtraBold
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = when (dayEntries.size) {
+                0 -> "No classes scheduled"
+                1 -> "1 class scheduled"
+                else -> "${dayEntries.size} classes scheduled"
+            },
+            color = PortalTextSecondary,
+            fontSize = 11.5.sp
+        )
+    }
+
+    Spacer(Modifier.height(14.dp))
+
+    if (dayEntries.isEmpty()) {
+        EmptyDayCard(dayName = dayName)
+    } else {
+        dayEntries.forEachIndexed { index, entry ->
+            ScheduleTimelineRow(
+                entry = entry,
+                isLast = index == dayEntries.lastIndex
             )
         }
-        val timetable = remember(data.timetable) {
-            if (data.timetable.isEmpty()) sampleTimetableEntries() else data.timetable
-        }
-        val grouped = remember(timetable) { timetable.groupBy { it.dayOfWeek } }
-        val today = remember { currentDayOfWeek() }
+    }
+}
 
-        PortalSectionLabel(text = "WEEKLY TIMETABLE")
-        Spacer(Modifier.height(12.dp))
+@Composable
+private fun WeekPickerCard(
+    weekRange: String,
+    cells: List<WeekDayCell>,
+    selectedDay: Int,
+    onSelect: (Int) -> Unit
+) {
+    val busyDays = cells.count { it.hasClasses }
 
-        if (data.profile?.groupName.isNullOrBlank()) {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = PortalRose.copy(alpha = 0.08f),
-                border = androidx.compose.foundation.BorderStroke(1.dp, PortalRose.copy(alpha = 0.4f)),
-                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = PortalCard,
+        border = BorderStroke(1.dp, PortalStroke),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                Column {
+                    Text(
+                        text = "THIS WEEK",
+                        color = PortalTextSecondary,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.4.sp
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = weekRange,
+                        color = PortalTextPrimary,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
                 Text(
-                    text = "Lab group not assigned yet. Contact your co-ordinator.",
-                    color = PortalRose, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(14.dp)
+                    text = if (busyDays == 0) "No classes" else "$busyDays of 6 days",
+                    color = PortalTextSecondary,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Medium
                 )
             }
-        }
 
-        if (timetable.isEmpty()) {
-            PortalEmptyCard(message = "No published timetable available.")
-        } else {
-            (1..6).forEach { day ->
-                val entries = grouped[day]?.sortedBy { it.startPeriod }
-                if (!entries.isNullOrEmpty()) {
-                    val isToday = day == today
-                    Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = PortalCard,
-                        border = androidx.compose.foundation.BorderStroke(if (isToday) 1.5.dp else 1.dp, if (isToday) PortalBlue else PortalStroke),
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                cells.forEach { cell ->
+                    val selected = cell.dayOfWeek == selectedDay
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onSelect(cell.dayOfWeek) }
+                            .padding(vertical = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = dayNames[day] ?: "Day $day",
-                                    color = if (isToday) PortalBlue else PortalTextPrimary,
-                                    fontSize = 14.sp, fontWeight = FontWeight.Bold
-                                )
-                                if (isToday) {
-                                    Spacer(Modifier.width(8.dp))
-                                    Box(modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(PortalBlue.copy(alpha = 0.12f)).padding(horizontal = 7.dp, vertical = 3.dp)) {
-                                        Text(text = "TODAY", color = PortalBlue, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
+                        Text(
+                            text = cell.shortLabel,
+                            color = if (selected) PortalBlue else PortalTextSecondary,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(Modifier.height(5.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .then(
+                                    when {
+                                        selected -> Modifier.background(PortalBlue)
+                                        cell.isToday -> Modifier.border(
+                                            1.dp,
+                                            PortalBlue.copy(alpha = 0.45f),
+                                            CircleShape
+                                        )
+
+                                        else -> Modifier
                                     }
-                                }
-                            }
-                            Spacer(Modifier.height(12.dp))
-                            entries.forEachIndexed { idx, entry ->
-                                if (idx > 0) Spacer(Modifier.height(8.dp))
-                                TimetableEntryRow(entry)
-                            }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = cell.dayOfMonth.toString(),
+                                color = when {
+                                    selected -> Color.White
+                                    cell.isToday -> PortalBlue
+                                    else -> PortalTextPrimary
+                                },
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
+                        Spacer(Modifier.height(5.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(4.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        !cell.hasClasses -> Color.Transparent
+                                        selected -> PortalBlue
+                                        else -> PortalBlue.copy(alpha = 0.35f)
+                                    }
+                                )
+                        )
                     }
                 }
             }
@@ -464,100 +691,346 @@ private fun TimetableContent(data: StudentPortalData) {
 }
 
 @Composable
-private fun TimetableEntryRow(entry: MyTimetableEntryView) {
-    val accentColor = when (entry.subjectKind.lowercase()) {
+private fun ScheduleTimelineRow(
+    entry: MyTimetableEntryView,
+    isLast: Boolean
+) {
+    val accent = when (entry.subjectKind.lowercase()) {
         "lab" -> PortalPurple
         "consultation" -> PortalAmber
         else -> PortalBlue
     }
+    val start = entryStart(entry)
+    val timeRange = entryTimeRange(entry)
 
-    Row(
+    val place = entry.room?.takeUnless { it.isBlank() } ?: entry.classRoom?.takeUnless { it.isBlank() }
+    val faculty = entry.teacherName?.takeUnless { it.isBlank() }
+    val meta = listOfNotNull(place?.let(::roomLabel), faculty).joinToString("  ·  ")
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = accent.copy(alpha = 0.06f),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.16f)),
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(PortalTrack.copy(alpha = 0.4f))
-            .border(width = 1.dp, color = PortalStroke, shape = RoundedCornerShape(14.dp))
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(bottom = if (isLast) 0.dp else 12.dp)
     ) {
-        Column(modifier = Modifier.width(72.dp)) {
-            val timeRange = if (!entry.startTime.isNullOrBlank() && !entry.endTime.isNullOrBlank()) {
-                "${entry.startTime} - ${entry.endTime}"
-            } else {
-                "P${entry.startPeriod}${if (entry.endPeriod > entry.startPeriod) "-${entry.endPeriod}" else ""}"
-            }
-            Text(
-                text = timeRange,
-                color = PortalTextSecondary,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        Box(
-            modifier = Modifier
-                .width(4.dp)
-                .height(42.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(accentColor)
-        )
-
-        Spacer(Modifier.width(12.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.width(44.dp)) {
                 Text(
-                    text = entry.subjectName,
+                    text = start?.label ?: "—",
                     color = PortalTextPrimary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.ExtraBold
                 )
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(accentColor.copy(alpha = 0.12f))
-                        .padding(horizontal = 7.dp, vertical = 2.dp)
-                ) {
+                if (start != null) {
                     Text(
-                        text = entry.subjectKind.replaceFirstChar { it.uppercase() }.ifBlank { "Class" },
-                        color = accentColor,
-                        fontSize = 9.5.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(4.dp))
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = entry.teacherName.orEmpty().ifBlank { "Faculty" },
-                    color = PortalTextSecondary,
-                    fontSize = 11.5.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                if (!entry.room.isNullOrBlank()) {
-                    Text(
-                        text = "Room ${entry.room}",
+                        text = start.suffix,
                         color = PortalTextSecondary,
-                        fontSize = 11.sp,
+                        fontSize = 8.5.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
             }
+
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    .width(1.dp)
+                    .height(34.dp)
+                    .background(accent.copy(alpha = 0.22f))
+            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Text(
+                        text = entry.subjectName,
+                        color = PortalTextPrimary,
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(accent.copy(alpha = 0.14f))
+                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = entry.subjectKind.replaceFirstChar { it.uppercase() }
+                                .ifBlank { "Class" },
+                            color = accent,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(7.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Outlined.Schedule,
+                        contentDescription = null,
+                        tint = accent.copy(alpha = 0.85f),
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        text = timeRange,
+                        color = PortalTextSecondary,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    if (entry.subjectCode.isNotBlank()) {
+                        Spacer(Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(3.dp)
+                                .clip(CircleShape)
+                                .background(PortalTextSecondary.copy(alpha = 0.5f))
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = entry.subjectCode,
+                            color = PortalTextSecondary.copy(alpha = 0.9f),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                if (meta.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = meta,
+                        color = PortalTextSecondary.copy(alpha = 0.9f),
+                        fontSize = 10.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimetableSkeleton() {
+    Column {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = PortalCard,
+            border = BorderStroke(1.dp, PortalStroke),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp)) {
+                Box(
+                    modifier = Modifier
+                        .width(64.dp)
+                        .height(9.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .shimmerEffect()
+                )
+                Spacer(Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .width(108.dp)
+                        .height(15.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .shimmerEffect()
+                )
+                Spacer(Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    repeat(6) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(18.dp)
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .shimmerEffect()
+                            )
+                            Spacer(Modifier.height(9.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(CircleShape)
+                                    .shimmerEffect()
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        Box(
+            modifier = Modifier
+                .width(148.dp)
+                .height(17.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .shimmerEffect()
+        )
+        Spacer(Modifier.height(7.dp))
+        Box(
+            modifier = Modifier
+                .width(96.dp)
+                .height(10.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .shimmerEffect()
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        repeat(3) { index ->
+            TimetableRowSkeleton()
+            if (index < 2) Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun TimetableRowSkeleton() {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = PortalCard,
+        border = BorderStroke(1.dp, PortalStroke),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.width(44.dp)) {
+                Box(
+                    modifier = Modifier
+                        .width(30.dp)
+                        .height(13.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .shimmerEffect()
+                )
+                Spacer(Modifier.height(6.dp))
+                Box(
+                    modifier = Modifier
+                        .width(16.dp)
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .shimmerEffect()
+                )
+            }
+            Spacer(Modifier.width(25.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.72f)
+                        .height(13.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .shimmerEffect()
+                )
+                Spacer(Modifier.height(9.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.46f)
+                        .height(10.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .shimmerEffect()
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Box(
+                modifier = Modifier
+                    .size(width = 42.dp, height = 18.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .shimmerEffect()
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptyDayCard(dayName: String) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = PortalCard,
+        border = BorderStroke(1.dp, PortalStroke),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(PortalBlue.copy(alpha = 0.08f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Outlined.EventAvailable,
+                    contentDescription = null,
+                    tint = PortalBlue,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = "No classes on $dayName",
+                color = PortalTextPrimary,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = "Enjoy the break — nothing is scheduled.",
+                color = PortalTextSecondary,
+                fontSize = 11.5.sp,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@Composable
+private fun LabGroupNotice() {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = PortalRose.copy(alpha = 0.06f),
+        border = BorderStroke(1.dp, PortalRose.copy(alpha = 0.28f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Outlined.Info,
+                contentDescription = null,
+                tint = PortalRose,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = "Lab group not assigned yet. Contact your co-ordinator.",
+                color = PortalRose,
+                fontSize = 11.5.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }
@@ -848,7 +1321,7 @@ private fun ExamsResultsContent(data: StudentPortalData) {
         Spacer(Modifier.height(4.dp))
 
         // --- 2. EXAMS SUB-FILTER CHIPS ---
-        PortalSectionLabel(text = "EXAMS RESULTS")
+        PortalSectionLabel(text = "RESULTS")
 
         val filterCategories = listOf("All Exams", "Unit Tests", "Mid Terms", "End Sem")
         Row(
@@ -1310,7 +1783,7 @@ fun StudentSettingsTab(data: StudentPortalData, scroll: ScrollState, onSignedOut
 }
 
 @Composable
-private fun LogoutConfirmDialog(
+internal fun LogoutConfirmDialog(
     signingOut: Boolean,
     signOutComplete: Boolean,
     onConfirm: () -> Unit,
