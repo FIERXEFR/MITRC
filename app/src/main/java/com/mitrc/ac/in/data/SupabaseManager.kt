@@ -75,7 +75,15 @@ object SupabaseManager {
         repeat(USER_WAIT_ATTEMPTS) { attempt ->
             val user = auth.currentUser
             if (user != null) {
-                val token = runCatching { user.getIdToken(false).await()?.token }.getOrNull()
+                val token = runCatching { user.getIdToken(false).await()?.token }
+                    .onFailure { error ->
+                        Log.w(TAG, "getIdToken failed for uid=${user.uid}: ${error.message}")
+                        if (isAuthFailure(error)) {
+                            Log.w(TAG, "Cached auth credential is invalid or expired. Signing out stale session.")
+                            runCatching { auth.signOut() }
+                        }
+                    }
+                    .getOrNull()
                 if (!token.isNullOrBlank()) return token
                 Log.w(TAG, "getIdToken returned no token for uid=${user.uid}, attempt=$attempt")
             }
@@ -98,7 +106,7 @@ object SupabaseManager {
 
     private val authFailureMarkers = listOf(
         "jwt", "pgrst301", "pgrst302", "expired", "unauthorized", "invalid claim",
-        "invalid token", "not authorized"
+        "invalid token", "not authorized", "supplied auth credential", "credential", "malformed"
     )
 
     /** True when [error] (or anything it wraps) looks like a rejected/missing auth token. */

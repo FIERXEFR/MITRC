@@ -91,9 +91,85 @@ object CoordinatorAdminRepository {
             .decodeList<ClassGroupRow>()
     }
 
+    /**
+     * Fallback for coordinator portal: returns all active classes mapped into
+     * [MyCoordinatorClassView] format using the service-role key so the coordinator can
+     * manage any class/batch timetable even if role assignment views are partially unpopulated.
+     */
+    suspend fun getAllClassesWithDetails(): Result<List<MyCoordinatorClassView>> = admin { client ->
+        val classes = client.postgrest[SupabaseTableData.Tables.CLASSES]
+            .select()
+            .decodeList<ClassRow>()
+
+        val branches = runCatching {
+            client.postgrest[SupabaseTableData.Tables.BRANCHES].select().decodeList<BranchRow>()
+        }.getOrDefault(emptyList())
+
+        val courses = runCatching {
+            client.postgrest[SupabaseTableData.Tables.COURSES].select().decodeList<CourseRow>()
+        }.getOrDefault(emptyList())
+
+        val branchMap = branches.associateBy { it.id }
+        val courseMap = courses.associateBy { it.id }
+
+        classes.map { cls ->
+            val branch = branchMap[cls.branchId]
+            val course = branch?.courseId?.let { courseMap[it] }
+            MyCoordinatorClassView(
+                classId = cls.id,
+                courseId = course?.id ?: 0,
+                course = course?.name ?: "Course",
+                branchId = cls.branchId,
+                branch = branch?.name ?: "Branch",
+                semester = cls.semester,
+                section = cls.section,
+                academicYear = cls.academicYear
+            )
+        }
+    }
+
     // -----------------------------------------------------------------------------------------
     // Timetable writes
     // -----------------------------------------------------------------------------------------
+
+    /** Creates a new timetable draft for a class directly via service-role key. */
+    suspend fun createTimetable(
+        classId: Int,
+        effectiveFrom: String,
+        room: String? = null
+    ): Result<TimetableRow> = admin { client ->
+        val cleanRoom = room?.trim()?.takeIf { it.isNotEmpty() }
+        val newRow = NewTimetableRow(
+            classId = classId,
+            effectiveFrom = effectiveFrom.trim(),
+            room = cleanRoom,
+            isPublished = false
+        )
+        val inserted = client.postgrest[SupabaseTableData.Tables.TIMETABLES]
+            .insert(newRow) { select() }
+            .decodeList<TimetableRow>()
+
+        inserted.firstOrNull() ?: error("Database created no timetable row.")
+    }
+
+    /** Updates the effective-from date of an existing timetable. */
+    suspend fun updateEffectiveFrom(timetableId: Int, effectiveFrom: String): Result<Unit> = admin { client ->
+        val clean = effectiveFrom.trim()
+        require(clean.isNotEmpty()) { "Effective date cannot be empty." }
+
+        val updated = client.postgrest[SupabaseTableData.Tables.TIMETABLES]
+            .update({
+                set("effective_from", clean)
+            }) {
+                filter { eq("id", timetableId) }
+                select()
+            }
+            .decodeList<TimetableRow>()
+
+        if (updated.isEmpty()) {
+            error("The effective date was not saved: database updated no timetable row.")
+        }
+    }
 
     /** Saves the class room shown on every published slot that has no slot-level room. */
     suspend fun updateRoom(timetableId: Int, room: String?): Result<Unit> = admin { client ->
@@ -110,6 +186,23 @@ object CoordinatorAdminRepository {
 
         if (updated.isEmpty()) {
             error("The room was not saved: the database updated no timetable row.")
+        }
+    }
+
+    /** Deletes an entire timetable draft and its slots. */
+    suspend fun deleteTimetable(timetableId: Int): Result<Unit> = admin { client ->
+        client.postgrest[SupabaseTableData.Tables.TIMETABLE_ENTRIES]
+            .delete { filter { eq("timetable_id", timetableId) } }
+
+        val deleted = client.postgrest[SupabaseTableData.Tables.TIMETABLES]
+            .delete {
+                filter { eq("id", timetableId) }
+                select()
+            }
+            .decodeList<TimetableRow>()
+
+        if (deleted.isEmpty()) {
+            error("The timetable was not deleted: database deleted no timetable row.")
         }
     }
 

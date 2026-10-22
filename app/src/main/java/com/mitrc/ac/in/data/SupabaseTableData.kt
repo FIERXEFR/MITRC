@@ -282,6 +282,17 @@ data class TimetableRow(
     @SerialName("lunch_end") val lunchEnd: String? = null,
 )
 
+/**
+ * Insert shape for `timetables`: omits `id` so PostgREST uses the identity sequence.
+ */
+@Serializable
+data class NewTimetableRow(
+    @SerialName("class_id") val classId: Int,
+    @SerialName("effective_from") val effectiveFrom: String,
+    @SerialName("room") val room: String? = null,
+    @SerialName("is_published") val isPublished: Boolean = false,
+)
+
 @Serializable
 data class TimetablePeriodRow(
     @SerialName("timetable_id") val timetableId: Int,

@@ -22,7 +22,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
@@ -35,6 +34,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -52,16 +52,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mitrc.ac.`in`.auth.AdminRepository
 import com.mitrc.ac.`in`.data.ClassGroupRow
+import com.mitrc.ac.`in`.data.ClassSubjectView
 import com.mitrc.ac.`in`.data.CoordinatorAdminRepository
 import com.mitrc.ac.`in`.data.FacultyMasterRow
+import com.mitrc.ac.`in`.data.MyCoordinatorClassView
 import com.mitrc.ac.`in`.data.NewTimetableEntryRow
 import com.mitrc.ac.`in`.data.PortalRepository
-import com.mitrc.ac.`in`.data.ClassSubjectView
 import com.mitrc.ac.`in`.data.TimetableEntryRow
 import com.mitrc.ac.`in`.data.TimetableEntryView
 import com.mitrc.ac.`in`.data.TimetableRow
+import com.mitrc.ac.`in`.ui.theme.DividerSoft
 import com.mitrc.ac.`in`.ui.theme.ErrorRed
 import com.mitrc.ac.`in`.ui.theme.Gold
 import com.mitrc.ac.`in`.ui.theme.Navy
@@ -78,13 +79,34 @@ import java.util.Locale
 import java.util.TimeZone
 
 @Composable
+private fun mitrcFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = TextPrimary,
+    unfocusedTextColor = TextPrimary,
+    disabledTextColor = TextPrimary.copy(alpha = 0.6f),
+    cursorColor = Navy,
+    focusedBorderColor = Navy,
+    unfocusedBorderColor = DividerSoft,
+    focusedContainerColor = SurfaceWhite,
+    unfocusedContainerColor = SurfaceWhite,
+    focusedLabelColor = TextSecondary,
+    unfocusedLabelColor = TextSecondary,
+    focusedLeadingIconColor = Navy,
+    unfocusedLeadingIconColor = Navy,
+    focusedTrailingIconColor = TextSecondary,
+    unfocusedTrailingIconColor = TextSecondary,
+    focusedPlaceholderColor = TextSecondary.copy(alpha = 0.6f),
+    unfocusedPlaceholderColor = TextSecondary.copy(alpha = 0.6f)
+)
+
+@Composable
 fun CoordinatorTimetableView(userUid: String) {
     val scope = rememberCoroutineScope()
 
     var loading by remember { mutableStateOf(true) }
-    var isCoordinatorAllowed by remember { mutableStateOf(false) }
     var coordinatorProfile by remember { mutableStateOf<FacultyMasterRow?>(null) }
-    var ruledClasses by remember { mutableStateOf<List<com.mitrc.ac.`in`.data.MyCoordinatorClassView>>(emptyList()) }
+    var availableClasses by remember { mutableStateOf<List<MyCoordinatorClassView>>(emptyList()) }
+    var selectedClass by remember { mutableStateOf<MyCoordinatorClassView?>(null) }
+
     var timetables by remember { mutableStateOf<List<TimetableRow>>(emptyList()) }
     var selectedTimetable by remember { mutableStateOf<TimetableRow?>(null) }
 
@@ -96,53 +118,79 @@ fun CoordinatorTimetableView(userUid: String) {
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
 
-    var newEffectiveFrom by remember { mutableStateOf(getTodayIstDate()) }
-
-    // Room editor + slot dialog state. The dialog is reused for both create and edit: a null
-    // `editingEntry` means "new slot".
     var roomDraft by remember { mutableStateOf("") }
+    var effectiveDateDraft by remember { mutableStateOf("") }
+    var newDuplicateDate by remember { mutableStateOf(getTodayIstDate()) }
+
+    // Dialog states
     var showSlotDialog by remember { mutableStateOf(false) }
     var editingEntry by remember { mutableStateOf<TimetableEntryView?>(null) }
 
+    var showNewTTDialog by remember { mutableStateOf(false) }
+    var newTTEffectiveFrom by remember { mutableStateOf(getTodayIstDate()) }
+    var newTTRoom by remember { mutableStateOf("") }
+
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    // Initial load: fetch classes & coordinator profile
     LaunchedEffect(userUid) {
         loading = true
-        val portals = PortalRepository.getMyPortals().getOrNull()
+        val profRes = PortalRepository.getTeacherProfile(userUid)
+        coordinatorProfile = profRes.getOrNull()
 
-        // Same resolution the rest of the coordinator portal uses: `my_portals` can leave
-        // is_coordinator false even though `course_coordinators` grants the rights, so the ruled
-        // class list is the fallback. Checking only my_portals locked valid coordinators out here.
-        val classesRes = PortalRepository.getMyCoordinatorClasses()
-        ruledClasses = classesRes.getOrDefault(emptyList())
-        isCoordinatorAllowed = portals?.isCoordinator == true ||
-            portals?.isAdmin == true ||
-            ruledClasses.isNotEmpty()
+        val ruledRes = PortalRepository.getMyCoordinatorClasses()
+        val ruledList = ruledRes.getOrDefault(emptyList())
 
-        if (isCoordinatorAllowed) {
-            val profRes = PortalRepository.getTeacherProfile(userUid)
-            coordinatorProfile = profRes.getOrNull()
+        if (ruledList.isNotEmpty()) {
+            availableClasses = ruledList
+        } else {
+            // Fallback via direct service role key
+            val fallbackRes = CoordinatorAdminRepository.getAllClassesWithDetails()
+            availableClasses = fallbackRes.getOrDefault(emptyList())
+        }
 
-            val ttRes = PortalRepository.getTimetablesForClasses(ruledClasses.map { it.classId })
-            timetables = ttRes.getOrDefault(emptyList())
-            if (timetables.isNotEmpty()) {
-                selectedTimetable = timetables.first()
-            }
+        if (availableClasses.isNotEmpty()) {
+            selectedClass = availableClasses.first()
         }
         loading = false
     }
 
+    // Load timetables when selectedClass changes
+    LaunchedEffect(selectedClass) {
+        actionMsg = null
+        errorMsg = null
+        val targetClass = selectedClass
+        if (targetClass != null) {
+            val ttRes = CoordinatorAdminRepository.getTimetables(listOf(targetClass.classId))
+            timetables = ttRes.getOrDefault(emptyList())
+            selectedTimetable = timetables.firstOrNull()
+        } else {
+            timetables = emptyList()
+            selectedTimetable = null
+        }
+    }
+
+    // Load entries, subjects, groups when selectedTimetable changes
     LaunchedEffect(selectedTimetable) {
         actionMsg = null
         errorMsg = null
         val tt = selectedTimetable
         if (tt != null) {
             roomDraft = tt.room.orEmpty()
-            val entriesRes = PortalRepository.getTimetableEntries(tt.id)
+            effectiveDateDraft = tt.effectiveFrom
+
+            val entriesRes = CoordinatorAdminRepository.getEntries(tt.id)
             entries = entriesRes.getOrDefault(emptyList())
 
-            val subTeachersRes = PortalRepository.getSubjectTeachers(tt.classId)
-            subjects = subTeachersRes.getOrDefault(emptyList())
+            val subjectsRes = CoordinatorAdminRepository.getSubjects(tt.classId)
+            subjects = subjectsRes.getOrDefault(emptyList())
 
-            groups = AdminRepository.getClassGroups(tt.classId)
+            val groupsRes = CoordinatorAdminRepository.getGroups(tt.classId)
+            groups = groupsRes.getOrDefault(emptyList())
+        } else {
+            entries = emptyList()
+            subjects = emptyList()
+            groups = emptyList()
         }
     }
 
@@ -151,40 +199,20 @@ fun CoordinatorTimetableView(userUid: String) {
         return
     }
 
-    if (!isCoordinatorAllowed) {
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Text(
-                    text = "Coordinator Access Required",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    color = ErrorRed
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "Your account does not have active coordinator rights in course_coordinators. Contact admin.",
-                    fontSize = 13.sp,
-                    color = TextSecondary
-                )
-            }
-        }
-        return
-    }
-
     CoordinatorRefreshBox(
         onRefresh = {
-            val refreshed = PortalRepository.getTimetablesForClasses(ruledClasses.map { it.classId })
-            timetables = refreshed.getOrDefault(emptyList())
-            val current = selectedTimetable ?: timetables.firstOrNull()
-            if (current != null) {
-                roomDraft = current.room.orEmpty()
-                entries = PortalRepository.getTimetableEntries(current.id).getOrDefault(emptyList())
-                subjects = PortalRepository.getSubjectTeachers(current.classId).getOrDefault(emptyList())
-                groups = AdminRepository.getClassGroups(current.classId)
+            val targetClass = selectedClass
+            if (targetClass != null) {
+                val ttRes = CoordinatorAdminRepository.getTimetables(listOf(targetClass.classId))
+                timetables = ttRes.getOrDefault(emptyList())
+                val curr = selectedTimetable ?: timetables.firstOrNull()
+                if (curr != null) {
+                    roomDraft = curr.room.orEmpty()
+                    effectiveDateDraft = curr.effectiveFrom
+                    entries = CoordinatorAdminRepository.getEntries(curr.id).getOrDefault(emptyList())
+                    subjects = CoordinatorAdminRepository.getSubjects(curr.classId).getOrDefault(emptyList())
+                    groups = CoordinatorAdminRepository.getGroups(curr.classId).getOrDefault(emptyList())
+                }
             }
         },
         skeleton = { CoordinatorTimetableSkeleton() }
@@ -195,365 +223,681 @@ fun CoordinatorTimetableView(userUid: String) {
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
+            // Section Header: Class/Batch Selector
             Text(
-                text = "TIMETABLE MANAGER & DRAFTS",
+                text = "SELECT CLASS / BATCH",
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 color = TextSecondary,
                 letterSpacing = 1.5.sp
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
 
-        if (timetables.isEmpty()) {
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Box(modifier = Modifier.padding(18.dp)) {
-                    Text(text = "No timetables created yet.", fontSize = 13.sp, color = TextSecondary)
-                }
-            }
-        } else {
-            // Timetable selector chips
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                timetables.forEach { tt ->
-                    val isSel = selectedTimetable?.id == tt.id
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (isSel) Navy else SurfaceWhite)
-                            .clickable { selectedTimetable = tt }
-                            .padding(horizontal = 14.dp, vertical = 10.dp)
-                    ) {
-                        Text(
-                            text = "TT #${tt.id} (w.e.f. ${tt.effectiveFrom})${if (tt.isPublished) " [PUB]" else " [DRAFT]"}",
-                            color = if (isSel) Color.White else TextPrimary,
-                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-
-            val currentTT = selectedTimetable
-            if (currentTT != null) {
+            if (availableClasses.isEmpty()) {
                 Card(
-                    shape = RoundedCornerShape(18.dp),
+                    shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Class ID: ${currentTT.classId} | w.e.f. ${currentTT.effectiveFrom}",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Navy
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(if (currentTT.isPublished) SuccessGreen else Gold)
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = if (currentTT.isPublished) "PUBLISHED" else "DRAFT",
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-
-                        Spacer(Modifier.height(14.dp))
-
-                        // Duplicate Timetable RPC Action
-                        OutlinedTextField(
-                            value = newEffectiveFrom,
-                            onValueChange = { newEffectiveFrom = it.trim() },
-                            label = { Text("New Effective Date (YYYY-MM-DD)") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        Spacer(Modifier.height(8.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    busy = true
-                                    actionMsg = null
-                                    errorMsg = null
-                                    scope.launch {
-                                        val res = CoordinatorAdminRepository.duplicateTimetable(currentTT.id, newEffectiveFrom)
-                                        busy = false
-                                        res.fold(
-                                            onSuccess = { newId ->
-                                                actionMsg = "Duplicated as new draft TT #$newId"
-                                                val refresh = CoordinatorAdminRepository
-                                                    .getTimetables(ruledClasses.map { it.classId })
-                                                    .getOrDefault(timetables)
-                                                timetables = refresh
-                                                selectedTimetable = refresh.firstOrNull { it.id == newId }
-                                                    ?: selectedTimetable
-                                            },
-                                            onFailure = { err ->
-                                                errorMsg = err.message ?: "Failed to duplicate timetable"
-                                            }
-                                        )
-                                    }
-                                },
-                                enabled = !busy,
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = NavySoft),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(text = "Duplicate Draft", fontSize = 12.sp)
-                            }
-
-                            Button(
-                                onClick = {
-                                    busy = true
-                                    actionMsg = null
-                                    errorMsg = null
-                                    scope.launch {
-                                        val nextPublished = !currentTT.isPublished
-                                        val res = CoordinatorAdminRepository.setPublished(currentTT.id, nextPublished)
-                                        busy = false
-                                        res.fold(
-                                            onSuccess = {
-                                                val updated = currentTT.copy(
-                                                    isPublished = nextPublished,
-                                                    publishedAt = if (nextPublished) {
-                                                        java.time.Instant.now().toString()
-                                                    } else {
-                                                        null
-                                                    }
-                                                )
-                                                selectedTimetable = updated
-                                                timetables = timetables.map { if (it.id == updated.id) updated else it }
-                                                actionMsg = "Timetable status updated to ${if (updated.isPublished) "Published" else "Draft"}"
-                                            },
-                                            onFailure = { err ->
-                                                errorMsg = err.message ?: "Failed to update timetable status"
-                                            }
-                                        )
-                                    }
-                                },
-                                enabled = !busy,
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = if (currentTT.isPublished) Gold else SuccessGreen),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Outlined.Publish, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(text = if (currentTT.isPublished) "Unpublish" else "Publish", fontSize = 12.sp)
-                            }
-                        }
-
-                        Spacer(Modifier.height(12.dp))
-
-                        AnimatedVisibility(visible = actionMsg != null) {
-                            Text(text = actionMsg.orEmpty(), color = SuccessGreen, fontSize = 12.sp)
-                        }
-                        AnimatedVisibility(visible = errorMsg != null) {
-                            Text(text = errorMsg.orEmpty(), color = ErrorRed, fontSize = 12.sp)
-                        }
-
-                        Spacer(Modifier.height(14.dp))
-
+                    Box(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "CLASS ROOM",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextSecondary,
-                            letterSpacing = 1.2.sp
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            OutlinedTextField(
-                                value = roomDraft,
-                                onValueChange = { roomDraft = it },
-                                label = { Text("Room (e.g. 204)") },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Button(
-                                onClick = {
-                                    busy = true
-                                    actionMsg = null
-                                    errorMsg = null
-                                    scope.launch {
-                                        val res = CoordinatorAdminRepository.updateRoom(currentTT.id, roomDraft)
-                                        busy = false
-                                        res.fold(
-                                            onSuccess = {
-                                                val updated = currentTT.copy(
-                                                    room = roomDraft.trim().takeIf { it.isNotEmpty() }
-                                                )
-                                                selectedTimetable = updated
-                                                timetables = timetables.map { if (it.id == updated.id) updated else it }
-                                                actionMsg = "Class room saved."
-                                            },
-                                            onFailure = { err ->
-                                                errorMsg = err.message ?: "Failed to save the room"
-                                            }
-                                        )
-                                    }
-                                },
-                                enabled = !busy,
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Navy)
-                            ) {
-                                Text(text = "Save", fontSize = 12.sp)
-                            }
-                        }
-
-                        Spacer(Modifier.height(16.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "TIMETABLE SLOTS (${entries.size})",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextSecondary,
-                                letterSpacing = 1.2.sp
-                            )
-                            TextButton(
-                                onClick = {
-                                    editingEntry = null
-                                    showSlotDialog = true
-                                }
-                            ) {
-                                Icon(
-                                    Icons.Outlined.Add,
-                                    contentDescription = null,
-                                    tint = Navy,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Text(text = "Add slot", color = Navy, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
-
-                        if (entries.isEmpty()) {
-                            Text(text = "No slot entries in this draft yet.", fontSize = 12.sp, color = TextSecondary)
-                        } else {
-                            entries.forEach { entry ->
-                                SlotEntryRow(
-                                    entry = entry,
-                                    onEdit = {
-                                        editingEntry = entry
-                                        showSlotDialog = true
-                                    },
-                                    onDelete = {
-                                        errorMsg = null
-                                        scope.launch {
-                                            CoordinatorAdminRepository.deleteEntry(entry.entryId).fold(
-                                                onSuccess = {
-                                                    actionMsg = "Slot deleted."
-                                                    entries = CoordinatorAdminRepository
-                                                        .getEntries(currentTT.id)
-                                                        .getOrDefault(entries)
-                                                },
-                                                onFailure = { err ->
-                                                    errorMsg = err.message ?: "Failed to delete the slot"
-                                                }
-                                            )
-                                        }
-                                    }
-                                )
-                                Spacer(Modifier.height(6.dp))
-                            }
-                        }
-                    }
-                }
-
-                if (showSlotDialog) {
-                    TimetableSlotDialog(
-                        timetableId = currentTT.id,
-                        entry = editingEntry,
-                        subjects = subjects,
-                        groups = groups,
-                        onDismiss = { showSlotDialog = false },
-                        onSaved = {
-                            showSlotDialog = false
-                            actionMsg = if (editingEntry == null) "Slot added." else "Slot saved."
-                            errorMsg = null
-                            scope.launch {
-                                entries = CoordinatorAdminRepository
-                                    .getEntries(currentTT.id)
-                                    .getOrDefault(entries)
-                            }
-                        },
-                        onError = { message ->
-                            errorMsg = message
-                        }
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(24.dp))
-
-        // Signatories Section
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "OFFICIAL SIGNATORIES",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextSecondary,
-                    letterSpacing = 1.2.sp
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text(text = coordinatorProfile?.name ?: "Course Coordinator", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                        Text(
-                            text = coordinatorProfile?.designation ?: "Coordinator",
-                            fontSize = 11.sp,
+                            text = "No classes found in the system.",
+                            fontSize = 13.sp,
                             color = TextSecondary
                         )
                     }
                 }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    availableClasses.forEach { cls ->
+                        val isSelected = selectedClass?.classId == cls.classId
+                        val label = buildString {
+                            if (!cls.course.isNullOrBlank()) append("${cls.course} ")
+                            if (!cls.branch.isNullOrBlank()) append("${cls.branch} ")
+                            append("Sem ${cls.semester} ${cls.section}")
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isSelected) Navy else SurfaceWhite)
+                                .clickable { selectedClass = cls }
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (isSelected) Color.White else TextPrimary,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
             }
-        }
+
+            Spacer(Modifier.height(16.dp))
+
+            // Timetable Selector & Create New Draft
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "TIMETABLE DRAFTS",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextSecondary,
+                    letterSpacing = 1.5.sp
+                )
+
+                if (selectedClass != null) {
+                    TextButton(
+                        onClick = {
+                            newTTEffectiveFrom = getTodayIstDate()
+                            newTTRoom = ""
+                            showNewTTDialog = true
+                        }
+                    ) {
+                        Icon(
+                            Icons.Outlined.Add,
+                            contentDescription = null,
+                            tint = Navy,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "New Draft",
+                            color = Navy,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            if (timetables.isEmpty()) {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "No timetables created for this class yet.",
+                            fontSize = 13.sp,
+                            color = TextSecondary
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Button(
+                            onClick = {
+                                newTTEffectiveFrom = getTodayIstDate()
+                                newTTRoom = ""
+                                showNewTTDialog = true
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Navy),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Create First Timetable Draft", fontSize = 12.sp)
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    timetables.forEach { tt ->
+                        val isSel = selectedTimetable?.id == tt.id
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isSel) Navy else SurfaceWhite)
+                                .clickable { selectedTimetable = tt }
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                text = "TT #${tt.id} (w.e.f. ${tt.effectiveFrom})${if (tt.isPublished) " [PUB]" else " [DRAFT]"}",
+                                color = if (isSel) Color.White else TextPrimary,
+                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                val currentTT = selectedTimetable
+                if (currentTT != null) {
+                    Card(
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Timetable #${currentTT.id} Details",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Navy
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (currentTT.isPublished) SuccessGreen else Gold)
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = if (currentTT.isPublished) "PUBLISHED" else "DRAFT",
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            Spacer(Modifier.height(14.dp))
+
+                            // Action status notifications
+                            AnimatedVisibility(visible = actionMsg != null) {
+                                Text(
+                                    text = actionMsg.orEmpty(),
+                                    color = SuccessGreen,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            AnimatedVisibility(visible = errorMsg != null) {
+                                Text(
+                                    text = errorMsg.orEmpty(),
+                                    color = ErrorRed,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+
+                            if (actionMsg != null || errorMsg != null) {
+                                Spacer(Modifier.height(10.dp))
+                            }
+
+                            // Class Room Editor
+                            Text(
+                                text = "CLASS ROOM",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextSecondary,
+                                letterSpacing = 1.2.sp
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = roomDraft,
+                                    onValueChange = { roomDraft = it },
+                                    label = { Text("Room (e.g. 204)") },
+                                    singleLine = true,
+                                    colors = mitrcFieldColors(),
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Button(
+                                    onClick = {
+                                        busy = true
+                                        actionMsg = null
+                                        errorMsg = null
+                                        scope.launch {
+                                            val res = CoordinatorAdminRepository.updateRoom(currentTT.id, roomDraft)
+                                            busy = false
+                                            res.fold(
+                                                onSuccess = {
+                                                    val updated = currentTT.copy(
+                                                        room = roomDraft.trim().takeIf { it.isNotEmpty() }
+                                                    )
+                                                    selectedTimetable = updated
+                                                    timetables = timetables.map { if (it.id == updated.id) updated else it }
+                                                    actionMsg = "Class room saved."
+                                                },
+                                                onFailure = { err ->
+                                                    errorMsg = err.message ?: "Failed to save the room"
+                                                }
+                                            )
+                                        }
+                                    },
+                                    enabled = !busy,
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Navy)
+                                ) {
+                                    Text(text = "Save Room", fontSize = 12.sp)
+                                }
+                            }
+
+                            Spacer(Modifier.height(12.dp))
+
+                            // Effective Date Editor
+                            Text(
+                                text = "EFFECTIVE DATE (YYYY-MM-DD)",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextSecondary,
+                                letterSpacing = 1.2.sp
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = effectiveDateDraft,
+                                    onValueChange = { effectiveDateDraft = it.trim() },
+                                    label = { Text("Effective Date") },
+                                    singleLine = true,
+                                    colors = mitrcFieldColors(),
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Button(
+                                    onClick = {
+                                        busy = true
+                                        actionMsg = null
+                                        errorMsg = null
+                                        scope.launch {
+                                            val res = CoordinatorAdminRepository.updateEffectiveFrom(currentTT.id, effectiveDateDraft)
+                                            busy = false
+                                            res.fold(
+                                                onSuccess = {
+                                                    val updated = currentTT.copy(effectiveFrom = effectiveDateDraft)
+                                                    selectedTimetable = updated
+                                                    timetables = timetables.map { if (it.id == updated.id) updated else it }
+                                                    actionMsg = "Effective date updated."
+                                                },
+                                                onFailure = { err ->
+                                                    errorMsg = err.message ?: "Failed to update effective date"
+                                                }
+                                            )
+                                        }
+                                    },
+                                    enabled = !busy,
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Navy)
+                                ) {
+                                    Text(text = "Update Date", fontSize = 12.sp)
+                                }
+                            }
+
+                            Spacer(Modifier.height(14.dp))
+
+                            // Duplicate & Publish Controls
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        busy = true
+                                        actionMsg = null
+                                        errorMsg = null
+                                        scope.launch {
+                                            val res = CoordinatorAdminRepository.duplicateTimetable(currentTT.id, newDuplicateDate)
+                                            busy = false
+                                            res.fold(
+                                                onSuccess = { newId ->
+                                                    actionMsg = "Duplicated as new draft TT #$newId"
+                                                    val targetClass = selectedClass
+                                                    if (targetClass != null) {
+                                                        val refresh = CoordinatorAdminRepository
+                                                            .getTimetables(listOf(targetClass.classId))
+                                                            .getOrDefault(timetables)
+                                                        timetables = refresh
+                                                        selectedTimetable = refresh.firstOrNull { it.id == newId }
+                                                            ?: selectedTimetable
+                                                    }
+                                                },
+                                                onFailure = { err ->
+                                                    errorMsg = err.message ?: "Failed to duplicate timetable"
+                                                }
+                                            )
+                                        }
+                                    },
+                                    enabled = !busy,
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = NavySoft),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(text = "Duplicate", fontSize = 12.sp)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        busy = true
+                                        actionMsg = null
+                                        errorMsg = null
+                                        scope.launch {
+                                            val nextPublished = !currentTT.isPublished
+                                            val res = CoordinatorAdminRepository.setPublished(currentTT.id, nextPublished)
+                                            busy = false
+                                            res.fold(
+                                                onSuccess = {
+                                                    val updated = currentTT.copy(
+                                                        isPublished = nextPublished,
+                                                        publishedAt = if (nextPublished) java.time.Instant.now().toString() else null
+                                                    )
+                                                    selectedTimetable = updated
+                                                    timetables = timetables.map { if (it.id == updated.id) updated else it }
+                                                    actionMsg = "Status changed to ${if (updated.isPublished) "Published" else "Draft"}"
+                                                },
+                                                onFailure = { err ->
+                                                    errorMsg = err.message ?: "Failed to update timetable status"
+                                                }
+                                            )
+                                        }
+                                    },
+                                    enabled = !busy,
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = if (currentTT.isPublished) Gold else SuccessGreen),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Outlined.Publish, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(text = if (currentTT.isPublished) "Unpublish" else "Publish", fontSize = 12.sp)
+                                }
+                            }
+
+                            Spacer(Modifier.height(8.dp))
+
+                            // Delete Draft Button
+                            Button(
+                                onClick = { showDeleteConfirm = true },
+                                enabled = !busy,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = ErrorRed.copy(alpha = 0.15f), contentColor = ErrorRed),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(text = "Delete Timetable Draft", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Spacer(Modifier.height(16.dp))
+
+                            // Slot Entries Section
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "TIMETABLE SLOTS (${entries.size})",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextSecondary,
+                                    letterSpacing = 1.2.sp
+                                )
+                                TextButton(
+                                    onClick = {
+                                        editingEntry = null
+                                        showSlotDialog = true
+                                    }
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Add,
+                                        contentDescription = null,
+                                        tint = Navy,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(text = "Add slot", color = Navy, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
+
+                            if (entries.isEmpty()) {
+                                Text(text = "No slot entries in this draft yet.", fontSize = 12.sp, color = TextSecondary)
+                            } else {
+                                entries.forEach { entry ->
+                                    SlotEntryRow(
+                                        entry = entry,
+                                        onEdit = {
+                                            editingEntry = entry
+                                            showSlotDialog = true
+                                        },
+                                        onDelete = {
+                                            errorMsg = null
+                                            scope.launch {
+                                                CoordinatorAdminRepository.deleteEntry(entry.entryId).fold(
+                                                    onSuccess = {
+                                                        actionMsg = "Slot deleted."
+                                                        entries = CoordinatorAdminRepository
+                                                            .getEntries(currentTT.id)
+                                                            .getOrDefault(entries)
+                                                    },
+                                                    onFailure = { err ->
+                                                        errorMsg = err.message ?: "Failed to delete the slot"
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    )
+                                    Spacer(Modifier.height(6.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    // Slot Add/Edit Dialog
+                    if (showSlotDialog) {
+                        TimetableSlotDialog(
+                            timetableId = currentTT.id,
+                            entry = editingEntry,
+                            subjects = subjects,
+                            groups = groups,
+                            onDismiss = { showSlotDialog = false },
+                            onSaved = {
+                                showSlotDialog = false
+                                actionMsg = if (editingEntry == null) "Slot added." else "Slot saved."
+                                errorMsg = null
+                                scope.launch {
+                                    entries = CoordinatorAdminRepository
+                                        .getEntries(currentTT.id)
+                                        .getOrDefault(entries)
+                                }
+                            },
+                            onError = { message ->
+                                errorMsg = message
+                            }
+                        )
+                    }
+
+                    // Delete Timetable Confirmation Dialog
+                    if (showDeleteConfirm) {
+                        AlertDialog(
+                            onDismissRequest = { showDeleteConfirm = false },
+                            title = { Text("Delete Timetable Draft?", color = Navy, fontWeight = FontWeight.Bold) },
+                            text = { Text("This will permanently delete Timetable #${currentTT.id} and all its slots.", fontSize = 13.sp) },
+                            confirmButton = {
+                                TextButton(
+                                    onClick = {
+                                        showDeleteConfirm = false
+                                        busy = true
+                                        scope.launch {
+                                            CoordinatorAdminRepository.deleteTimetable(currentTT.id).fold(
+                                                onSuccess = {
+                                                    busy = false
+                                                    actionMsg = "Timetable deleted."
+                                                    val targetClass = selectedClass
+                                                    if (targetClass != null) {
+                                                        val refresh = CoordinatorAdminRepository
+                                                            .getTimetables(listOf(targetClass.classId))
+                                                            .getOrDefault(emptyList())
+                                                        timetables = refresh
+                                                        selectedTimetable = refresh.firstOrNull()
+                                                    }
+                                                },
+                                                onFailure = { err ->
+                                                    busy = false
+                                                    errorMsg = err.message ?: "Failed to delete timetable"
+                                                }
+                                            )
+                                        }
+                                    }
+                                ) {
+                                    Text("Delete", color = ErrorRed, fontWeight = FontWeight.Bold)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showDeleteConfirm = false }) {
+                                    Text("Cancel", color = TextSecondary)
+                                }
+                            },
+                            containerColor = SurfaceWhite
+                        )
+                    }
+                }
+            }
+
+            // Create New Timetable Dialog
+            if (showNewTTDialog && selectedClass != null) {
+                val targetClass = selectedClass!!
+                AlertDialog(
+                    onDismissRequest = { showNewTTDialog = false },
+                    title = {
+                        Text(
+                            text = "New Timetable Draft",
+                            color = Navy,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                text = "Class: ${targetClass.course ?: "Class"} ${targetClass.branch ?: ""} Sem ${targetClass.semester} ${targetClass.section}",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimary
+                            )
+                            OutlinedTextField(
+                                value = newTTEffectiveFrom,
+                                onValueChange = { newTTEffectiveFrom = it.trim() },
+                                label = { Text("Effective Date (YYYY-MM-DD)") },
+                                singleLine = true,
+                                colors = mitrcFieldColors(),
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            OutlinedTextField(
+                                value = newTTRoom,
+                                onValueChange = { newTTRoom = it },
+                                label = { Text("Class Room (optional, e.g. 204)") },
+                                singleLine = true,
+                                colors = mitrcFieldColors(),
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                showNewTTDialog = false
+                                busy = true
+                                scope.launch {
+                                    val res = CoordinatorAdminRepository.createTimetable(
+                                        classId = targetClass.classId,
+                                        effectiveFrom = newTTEffectiveFrom,
+                                        room = newTTRoom
+                                    )
+                                    busy = false
+                                    res.fold(
+                                        onSuccess = { createdTT ->
+                                            actionMsg = "Created Timetable #${createdTT.id}."
+                                            val refresh = CoordinatorAdminRepository
+                                                .getTimetables(listOf(targetClass.classId))
+                                                .getOrDefault(emptyList())
+                                            timetables = refresh
+                                            selectedTimetable = refresh.firstOrNull { it.id == createdTT.id } ?: createdTT
+                                        },
+                                        onFailure = { err ->
+                                            errorMsg = err.message ?: "Failed to create timetable"
+                                        }
+                                    )
+                                }
+                            }
+                        ) {
+                            Text("Create", color = Navy, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showNewTTDialog = false }) {
+                            Text("Cancel", color = TextSecondary)
+                        }
+                    },
+                    containerColor = SurfaceWhite
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // Signatories Section
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "OFFICIAL SIGNATORIES",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextSecondary,
+                        letterSpacing = 1.2.sp
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text(
+                                text = coordinatorProfile?.name ?: "Course Coordinator",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = coordinatorProfile?.designation ?: "Coordinator",
+                                fontSize = 11.sp,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -816,6 +1160,7 @@ private fun TimetableSlotDialog(
                     onValueChange = { room = it },
                     label = { Text("Room (optional)") },
                     singleLine = true,
+                    colors = mitrcFieldColors(),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 )

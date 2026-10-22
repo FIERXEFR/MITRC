@@ -59,7 +59,9 @@ object AuthRepository {
             message.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) ||
                 message.contains("wrong password", ignoreCase = true) ||
                 message.contains("badly formatted", ignoreCase = true) ||
-                message.contains("invalid email", ignoreCase = true) -> "Invalid email or password"
+                message.contains("invalid email", ignoreCase = true) ||
+                message.contains("supplied auth credential", ignoreCase = true) ||
+                message.contains("credential", ignoreCase = true) -> "Invalid email or password"
 
             message.contains("user not found", ignoreCase = true) -> "No account found for this email"
             message.contains("network", ignoreCase = true) ||
