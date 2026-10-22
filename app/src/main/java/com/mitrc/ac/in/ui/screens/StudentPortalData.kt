@@ -56,6 +56,7 @@ import com.mitrc.ac.`in`.ui.theme.TextPrimary
 import com.mitrc.ac.`in`.ui.theme.TextSecondary
 import java.text.SimpleDateFormat
 import java.time.Instant
+import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -599,6 +600,36 @@ val streakDays: List<Pair<String, Boolean>>
 /** Attendance for each of the last 7 days, used by the small bar chart. */
 val weekBars: List<Pair<String, Int>>
     get() = listOf("Mon" to 7, "Tue" to 6, "Wed" to 6, "Thu" to 5, "Fri" to 6, "Sat" to 4, "Sun" to 0)
+
+/** Current and best consecutive-present runs shown on the attendance streak card. */
+data class AttendanceStreak(val current: Int, val best: Int)
+
+/**
+ * Counts consecutive attended days over the days that actually had a marked period. Days with no
+ * records (weekends, holidays, days faculty have not marked yet) neither extend nor break a run.
+ */
+fun attendanceStreak(days: List<DailyAttendance>): AttendanceStreak {
+    val states = days
+        .mapNotNull { day ->
+            val date = runCatching { LocalDate.parse(day.date) }.getOrNull() ?: return@mapNotNull null
+            day.attendedDay?.let { date to it }
+        }
+        .sortedBy { it.first }
+
+    var best = 0
+    var run = 0
+    states.forEach { (_, attended) ->
+        if (attended) {
+            run += 1
+            if (run > best) best = run
+        } else {
+            run = 0
+        }
+    }
+
+    // `run` after the loop is the streak ending at the most recently marked day.
+    return AttendanceStreak(current = run, best = best)
+}
 
 /** Placeholder entries for the notebook's "Saved notes" list. */
 fun samplePersonalNotes(): List<PortalNote> = listOf(

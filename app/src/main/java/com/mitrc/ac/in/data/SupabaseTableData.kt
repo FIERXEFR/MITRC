@@ -254,6 +254,21 @@ data class AttendanceRecordRow(
     @SerialName("status") val status: String, // 'P'|'A'|'L'|'OD'
 )
 
+/**
+ * A student's mark joined with the session it belongs to. Backs the attendance calendar, which
+ * needs the `class_date` per record rather than a session id.
+ */
+@Serializable
+data class AttendanceRecordWithSessionRow(
+    @SerialName("status") val status: String = "A",
+    @SerialName("attendance_sessions") val session: AttendanceSessionDate? = null,
+)
+
+@Serializable
+data class AttendanceSessionDate(
+    @SerialName("class_date") val classDate: String? = null,
+)
+
 @Serializable
 data class TimetableRow(
     @SerialName("id") val id: Int = 0,
@@ -280,6 +295,22 @@ data class TimetableEntryRow(
     @SerialName("id") val id: Int = 0,
     @SerialName("timetable_id") val timetableId: Int,
     @SerialName("day_of_week") val dayOfWeek: Int, // 1=Mon..7=Sun
+    @SerialName("start_period") val startPeriod: Int,
+    @SerialName("end_period") val endPeriod: Int,
+    @SerialName("class_subject_id") val classSubjectId: Int,
+    @SerialName("group_id") val groupId: Int? = null,
+    @SerialName("faculty_id") val facultyId: Int? = null,
+    @SerialName("room") val room: String? = null,
+)
+
+/**
+ * Insert shape for `timetable_entries`: it deliberately omits `id` so PostgREST lets the table's
+ * identity column generate the next value instead of receiving a literal `0`.
+ */
+@Serializable
+data class NewTimetableEntryRow(
+    @SerialName("timetable_id") val timetableId: Int,
+    @SerialName("day_of_week") val dayOfWeek: Int,
     @SerialName("start_period") val startPeriod: Int,
     @SerialName("end_period") val endPeriod: Int,
     @SerialName("class_subject_id") val classSubjectId: Int,
@@ -391,6 +422,32 @@ data class AttendanceSummaryView(
     @SerialName("total") val total: Long,
     @SerialName("percentage") val percentage: Double,
 )
+
+/**
+ * One calendar day of a student's attendance, folded together from every marked period that day.
+ * Built client-side from `attendance_sessions` + `attendance_records`; `date` is ISO `yyyy-MM-dd`.
+ */
+data class DailyAttendance(
+    val date: String,
+    val present: Int = 0,
+    val absent: Int = 0,
+    val leave: Int = 0,
+    val onDuty: Int = 0,
+) {
+    /** Periods that count as attended (on-duty also counts as attended). */
+    val attended: Int get() = present + onDuty
+
+    /** Periods that count against the student. */
+    val missed: Int get() = absent + leave
+
+    /** True when the day is mostly attended, false when mostly missed, null when nothing marked. */
+    val attendedDay: Boolean?
+        get() = when {
+            attended == 0 && missed == 0 -> null
+            attended >= missed -> true
+            else -> false
+        }
+}
 
 @Serializable
 data class MarkView(

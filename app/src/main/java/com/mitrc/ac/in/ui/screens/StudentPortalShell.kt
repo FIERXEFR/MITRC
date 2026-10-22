@@ -107,6 +107,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 import kotlin.math.roundToInt
 import com.mitrc.ac.`in`.R
 import com.mitrc.ac.`in`.data.*
@@ -122,6 +123,8 @@ data class StudentPortalData(
     val attendance: List<AttendanceSummaryView>,
     val marks: List<MarkView>,
     val timetable: List<MyTimetableEntryView>,
+    /** One entry per calendar day that had a marked period; empty until faculty mark attendance. */
+    val dailyAttendance: List<DailyAttendance> = emptyList(),
     val error: String?,
     /** `v_my_subject_cards` rows for this student - backs the "Contact Faculty" sheet. */
     val faculty: List<ClassSubjectView> = emptyList(),
@@ -163,12 +166,24 @@ private suspend fun loadPortalData(userUid: String): StudentPortalData {
         null
     }
 
+    val timetable = PortalRepository.getMyTimetable(classId.takeIf { it > 0 }).getOrDefault(emptyList())
+
+    // Six months of day-by-day attendance powers the calendar's month navigation. The table pair
+    // is empty in fresh deployments, so this returns [] and the calendar falls back to holidays.
+    val today = LocalDate.now()
+    val dailyAttendance = PortalRepository.getStudentDailyAttendance(
+        uid = userUid,
+        fromIsoDate = today.minusMonths(6).withDayOfMonth(1).toString(),
+        toIsoDate = today.toString()
+    ).getOrDefault(emptyList())
+
     return StudentPortalData(
         profile = profile,
         subjects = subjects,
         attendance = PortalRepository.getStudentAttendance(userUid).getOrDefault(emptyList()),
         marks = PortalRepository.getStudentMarks(userUid).getOrDefault(emptyList()),
-        timetable = PortalRepository.getMyTimetable(classId.takeIf { it > 0 }).getOrDefault(emptyList()),
+        timetable = timetable,
+        dailyAttendance = dailyAttendance,
         faculty = subjects,
         // Notes live in their own table; the mapper drops rows outside this student's subjects.
         pdfNotes = PortalRepository.getPublishedNotes(userUid, classId.takeIf { it > 0 })

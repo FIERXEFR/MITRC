@@ -41,6 +41,7 @@ import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.Info
@@ -104,8 +105,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.mitrc.ac.`in`.data.AttendanceSummaryView
+import com.mitrc.ac.`in`.data.ClassGroupRow
+import com.mitrc.ac.`in`.data.CoordinatorAdminRepository
 import com.mitrc.ac.`in`.data.MarkView
 import com.mitrc.ac.`in`.data.PortalRepository
+import com.mitrc.ac.`in`.data.StudentDetailsUpdate
 import com.mitrc.ac.`in`.data.StudentProfileView
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
 import com.mitrc.ac.`in`.ui.theme.ErrorRed
@@ -304,6 +308,23 @@ fun CoordinatorStudentsView(userUid: String) {
                             .onFailure {
                                 actionError = it.message ?: "Couldn't update this student."
                             }
+                    }
+                },
+                onDetailsSaved = { uid, update ->
+                    // The edit dialog already wrote through the service-role client. Mirror the
+                    // saved values in the roster and the open sheet so the UI can't disagree
+                    // with the database.
+                    applyStudentChange(uid) {
+                        it.copy(
+                            name = update.name,
+                            serialNo = update.serialNo,
+                            fatherName = update.fatherName,
+                            studentPhoneNo = update.studentPhoneNo,
+                            fatherPhoneNo = update.fatherPhoneNo,
+                            studentEmail = update.studentEmail,
+                            groupId = update.groupId,
+                            groupName = update.groupName
+                        )
                     }
                 }
             )
@@ -513,7 +534,8 @@ private fun StudentDetailSheet(
     student: StudentProfileView,
     onDismiss: () -> Unit,
     onLockToggle: (String, Boolean, String?) -> Unit,
-    onPtmUpdate: (String, PtmUpdate) -> Unit
+    onPtmUpdate: (String, PtmUpdate) -> Unit,
+    onDetailsSaved: (String, StudentDetailsUpdate) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var attendance by remember { mutableStateOf<List<AttendanceSummaryView>>(emptyList()) }
@@ -523,6 +545,7 @@ private fun StudentDetailSheet(
     // confirmation dialogs
     var showLockDialog by remember { mutableStateOf(false) }
     var showPtmDialog by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(student.studentUid) {
         loadingDetails = true
@@ -576,6 +599,13 @@ private fun StudentDetailSheet(
                 student.serialNo?.let {
                     Text("Roll No: $it", color = TextSecondary, fontSize = 12.sp)
                 }
+            }
+            IconButton(onClick = { showEditDialog = true }) {
+                Icon(
+                    Icons.Outlined.Edit,
+                    contentDescription = "Edit student details",
+                    tint = Navy
+                )
             }
             IconButton(onClick = onDismiss) {
                 Icon(Icons.Outlined.Close, contentDescription = "Close", tint = TextSecondary)
@@ -758,6 +788,220 @@ private fun StudentDetailSheet(
                 }
             )
         }
+    }
+
+    // ---- Edit identity: name, roll, parent/contact details, class group ----
+    if (showEditDialog) {
+        EditStudentDetailsDialog(
+            student = student,
+            onDismiss = { showEditDialog = false },
+            onSaved = { update ->
+                showEditDialog = false
+                onDetailsSaved(student.studentUid, update)
+            }
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Student details editor
+// ---------------------------------------------------------------------------
+
+/**
+ * Edits the identity columns of `students` (and optionally the class group in `enrollments`)
+ * through the coordinator service-role client. Groups are loaded lazily because a class can have
+ * none, in which case the group picker is hidden.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EditStudentDetailsDialog(
+    student: StudentProfileView,
+    onDismiss: () -> Unit,
+    onSaved: (StudentDetailsUpdate) -> Unit
+) {
+    val scope = rememberCoroutineScope()
+
+    var name by remember(student.studentUid) { mutableStateOf(student.name.orEmpty()) }
+    var serialNo by remember(student.studentUid) { mutableStateOf(student.serialNo.orEmpty()) }
+    var fatherName by remember(student.studentUid) { mutableStateOf(student.fatherName.orEmpty()) }
+    var studentPhone by remember(student.studentUid) { mutableStateOf(student.studentPhoneNo.orEmpty()) }
+    var fatherPhone by remember(student.studentUid) { mutableStateOf(student.fatherPhoneNo.orEmpty()) }
+    var studentEmail by remember(student.studentUid) { mutableStateOf(student.studentEmail.orEmpty()) }
+    var groupId by remember(student.studentUid) { mutableStateOf(student.groupId) }
+
+    var groups by remember(student.studentUid) { mutableStateOf<List<ClassGroupRow>>(emptyList()) }
+    var saving by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(student.classId) {
+        val classId = student.classId ?: return@LaunchedEffect
+        groups = CoordinatorAdminRepository.getGroups(classId).getOrDefault(emptyList())
+    }
+
+    fun save() {
+        val cleanName = name.trim()
+        if (cleanName.isEmpty()) {
+            error = "Student name can't be empty."
+            return
+        }
+
+        val selectedGroup = groups.firstOrNull { it.id == groupId }
+        val update = StudentDetailsUpdate(
+            name = cleanName,
+            serialNo = serialNo.trim().takeIf { it.isNotEmpty() },
+            fatherName = fatherName.trim().takeIf { it.isNotEmpty() },
+            studentPhoneNo = studentPhone.trim().takeIf { it.isNotEmpty() },
+            fatherPhoneNo = fatherPhone.trim().takeIf { it.isNotEmpty() },
+            studentEmail = studentEmail.trim().takeIf { it.isNotEmpty() },
+            groupId = groupId,
+            groupName = selectedGroup?.name ?: student.groupName.takeIf { groupId == student.groupId }
+        )
+
+        saving = true
+        error = null
+        scope.launch {
+            val detailsResult = CoordinatorAdminRepository.updateStudentDetails(student.studentUid, update)
+            val groupChanged = groupId != student.groupId
+            val classId = student.classId
+
+            val groupFailure = if (detailsResult.isSuccess && groupChanged && classId != null) {
+                CoordinatorAdminRepository
+                    .updateStudentGroup(student.studentUid, classId, groupId)
+                    .exceptionOrNull()
+            } else {
+                null
+            }
+
+            saving = false
+            val failure = detailsResult.exceptionOrNull() ?: groupFailure
+            if (failure != null) {
+                error = failure.message ?: "Couldn't save this student's details."
+            } else {
+                onSaved(update)
+            }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!saving) onDismiss() },
+        title = {
+            Text(
+                text = "Edit Student Details",
+                color = Navy,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                EditField(value = name, onValueChange = { name = it }, label = "Full name")
+                EditField(value = serialNo, onValueChange = { serialNo = it }, label = "Roll / serial no")
+                EditField(value = fatherName, onValueChange = { fatherName = it }, label = "Father's name")
+                EditField(
+                    value = studentPhone,
+                    onValueChange = { studentPhone = it },
+                    label = "Student phone"
+                )
+                EditField(
+                    value = fatherPhone,
+                    onValueChange = { fatherPhone = it },
+                    label = "Father's phone"
+                )
+                EditField(
+                    value = studentEmail,
+                    onValueChange = { studentEmail = it },
+                    label = "Student email"
+                )
+
+                if (groups.isNotEmpty()) {
+                    Text(
+                        text = "CLASS GROUP",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        EditChoiceChip(label = "No group", selected = groupId == null) {
+                            groupId = null
+                        }
+                        groups.forEach { group ->
+                            EditChoiceChip(
+                                label = group.name,
+                                selected = groupId == group.id
+                            ) { groupId = group.id }
+                        }
+                    }
+                }
+
+                if (error != null) {
+                    Text(text = error.orEmpty(), color = ErrorRed, fontSize = 11.5.sp)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { save() }, enabled = !saving) {
+                Text(
+                    text = if (saving) "Saving..." else "Save changes",
+                    color = if (saving) TextSecondary else Navy,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !saving) {
+                Text("Cancel", color = TextSecondary, fontSize = 13.sp)
+            }
+        },
+        containerColor = SurfaceWhite
+    )
+}
+
+@Composable
+private fun EditField(value: String, onValueChange: (String) -> Unit, label: String) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = TextPrimary,
+            unfocusedTextColor = TextPrimary,
+            focusedBorderColor = Navy,
+            unfocusedBorderColor = DividerSoft,
+            focusedLabelColor = Navy,
+            unfocusedLabelColor = TextSecondary,
+            cursorColor = Navy
+        )
+    )
+}
+
+@Composable
+private fun EditChoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(if (selected) Navy else Slate)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 7.dp)
+    ) {
+        Text(
+            text = label,
+            color = if (selected) SurfaceWhite else TextPrimary,
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+        )
     }
 }
 

@@ -3,6 +3,7 @@ package com.mitrc.ac.`in`.data
 import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.PostgrestUpdate
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
@@ -235,6 +236,57 @@ object PortalRepository {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_MARKS]
             .select { filter { eq("student_uid", uid) } }
             .decodeList<MarkView>()
+    }
+
+    /**
+     * Per-day attendance behind the student calendar.
+     *
+     * One request: `attendance_records` embedded with its session so each mark carries the
+     * `class_date` it belongs to. Filtering on the embedded date keeps the payload to the window
+     * shown by the calendar instead of every record the student has ever had.
+     *
+     * The recorded sessions are optional for a student deployment. If the embed is not readable,
+     * this logs and returns an empty list so the calendar falls back to its holiday-only view.
+     */
+    suspend fun getStudentDailyAttendance(
+        uid: String,
+        fromIsoDate: String,
+        toIsoDate: String,
+    ): Result<List<DailyAttendance>> = query {
+        if (uid.isBlank()) return@query emptyList()
+
+        val records = runCatching {
+            SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.ATTENDANCE_RECORDS]
+                .select(columns = Columns.raw("status,attendance_sessions!inner(class_date)")) {
+                    filter {
+                        eq("student_uid", uid)
+                        gte("attendance_sessions.class_date", fromIsoDate)
+                        lte("attendance_sessions.class_date", toIsoDate)
+                    }
+                }
+                .decodeList<AttendanceRecordWithSessionRow>()
+        }.getOrElse {
+            Log.w(TAG, "getStudentDailyAttendance unreadable (${it.message})")
+            return@query emptyList()
+        }
+
+        records
+            .mapNotNull { record ->
+                val date = record.session?.classDate?.takeIf { it.isNotBlank() }
+                    ?: return@mapNotNull null
+                date to record.status.trim().uppercase()
+            }
+            .groupBy({ it.first }, { it.second })
+            .map { (date, statuses) ->
+                DailyAttendance(
+                    date = date,
+                    present = statuses.count { it == "P" },
+                    absent = statuses.count { it == "A" },
+                    leave = statuses.count { it == "L" },
+                    onDuty = statuses.count { it == "OD" }
+                )
+            }
+            .sortedBy { it.date }
     }
 
     /**

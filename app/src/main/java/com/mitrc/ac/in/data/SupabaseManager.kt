@@ -26,6 +26,15 @@ object SupabaseManager {
     @Volatile
     private var client: SupabaseClient? = null
 
+    /**
+     * Service-role client for coordinator-only writes. It is created lazily, only after a screen
+     * has verified the signed-in account through `course_coordinators`, and it never installs the
+     * Auth plugin: supabase-kt then sends the service key as `Authorization: Bearer ...`, which
+     * bypasses RLS for the timetable and student editors.
+     */
+    @Volatile
+    private var adminClient: SupabaseClient? = null
+
     val isConfigured: Boolean
         get() = client != null
 
@@ -151,4 +160,34 @@ object SupabaseManager {
 
     fun requireClient(): SupabaseClient =
         client ?: error("Supabase is not configured. Run scripts/generate_xor_cpp.ps1 with real credentials.")
+
+    /**
+     * The privileged client used by the coordinator timetable and student editors.
+     *
+     * The key is read from [NativeUtils] at runtime and is never held in a Kotlin constant. Callers
+     * must gate on coordinator rights before touching this, because the key itself has no RLS.
+     */
+    fun requireAdminClient(): SupabaseClient {
+        adminClient?.let { return it }
+        synchronized(this) {
+            adminClient?.let { return it }
+
+            val url = readSecret("supabaseUrl") { NativeUtils.getSupabaseUrl() }
+            val serviceKey = readSecret("supabaseServiceKey") { NativeUtils.getSupabaseServiceKey() }
+            if (url.isEmpty() || serviceKey.isEmpty()) {
+                error(
+                    "The coordinator write key is unavailable. Regenerate the native secrets with " +
+                        "scripts/generate_xor_cpp.ps1, then rebuild the app."
+                )
+            }
+
+            val created = createSupabaseClient(supabaseUrl = url, supabaseKey = serviceKey) {
+                install(Postgrest)
+                httpEngine = OkHttp.create()
+            }
+            Log.i(TAG, "Service-role client configured for coordinator writes")
+            adminClient = created
+            return created
+        }
+    }
 }

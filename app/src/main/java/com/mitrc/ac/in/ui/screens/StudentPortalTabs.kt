@@ -26,6 +26,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -40,6 +41,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -50,6 +52,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.outlined.Assignment
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
@@ -60,6 +63,7 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.EventAvailable
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.LocalFireDepartment
 import androidx.compose.material.icons.outlined.MarkEmailRead
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Phone
@@ -98,8 +102,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -112,6 +120,8 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -123,10 +133,15 @@ import com.mitrc.ac.`in`.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.ceil
 
 @Composable
 private fun PortalTabScaffold(
@@ -291,69 +306,323 @@ private fun ScheduleSegmentedControl(
 
 @Composable
 private fun AttendanceContent(data: StudentPortalData) {
-    Column {
-        val attended = remember(data.attendance) { data.attendance.sumOf { it.attended } }
-        val total = remember(data.attendance) { data.attendance.sumOf { it.total } }
-        val pct = if (total > 0) attended * 100.0 / total else 0.0
+    val attended = remember(data.attendance) { data.attendance.sumOf { it.attended } }
+    val total = remember(data.attendance) { data.attendance.sumOf { it.total } }
+    val pct = if (total > 0) attended * 100.0 / total else 0.0
 
+    val today = remember { LocalDate.now() }
+    val daysByDate = remember(data.dailyAttendance) {
+        data.dailyAttendance.mapNotNull { day ->
+            runCatching { LocalDate.parse(day.date) }.getOrNull()?.let { it to day }
+        }.toMap()
+    }
+    val streak = remember(data.dailyAttendance) { attendanceStreak(data.dailyAttendance) }
+    var visibleMonth by remember { mutableStateOf(YearMonth.from(today)) }
+
+    // Every assigned subject gets a card, even before any attendance is marked for it. The summary
+    // view only returns subjects that already have records, so it is merged onto the enrolment list.
+    val attendanceBySubject = remember(data.attendance) {
+        data.attendance.associateBy { it.classSubjectId }
+    }
+    val subjectRows = remember(data.subjects, data.attendance) {
+        val rows = data.subjects.map { subject ->
+            SubjectAttendanceRow(
+                subject = subject,
+                summary = attendanceBySubject[subject.classSubjectId]
+            )
+        }
+        rows.ifEmpty {
+            data.attendance.map { SubjectAttendanceRow(subject = null, summary = it) }
+        }
+    }
+
+    Column {
         PortalSectionLabel(text = "ATTENDANCE RECORD")
         Spacer(Modifier.height(12.dp))
 
-        Surface(
-            shape = RoundedCornerShape(18.dp),
-            color = PortalCard,
-            border = androidx.compose.foundation.BorderStroke(1.dp, PortalStroke),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier.padding(18.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (pct >= 75) PortalGreen.copy(alpha = 0.16f)
-                            else PortalRose.copy(alpha = 0.12f)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "${pct.toInt()}%",
-                        color = if (pct >= 75) PortalGreen else PortalRose,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                }
-                Spacer(Modifier.width(16.dp))
-                Column {
-                    Text(
-                        text = if (pct >= 75) "You are on track" else "Needs attention",
-                        color = PortalTextPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        text = "$attended attended of $total classes",
-                        color = PortalTextSecondary,
-                        fontSize = 12.5.sp
-                    )
+        AttendanceSummaryCard(attended = attended, total = total, pct = pct)
+
+        Spacer(Modifier.height(20.dp))
+        PortalSectionLabel(text = "MONTH AT A GLANCE")
+        Spacer(Modifier.height(12.dp))
+        AttendanceCalendarCard(
+            month = visibleMonth,
+            today = today,
+            days = daysByDate,
+            onPrevious = { visibleMonth = visibleMonth.minusMonths(1) },
+            onNext = {
+                if (visibleMonth < YearMonth.from(today)) {
+                    visibleMonth = visibleMonth.plusMonths(1)
                 }
             }
-        }
+        )
+
+        Spacer(Modifier.height(14.dp))
+        AttendanceStreakCard(streak = streak, days = daysByDate, today = today)
 
         Spacer(Modifier.height(20.dp))
         PortalSectionLabel(text = "SUBJECT WISE")
         Spacer(Modifier.height(12.dp))
 
-        if (data.attendance.isEmpty()) {
-            PortalEmptyCard(message = "No attendance records recorded yet.")
+        if (subjectRows.isEmpty()) {
+            PortalEmptyCard(message = "No subjects are assigned to your class yet.")
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                data.attendance.forEach { item ->
-                    SubjectAttendanceCard(item)
+                subjectRows.forEach { row ->
+                    SubjectAttendanceCard(row)
+                }
+            }
+        }
+    }
+}
+
+/** Overall percentage: a ring instead of a flat badge, plus the classes needed to clear 75%. */
+@Composable
+private fun AttendanceSummaryCard(attended: Long, total: Long, pct: Double) {
+    val onTrack = pct >= 75.0
+    val accent = if (onTrack) PortalGreen else PortalRose
+    val needed = classesNeededFor75(attended, total)
+
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = PortalCard,
+        border = BorderStroke(1.dp, PortalStroke),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AttendanceRing(
+                percent = pct,
+                color = accent,
+                diameter = 78.dp,
+                strokeWidth = 7.dp,
+                labelSize = 16.sp
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (onTrack) "You are on track" else "Needs attention",
+                    color = PortalTextPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = "$attended attended of $total classes",
+                    color = PortalTextSecondary,
+                    fontSize = 12.5.sp
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(accent)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = when {
+                            total <= 0L -> "No classes marked yet"
+                            onTrack -> "Above the 75% requirement"
+                            else -> "Attend $needed more ${if (needed == 1L) "class" else "classes"} to reach 75%"
+                        },
+                        color = accent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Extra classes required before `attended / total` reaches 75%. */
+private fun classesNeededFor75(attended: Long, total: Long): Long {
+    if (total <= 0L) return 0L
+    if (attended * 100.0 / total >= 75.0) return 0L
+    return ceil((0.75 * total - attended) / 0.25).toLong().coerceAtLeast(1L)
+}
+
+/** Rounded ring progress with the percentage centred inside. */
+@Composable
+private fun AttendanceRing(
+    percent: Double,
+    label: String = "${percent.toInt()}%",
+    color: Color,
+    diameter: Dp,
+    strokeWidth: Dp,
+    labelSize: TextUnit
+) {
+    val sweep by animateFloatAsState(
+        targetValue = (percent / 100.0).toFloat().coerceIn(0f, 1f),
+        animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing),
+        label = "attendanceRing"
+    )
+
+    Box(modifier = Modifier.size(diameter), contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val stroke = strokeWidth.toPx()
+            val inset = stroke / 2f
+            val arcSize = Size(size.width - stroke, size.height - stroke)
+            drawArc(
+                color = PortalTrack,
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = Offset(inset, inset),
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round)
+            )
+            if (sweep > 0.001f) {
+                drawArc(
+                    color = color,
+                    startAngle = -90f,
+                    sweepAngle = sweep * 360f,
+                    useCenter = false,
+                    topLeft = Offset(inset, inset),
+                    size = arcSize,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round)
+                )
+            }
+        }
+        Text(
+            text = label,
+            color = color,
+            fontSize = labelSize,
+            fontWeight = FontWeight.ExtraBold
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Attendance calendar - present days filled green, absent filled red, Sundays a red holiday dot
+// and other institute holidays a blue dot.
+// ---------------------------------------------------------------------------------------------
+
+private val weekdayShortLabels = listOf("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
+
+/** Fixed-date institute holidays (MM-DD); festival dates vary yearly and are not guessed here. */
+private val instituteHolidays = setOf("01-01", "01-26", "05-01", "08-15", "10-02", "12-25")
+
+private fun isInstituteHoliday(date: LocalDate): Boolean =
+    "%02d-%02d".format(date.monthValue, date.dayOfMonth) in instituteHolidays
+
+@Composable
+private fun AttendanceCalendarCard(
+    month: YearMonth,
+    today: LocalDate,
+    days: Map<LocalDate, DailyAttendance>,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = PortalCard,
+        border = BorderStroke(1.dp, PortalStroke),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = month.format(
+                            DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())
+                        ),
+                        color = PortalTextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = "Present, absent and holidays at a glance",
+                        color = PortalTextSecondary,
+                        fontSize = 10.5.sp
+                    )
+                }
+                CalendarArrow(
+                    icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                    enabled = true,
+                    onClick = onPrevious
+                )
+                Spacer(Modifier.width(6.dp))
+                CalendarArrow(
+                    icon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    enabled = month < YearMonth.from(today),
+                    onClick = onNext
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Row(modifier = Modifier.fillMaxWidth()) {
+                weekdayShortLabels.forEach { label ->
+                    Text(
+                        text = label,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Center,
+                        color = PortalTextSecondary,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.6.sp
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+
+            CalendarMonthGrid(month = month, today = today, days = days)
+
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider(color = PortalStroke)
+            Spacer(Modifier.height(10.dp))
+            AttendanceLegend()
+        }
+    }
+}
+
+@Composable
+private fun CalendarArrow(icon: ImageVector, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(30.dp)
+            .clip(CircleShape)
+            .background(if (enabled) PortalBlue.copy(alpha = 0.08f) else Color.Transparent)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (enabled) PortalBlue else PortalStroke,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
+@Composable
+private fun CalendarMonthGrid(
+    month: YearMonth,
+    today: LocalDate,
+    days: Map<LocalDate, DailyAttendance>
+) {
+    val leadingBlanks = month.atDay(1).dayOfWeek.value - 1 // Monday-first grid
+    val daysInMonth = month.lengthOfMonth()
+    val rowCount = (leadingBlanks + daysInMonth + 6) / 7
+
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        repeat(rowCount) { row ->
+            Row(modifier = Modifier.fillMaxWidth()) {
+                repeat(7) { column ->
+                    val dayOfMonth = row * 7 + column - leadingBlanks + 1
+                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        if (dayOfMonth in 1..daysInMonth) {
+                            val date = month.atDay(dayOfMonth)
+                            CalendarDayCell(date = date, today = today, record = days[date])
+                        } else {
+                            Spacer(Modifier.size(34.dp))
+                        }
+                    }
                 }
             }
         }
@@ -361,67 +630,313 @@ private fun AttendanceContent(data: StudentPortalData) {
 }
 
 @Composable
-private fun SubjectAttendanceCard(item: AttendanceSummaryView) {
-    val pct = item.percentage
-    val good = pct >= 75.0
+private fun CalendarDayCell(date: LocalDate, today: LocalDate, record: DailyAttendance?) {
+    val attendedDay = record?.attendedDay
+    val isToday = date == today
+    val isSunday = date.dayOfWeek == DayOfWeek.SUNDAY
+    val isHoliday = isSunday || isInstituteHoliday(date)
+    val showHolidayDot = isHoliday && attendedDay == null
+    val dotColor = if (isSunday) PortalRose else PortalBlue
 
+    val fill = when (attendedDay) {
+        true -> PortalGreen
+        false -> PortalRose
+        null -> Color.Transparent
+    }
+    val textColor = when {
+        attendedDay != null -> Color.White
+        isToday -> PortalBlue
+        isHoliday -> PortalTextSecondary
+        date.isAfter(today) -> PortalTextSecondary.copy(alpha = 0.45f)
+        else -> PortalTextPrimary
+    }
+
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .background(fill)
+            .then(if (isToday) Modifier.border(1.5.dp, PortalBlue, CircleShape) else Modifier),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = date.dayOfMonth.toString(),
+            color = textColor,
+            fontSize = 12.sp,
+            fontWeight = if (attendedDay != null || isToday) FontWeight.Bold else FontWeight.Medium,
+            modifier = Modifier.offset(y = if (showHolidayDot) (-2).dp else 0.dp)
+        )
+        if (showHolidayDot) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 3.dp)
+                    .size(4.dp)
+                    .clip(CircleShape)
+                    .background(dotColor)
+            )
+        }
+    }
+}
+
+@Composable
+private fun AttendanceLegend() {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        LegendEntry(label = "Present", color = PortalGreen, filled = true)
+        LegendEntry(label = "Absent", color = PortalRose, filled = true)
+        LegendEntry(label = "Sunday", color = PortalRose, filled = false)
+        LegendEntry(label = "Holiday", color = PortalBlue, filled = false)
+    }
+}
+
+@Composable
+private fun LegendEntry(label: String, color: Color, filled: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .then(
+                    if (filled) Modifier.background(color)
+                    else Modifier.border(1.5.dp, color, CircleShape)
+                )
+        )
+        Spacer(Modifier.width(5.dp))
+        Text(
+            text = label,
+            color = PortalTextSecondary,
+            fontSize = 9.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Attendance streak - a bit of fun on top of the numbers.
+// ---------------------------------------------------------------------------------------------
+
+@Composable
+private fun AttendanceStreakCard(
+    streak: AttendanceStreak,
+    days: Map<LocalDate, DailyAttendance>,
+    today: LocalDate
+) {
     Surface(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(18.dp),
         color = PortalCard,
-        border = androidx.compose.foundation.BorderStroke(1.dp, PortalStroke),
+        border = BorderStroke(1.dp, PortalStroke),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(PortalBlue.copy(alpha = 0.12f))
-                        .padding(horizontal = 9.dp, vertical = 5.dp)
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(PortalAmber.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Outlined.LocalFireDepartment,
+                        contentDescription = null,
+                        tint = PortalAmber,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Attendance streak",
+                        color = PortalTextPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = if (streak.current > 0) {
+                            "${pluralDays(streak.current)} in a row \u00b7 best ${streak.best}"
+                        } else {
+                            "Attend class today to start a streak"
+                        },
+                        color = PortalTextSecondary,
+                        fontSize = 11.5.sp
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(PortalBlue)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
                     Text(
-                        text = item.subjectCode,
-                        color = PortalBlue,
+                        text = "${streak.current}d",
+                        color = PortalAmber,
                         fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                (6 downTo 0).forEach { offset ->
+                    val date = today.minusDays(offset.toLong())
+                    StreakDay(date = date, today = today, attended = days[date]?.attendedDay)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StreakDay(date: LocalDate, today: LocalDate, attended: Boolean?) {
+    val fill = when (attended) {
+        true -> PortalGreen
+        false -> PortalRose
+        null -> PortalTrack
+    }
+    val isToday = date == today
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(fill),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = date.dayOfWeek.name.take(1),
+                color = if (attended == null) PortalTextSecondary else Color.White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = date.dayOfMonth.toString(),
+            color = if (isToday) PortalBlue else PortalTextSecondary,
+            fontSize = 9.5.sp,
+            fontWeight = if (isToday) FontWeight.Bold else FontWeight.Medium
+        )
+    }
+}
+
+private fun pluralDays(count: Int): String = if (count == 1) "1 day" else "$count days"
+
+
+@Composable
+private fun SubjectAttendanceCard(row: SubjectAttendanceRow) {
+    val summary = row.summary
+    val code = summary?.subjectCode?.takeIf { it.isNotBlank() }
+        ?: row.subject?.subjectCode
+        ?: "SUBJECT"
+    val name = summary?.subjectName?.takeIf { it.isNotBlank() }
+        ?: row.subject?.subjectName
+        ?: "Subject"
+    val marked = summary != null && summary.total > 0
+    val pct = summary?.percentage ?: 0.0
+    val good = marked && pct >= 75.0
+    val accent = when {
+        !marked -> PortalTextSecondary
+        good -> PortalGreen
+        else -> PortalRose
+    }
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = PortalCard,
+        border = BorderStroke(1.dp, PortalStroke),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(PortalBlue.copy(alpha = 0.12f))
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = code,
+                        color = PortalBlue,
+                        fontSize = 10.5.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "${pct.toInt()}%",
-                    color = if (good) PortalGreen else PortalRose,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.ExtraBold
+                    text = name,
+                    color = PortalTextPrimary,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = 17.sp
                 )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = if (marked) {
+                        "Attended ${summary?.attended ?: 0} of ${summary?.total ?: 0} classes"
+                    } else {
+                        "No classes marked for this subject yet"
+                    },
+                    color = PortalTextSecondary,
+                    fontSize = 11.sp
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .clip(CircleShape)
+                            .background(accent)
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        text = when {
+                            !marked -> "Not marked"
+                            good -> "On track"
+                            else -> "Below 75%"
+                        },
+                        color = accent,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = item.subjectName,
-                color = PortalTextPrimary,
-                fontSize = 13.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(10.dp))
-            LinearProgressIndicator(
-                progress = { (pct / 100.0).toFloat().coerceIn(0f, 1f) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(7.dp)
-                    .clip(RoundedCornerShape(4.dp)),
-                color = if (good) PortalGreen else PortalRose,
-                trackColor = PortalTrack
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "Attended ${item.attended} of ${item.total} classes",
-                color = PortalTextSecondary,
-                fontSize = 11.sp
+
+            Spacer(Modifier.width(14.dp))
+
+            AttendanceRing(
+                percent = pct,
+                label = if (marked) "${pct.toInt()}%" else "\u2014",
+                color = accent,
+                diameter = 58.dp,
+                strokeWidth = 5.5.dp,
+                labelSize = 12.5.sp
             )
         }
     }
 }
+
+/** One row of the subject-wise list: the enrolled subject plus its summary when one exists. */
+private data class SubjectAttendanceRow(
+    val subject: ClassSubjectView?,
+    val summary: AttendanceSummaryView?
+)
 
 // ---------------------------------------------------------------------------------------------
 // Timetable - a week strip plus a single-day timeline, so the student reads one day at a time
