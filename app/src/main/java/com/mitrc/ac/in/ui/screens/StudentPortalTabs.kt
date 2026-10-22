@@ -2,13 +2,18 @@ package com.mitrc.ac.`in`.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -49,14 +54,17 @@ import androidx.compose.material.icons.automirrored.outlined.Assignment
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.EventAvailable
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MarkEmailRead
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.PictureAsPdf
+import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.School
@@ -73,6 +81,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -80,6 +89,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -87,6 +97,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -96,6 +107,7 @@ import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -205,9 +217,13 @@ fun StudentScheduleTab(
             )
             Spacer(Modifier.height(18.dp))
 
+            // Tapping the segmented control is the only way to change the segment: a swipe
+            // belongs to the portal's own tab pager, and nesting two horizontal pagers left the
+            // outer one stranded between Home and Academics.
             HorizontalPager(
                 state = schedulePagerState,
                 beyondViewportPageCount = 1,
+                userScrollEnabled = false,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
@@ -223,7 +239,11 @@ fun StudentScheduleTab(
                     when (pageMode) {
                         ScheduleMode.ATTENDANCE -> AttendanceContent(data = data)
                         ScheduleMode.TIMETABLE -> TimetableContent(data = data, refreshing = isRefreshing)
-                        ScheduleMode.NOTES -> NotesContent(data = data, notes = notes)
+                        ScheduleMode.NOTES -> NotesContent(
+                            data = data,
+                            notes = notes,
+                            loading = isRefreshing
+                        )
                         ScheduleMode.EXAMS -> ExamsResultsContent(data = data)
                     }
                 }
@@ -506,9 +526,7 @@ private fun roomLabel(value: String): String =
 
 @Composable
 private fun TimetableContent(data: StudentPortalData, refreshing: Boolean) {
-    val timetable = remember(data.timetable) {
-        if (data.timetable.isEmpty()) sampleTimetableEntries() else data.timetable
-    }
+    val timetable = data.timetable
     val todayDow = remember { currentDayOfWeek() }
     var selectedDay by remember { mutableStateOf(todayDow.coerceIn(1, 6)) }
 
@@ -523,6 +541,16 @@ private fun TimetableContent(data: StudentPortalData, refreshing: Boolean) {
 
     if (refreshing) {
         TimetableSkeleton()
+        return
+    }
+
+    // Same overline treatment as "ATTENDANCE RECORD", so the tab reads as a titled screen
+    // instead of starting abruptly with the week strip.
+    PortalSectionLabel(text = "CLASS TIMETABLE")
+    Spacer(Modifier.height(12.dp))
+
+    if (data.timetable.isEmpty()) {
+        PortalEmptyCard(message = "No timetable has been published for your class yet.")
         return
     }
 
@@ -1036,81 +1064,393 @@ private fun LabGroupNotice() {
 }
 
 @Composable
-private fun NotesContent(data: StudentPortalData, notes: MutableList<PortalNote>) {
-    val context = LocalContext.current
-
-    val pdfNotes = remember(data.pdfNotes) {
-        if (data.pdfNotes.isEmpty()) samplePdfNotes() else data.pdfNotes
+private fun NotesContent(
+    data: StudentPortalData,
+    notes: MutableList<PortalNote>,
+    loading: Boolean = false
+) {
+    if (loading) {
+        NotesTabSkeleton()
+        return
     }
-    val subjects = remember(data.subjects) {
-        if (data.subjects.isEmpty()) sampleSubjectCards() else data.subjects
+
+    val subjects = data.subjects
+    val facultyGroups = remember(subjects, data.pdfNotes) {
+        buildFacultyNoteGroups(subjects, data.pdfNotes)
     }
 
-    var selectedSubject by remember { mutableStateOf("All") }
     var searchQuery by remember { mutableStateOf("") }
+    val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
 
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        PortalSectionLabel(text = "ASSIGNED SUBJECTS & FACULTY")
-
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            subjects.forEach { subject ->
-                val countForSubject = pdfNotes.count {
-                    it.classSubjectId == subject.classSubjectId ||
-                            it.subjectName.equals(subject.subjectName, ignoreCase = true)
+    val query = searchQuery.trim()
+    val visibleGroups = remember(facultyGroups, query) {
+        if (query.isEmpty()) {
+            facultyGroups
+        } else {
+            facultyGroups.mapNotNull { group ->
+                val groupMatches = group.subjectName.contains(query, true) ||
+                        group.subjectCode.contains(query, true) ||
+                        group.teacherName.contains(query, true)
+                if (groupMatches) {
+                    group
+                } else {
+                    val matchedChapters = group.chapters.filter { it.title.contains(query, true) }
+                    if (matchedChapters.isEmpty()) null else group.copy(chapters = matchedChapters)
                 }
-                val isSelected = selectedSubject.equals(subject.subjectName, ignoreCase = true)
-
-                SubjectFacultyCard(
-                    subject = subject,
-                    noteCount = countForSubject,
-                    isSelected = isSelected,
-                    onClick = {
-                        selectedSubject = if (isSelected) "All" else subject.subjectName
-                    }
-                )
             }
         }
+    }
 
-        Spacer(Modifier.height(8.dp))
+    // A search should reveal what matched instead of leaving every card collapsed.
+    LaunchedEffect(query) {
+        if (query.isNotEmpty()) {
+            visibleGroups.forEach { expandedGroups[it.key] = true }
+        }
+    }
 
-        PortalSectionLabel(text = "STUDY MATERIAL & PDF NOTES")
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            PortalSectionLabel(text = "FACULTY & SUBJECT NOTES")
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = "${facultyGroups.size} subjects",
+                color = PortalTextSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        Text(
+            text = "Open a faculty card to see the chapter-wise notes shared for that subject.",
+            color = PortalTextSecondary,
+            fontSize = 12.sp,
+            lineHeight = 17.sp
+        )
 
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("Search by title, topic or teacher...", fontSize = 12.5.sp) },
-            leadingIcon = { Icon(Icons.Outlined.Search, null, modifier = Modifier.size(18.dp)) },
+            placeholder = {
+                Text(
+                    text = "Search subject, faculty or chapter...",
+                    color = PortalTextSecondary,
+                    fontSize = 12.5.sp
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Outlined.Search,
+                    contentDescription = null,
+                    tint = PortalTextSecondary,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            trailingIcon = if (searchQuery.isNotBlank()) {
+                {
+                    Icon(
+                        Icons.Outlined.Close,
+                        contentDescription = "Clear search",
+                        tint = PortalTextSecondary,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clickable {
+                                // Clearing the query also folds every card the search expanded.
+                                searchQuery = ""
+                                expandedGroups.clear()
+                            }
+                    )
+                }
+            } else null,
             singleLine = true,
             shape = RoundedCornerShape(14.dp),
+            textStyle = TextStyle(color = PortalTextPrimary, fontSize = 12.5.sp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = PortalTextPrimary,
+                unfocusedTextColor = PortalTextPrimary,
+                focusedContainerColor = PortalCard,
+                unfocusedContainerColor = PortalCard,
+                focusedBorderColor = PortalBlue,
+                unfocusedBorderColor = PortalStroke,
+                cursorColor = PortalBlue,
+                focusedLeadingIconColor = PortalTextSecondary,
+                unfocusedLeadingIconColor = PortalTextSecondary,
+                focusedTrailingIconColor = PortalTextSecondary,
+                unfocusedTrailingIconColor = PortalTextSecondary,
+                focusedPlaceholderColor = PortalTextSecondary,
+                unfocusedPlaceholderColor = PortalTextSecondary
+            ),
             modifier = Modifier.fillMaxWidth()
         )
 
-        val filtered = pdfNotes.filter { note ->
-            (selectedSubject == "All" || note.subjectName.equals(selectedSubject, ignoreCase = true)) &&
-                    (searchQuery.isBlank() || note.title.contains(searchQuery, true) || note.teacherName.contains(searchQuery, true))
+        if (visibleGroups.isEmpty()) {
+            PortalEmptyCard(
+                message = if (facultyGroups.isEmpty()) {
+                    "No subjects are assigned to your class yet."
+                } else {
+                    "No faculty or chapter matches \"$query\"."
+                }
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                visibleGroups.forEach { group ->
+                    FacultyNotesCard(
+                        group = group,
+                        expanded = expandedGroups[group.key] == true,
+                        onToggle = { expandedGroups[group.key] = expandedGroups[group.key] != true }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Shimmer preview that mirrors the Notes tab while it reloads. */
+@Composable
+private fun NotesTabSkeleton() {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(168.dp)
+                    .height(11.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .shimmerEffect()
+            )
+            Spacer(Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .width(62.dp)
+                    .height(11.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .shimmerEffect()
+            )
         }
 
-        if (filtered.isEmpty()) {
-            PortalEmptyCard(message = "No published PDF notes match your filter.")
-        } else {
-            val grouped = filtered.groupBy { it.subjectName }
-            val subjectOrder = subjects.withIndex()
-                .associate { (index, subject) -> subject.subjectName.lowercase() to index }
-            val sections = grouped.entries
-                .sortedBy { entry -> subjectOrder[entry.key.lowercase()] ?: Int.MAX_VALUE }
-                .map { it.key to it.value }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.82f)
+                .height(10.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .shimmerEffect()
+        )
 
-            Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                sections.forEach { (subjectName, subjectNotes) ->
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (selectedSubject == "All") {
-                            PortalSectionLabel(text = subjectName.uppercase())
-                        }
-                        subjectNotes.forEach { note ->
-                            PdfNoteCard(note) {
-                                try {
-                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(note.driveUrl)))
-                                } catch (e: Exception) {}
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = PortalCard,
+            border = BorderStroke(1.dp, PortalStroke),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clip(CircleShape)
+                        .shimmerEffect()
+                )
+                Spacer(Modifier.width(12.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.55f)
+                        .height(11.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .shimmerEffect()
+                )
+            }
+        }
+
+        repeat(4) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = PortalCard,
+                border = BorderStroke(1.dp, PortalStroke),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(78.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .shimmerEffect()
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Box(
+                            modifier = Modifier
+                                .width(132.dp)
+                                .height(12.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .shimmerEffect()
+                        )
+                        Spacer(Modifier.height(7.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.72f)
+                                .height(10.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .shimmerEffect()
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(54.dp)
+                            .height(10.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .shimmerEffect()
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FacultyNotesCard(
+    group: FacultyNotesGroup,
+    expanded: Boolean,
+    onToggle: () -> Unit
+) {
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(240, easing = FastOutSlowInEasing),
+        label = "chevronRotation"
+    )
+    val containerColor by animateColorAsState(
+        targetValue = if (expanded) PortalBlue.copy(alpha = 0.06f) else PortalCard,
+        animationSpec = tween(200),
+        label = "cardContainer"
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (expanded) PortalBlue.copy(alpha = 0.45f) else PortalStroke,
+        animationSpec = tween(200),
+        label = "cardBorder"
+    )
+
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = containerColor,
+        border = BorderStroke(1.dp, borderColor),
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(animationSpec = tween(240, easing = FastOutSlowInEasing))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClick = onToggle),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(PortalBlue.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = facultyInitials(group.teacherName),
+                        color = PortalBlue,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+
+                Spacer(Modifier.width(12.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = group.teacherName,
+                        color = PortalTextPrimary,
+                        fontSize = 14.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = "${group.subjectName} \u00b7 ${group.subjectCode}",
+                        color = PortalTextSecondary,
+                        fontSize = 11.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Spacer(Modifier.width(10.dp))
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = if (group.chapters.isEmpty()) "No notes" else "${group.chapters.size} chapters",
+                        color = PortalTextSecondary,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Icon(
+                        Icons.Outlined.ExpandMore,
+                        contentDescription = if (expanded) "Hide chapters" else "Show chapters",
+                        tint = PortalBlue,
+                        modifier = Modifier
+                            .size(22.dp)
+                            .rotate(chevronRotation)
+                    )
+                }
+            }
+
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(
+                    animationSpec = tween(240, easing = FastOutSlowInEasing)
+                ) + fadeIn(tween(180)),
+                exit = shrinkVertically(
+                    animationSpec = tween(200, easing = FastOutSlowInEasing)
+                ) + fadeOut(tween(120))
+            ) {
+                Column {
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider(color = PortalStroke)
+                    if (group.chapters.isEmpty()) {
+                        Text(
+                            text = "No chapters published for this subject yet.",
+                            color = PortalTextSecondary,
+                            fontSize = 11.5.sp,
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+                    } else {
+                        val context = LocalContext.current
+                        group.chapters.forEachIndexed { index, note ->
+                            ChapterRow(index = index + 1, note = note) {
+                                val opened = runCatching {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse(note.driveUrl))
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                }.isSuccess
+                                if (!opened) {
+                                    Toast.makeText(
+                                        context,
+                                        "No app can open this link",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
                             }
                         }
                     }
@@ -1121,93 +1461,88 @@ private fun NotesContent(data: StudentPortalData, notes: MutableList<PortalNote>
 }
 
 @Composable
-private fun SubjectFacultyCard(
-    subject: ClassSubjectView,
-    noteCount: Int,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    ElevatedCard(
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = if (isSelected) PortalBlue.copy(alpha = 0.08f) else PortalCard
-        ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp),
+private fun ChapterRow(index: Int, note: PortalPdfNote, onClick: () -> Unit) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .then(
-                if (isSelected) Modifier.border(1.5.dp, PortalBlue, RoundedCornerShape(18.dp))
-                else Modifier
-            )
+            .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
+            .padding(vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(PortalBlue.copy(alpha = 0.12f))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = subject.subjectCode,
-                        color = PortalBlue, fontSize = 11.5.sp, fontWeight = FontWeight.Bold
-                    )
-                }
-                if (noteCount > 0) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(PortalAmber.copy(alpha = 0.25f))
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Text(text = "$noteCount Resource${if (noteCount > 1) "s" else ""}", color = PortalBlue, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
+        Box(
+            modifier = Modifier
+                .size(26.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(PortalBlue.copy(alpha = 0.1f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "$index",
+                color = PortalBlue,
+                fontSize = 10.5.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
 
-            Spacer(Modifier.height(10.dp))
-            Text(text = subject.subjectName, color = PortalTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(modifier = Modifier.size(28.dp).clip(CircleShape).background(PortalBlue.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Outlined.School, null, tint = PortalBlue, modifier = Modifier.size(16.dp))
-                }
-                Column {
-                    Text(text = subject.teacherName, color = PortalTextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    if (!subject.teacherEmail.isNullOrBlank()) {
-                        Text(text = subject.teacherEmail!!, color = PortalTextSecondary, fontSize = 11.sp)
-                    }
-                }
-            }
+        Spacer(Modifier.width(10.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = note.title,
+                color = PortalTextPrimary,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                lineHeight = 16.sp
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = "${noteCategoryLabel(note.category)} \u00b7 ${note.createdAt}",
+                color = PortalTextSecondary,
+                fontSize = 10.5.sp
+            )
+        }
+
+        Spacer(Modifier.width(8.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Outlined.PictureAsPdf,
+                contentDescription = null,
+                tint = PortalRose,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(Modifier.width(6.dp))
+            Icon(
+                Icons.AutoMirrored.Outlined.OpenInNew,
+                contentDescription = "Open in Drive",
+                tint = PortalBlue,
+                modifier = Modifier.size(15.dp)
+            )
         }
     }
 }
 
-@Composable
-private fun PdfNoteCard(note: PortalPdfNote, onClick: () -> Unit) {
-    ElevatedCard(
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = PortalCard),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp),
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
-    ) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(PortalRose.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
-                Icon(Icons.Outlined.PictureAsPdf, null, tint = PortalRose, modifier = Modifier.size(20.dp))
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = note.title, color = PortalTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(text = "${note.subjectCode} \u00b7 ${note.teacherName}", color = PortalTextSecondary, fontSize = 11.sp)
-            }
-            Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, tint = PortalBlue, modifier = Modifier.size(18.dp))
-        }
+/** "Dr. Meena Sharma" -> "MS", "Rahul Verma" -> "RV"; a single word falls back to its initial. */
+private fun facultyInitials(name: String): String {
+    val stripped = name.replace(Regex("^(Dr|Mr|Mrs|Ms|Prof)\\.?\\s+", RegexOption.IGNORE_CASE), "")
+    val words = stripped.split(' ').filter { it.isNotBlank() }
+    return when {
+        words.isEmpty() -> "F"
+        words.size == 1 -> words.first().take(1).uppercase()
+        else -> (words.first().take(1) + words[1].take(1)).uppercase()
     }
+}
+
+private fun noteCategoryLabel(category: String): String = when (category.lowercase()) {
+    "notes" -> "Notes"
+    "assignment" -> "Assignment"
+    "question_paper" -> "Question paper"
+    "syllabus" -> "Syllabus"
+    "lab_manual" -> "Lab manual"
+    else -> "Material"
 }
 
 @Composable
@@ -1544,10 +1879,150 @@ private fun IconButton(onClick: () -> Unit, content: @Composable () -> Unit) {
 
 @Composable
 fun StudentEventsTab(scroll: ScrollState) {
+    val events = remember { sampleCollegeEvents() }
+
     PortalTabScaffold(scroll = scroll) {
-        PortalSectionLabel(text = "CAMPUS EVENTS")
-        Spacer(Modifier.height(12.dp))
-        PortalEmptyCard(message = "No upcoming events found.")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            PortalSectionLabel(text = "CAMPUS EVENTS")
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = "${events.size} events",
+                color = PortalTextSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = "Hackathons, fests and exhibitions hosted at MITRC.",
+            color = PortalTextSecondary,
+            fontSize = 12.sp
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            events.forEach { event -> EventListCard(event = event) }
+        }
+
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun EventListCard(event: CollegeEvent) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = PortalCard,
+        border = BorderStroke(1.dp, PortalStroke),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(168.dp)
+            ) {
+                AsyncImage(
+                    model = event.image,
+                    contentDescription = event.title,
+                    contentScale = ContentScale.Crop,
+                    placeholder = ColorPainter(PortalCardAlt),
+                    error = ColorPainter(PortalCardAlt),
+                    fallback = ColorPainter(PortalCardAlt),
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.Transparent,
+                                    Color(0x00001736),
+                                    Color(0x8C001736)
+                                )
+                            )
+                        )
+                )
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(12.dp)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(Color.White.copy(alpha = 0.18f))
+                        .border(1.dp, Color.White.copy(alpha = 0.38f), RoundedCornerShape(7.dp))
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = event.category,
+                        color = GoldLight,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 0.8.sp
+                    )
+                }
+            }
+
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(
+                    text = event.title,
+                    color = PortalTextPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = 19.sp
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.Schedule,
+                        contentDescription = null,
+                        tint = PortalBlue,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = event.whenLabel,
+                        color = PortalTextSecondary,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                Spacer(Modifier.height(4.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.Place,
+                        contentDescription = null,
+                        tint = PortalBlue,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = event.venue,
+                        color = PortalTextSecondary,
+                        fontSize = 11.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
     }
 }
 

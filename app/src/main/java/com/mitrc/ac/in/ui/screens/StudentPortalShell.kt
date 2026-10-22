@@ -72,6 +72,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -87,6 +88,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.ColorPainter
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.layout.ContentScale
@@ -124,7 +129,9 @@ data class StudentPortalData(
      * Teacher-published PDFs from the `notes` table, already filtered down to the subjects this
      * student is enrolled in - backs the Notes segment of the Academics tab.
      */
-    val pdfNotes: List<PortalPdfNote> = emptyList()
+    val pdfNotes: List<PortalPdfNote> = emptyList(),
+    /** Coordinator contact shown on the lock / PTM screen; null while the profile is active. */
+    val coordinator: StudentCoordinatorContact? = null
 )
 
 /**
@@ -135,27 +142,41 @@ data class StudentPortalData(
  * portal; a failed profile still surfaces as [StudentPortalData.error] so the Retry screen shows.
  */
 private suspend fun loadPortalData(userUid: String): StudentPortalData {
-    val profile = PortalRepository.getStudentProfile(userUid)
-    val classId = profile.getOrNull()?.classId ?: 0
+    val profileResult = PortalRepository.getStudentProfile(userUid)
+    val profile = profileResult.getOrNull()
+    val classId = profile?.classId ?: 0
     val subjects = if (classId > 0) {
         PortalRepository.getStudentSubjects(classId).getOrDefault(emptyList())
     } else {
         emptyList()
     }
 
+    // Only needed for the lock / PTM screen; skipped for an active profile so the extra
+    // coordinator lookup never costs anything on the normal path.
+    val coordinator = if (profile?.isLocked == true || profile?.isPtm == true) {
+        PortalRepository.getStudentCoordinator(
+            classId = profile.classId,
+            courseName = profile.course,
+            semester = profile.semester
+        ).getOrNull()
+    } else {
+        null
+    }
+
     return StudentPortalData(
-        profile = profile.getOrNull(),
+        profile = profile,
         subjects = subjects,
         attendance = PortalRepository.getStudentAttendance(userUid).getOrDefault(emptyList()),
         marks = PortalRepository.getStudentMarks(userUid).getOrDefault(emptyList()),
-        timetable = PortalRepository.getMyTimetable().getOrDefault(emptyList()),
+        timetable = PortalRepository.getMyTimetable(classId.takeIf { it > 0 }).getOrDefault(emptyList()),
         faculty = subjects,
         // Notes live in their own table; the mapper drops rows outside this student's subjects.
-        pdfNotes = PortalRepository.getPublishedNotes()
+        pdfNotes = PortalRepository.getPublishedNotes(userUid, classId.takeIf { it > 0 })
             .getOrDefault(emptyList())
             .toPortalPdfNotes(subjects = subjects),
-        error = if (profile.isFailure) {
-            profile.exceptionOrNull()?.message ?: "Failed to load your student profile."
+        coordinator = coordinator,
+        error = if (profileResult.isFailure) {
+            profileResult.exceptionOrNull()?.message ?: "Failed to load your student profile."
         } else {
             null
         }
@@ -186,10 +207,9 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
     var scheduleModeName by rememberSaveable { mutableStateOf(ScheduleMode.ATTENDANCE.name) }
     val scheduleMode = ScheduleMode.fromName(scheduleModeName)
 
-    // One scroll position per tab so the header collapses against whichever list is on screen and
-    // switching tabs keeps each tab where the user left it. Academics gets one state per mode:
-    // the pager composes neighbouring pages at the same time, and two scrollables writing a single
-    // ScrollState fight over its value/maxValue - that was the jitter and the lock-up.
+    // One scroll position per tab so switching tabs keeps each tab where the user left it.
+    // Academics gets one state per mode: the pager composes neighbouring pages at the same time,
+    // and two scrollables writing a single ScrollState fight over its value/maxValue.
     val homeScroll = rememberScrollState()
     val attendanceScroll = rememberScrollState()
     val timetableScroll = rememberScrollState()
@@ -197,6 +217,30 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
     val examsScroll = rememberScrollState()
     val eventsScroll = rememberScrollState()
     val settingsScroll = rememberScrollState()
+
+    // The hero folds by consuming scroll deltas through nested scroll instead of mirroring the
+    // list offset. Mirroring scrolled the content and grew the viewport at the same time, so on
+    // the timetable the scroll range shrank under the current offset near the bottom and clamped
+    // back and forth - the double hitch. The coordinator portal already folds this way.
+    val foldDistancePx = with(LocalDensity.current) { 96.dp.toPx() }
+    val headerOffset = remember { mutableFloatStateOf(0f) }
+    val headerNestedScroll = remember(foldDistancePx) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val delta = available.y
+                if (delta == 0f) return Offset.Zero
+                // Dragging up folds the hero; dragging down unfolds it before the list moves.
+                // Once it is fully unfolded the drag passes through to pull-to-refresh.
+                val next = (headerOffset.floatValue - delta).coerceIn(0f, foldDistancePx)
+                val used = next - headerOffset.floatValue
+                if (used == 0f) return Offset.Zero
+                headerOffset.floatValue = next
+                return Offset(0f, -used)
+            }
+        }
+    }
+
+    LaunchedEffect(tab, scheduleMode) { headerOffset.floatValue = 0f }
 
     // Reloadable: a transient failure (e.g. a token that expired mid-session) can be retried
     // from the error screen instead of leaving the user stranded.
@@ -212,6 +256,18 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
     // instead of blanking out to the full-screen loading skeleton.
     val refreshData: suspend () -> Unit = {
         data = loadPortalData(userUid)
+    }
+
+    // A locked profile, or a scheduled PTM, takes over the whole portal: no header, no tabs and
+    // no back out. The screen re-checks in the background and closes itself once the coordinator
+    // unlocks the profile.
+    data?.profile?.takeIf { it.isLocked == true || it.isPtm == true }?.let { locked ->
+        StudentLockScreen(
+            profile = locked,
+            coordinator = data?.coordinator,
+            onRefresh = refreshData
+        )
+        return
     }
 
     val pagerState = rememberPagerState(
@@ -257,18 +313,7 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
                 tab = tab,
                 scheduleMode = scheduleMode,
                 name = portalDisplayName(data?.profile),
-                scroll = when (tab) {
-                    StudentTab.HOME -> homeScroll
-                    StudentTab.ATTENDANCE -> when (scheduleMode) {
-                        ScheduleMode.ATTENDANCE -> attendanceScroll
-                        ScheduleMode.TIMETABLE -> timetableScroll
-                        ScheduleMode.NOTES -> notesScroll
-                        ScheduleMode.EXAMS -> examsScroll
-                    }
-
-                    StudentTab.EVENTS -> eventsScroll
-                    StudentTab.SETTINGS -> settingsScroll
-                },
+                scrolledPx = { headerOffset.floatValue },
                 onBellClick = { showNotifications = true },
                 onAvatarClick = { showProfile = true }
             )
@@ -277,6 +322,7 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    .nestedScroll(headerNestedScroll)
             ) {
                 val current = data
                 if (current == null) {
@@ -380,7 +426,7 @@ private fun PortalHeader(
     tab: StudentTab,
     scheduleMode: ScheduleMode,
     name: String?,
-    scroll: ScrollState,
+    scrolledPx: () -> Float,
     onBellClick: () -> Unit,
     onAvatarClick: () -> Unit
 ) {
@@ -400,7 +446,7 @@ private fun PortalHeader(
         overline = "STUDENT PORTAL",
         title = title,
         name = name,
-        scrolledPx = { scroll.value.toFloat() },
+        scrolledPx = scrolledPx,
         // The Settings tab already lists the profile in full, so the avatar duplicate is
         // hidden there.
         showAvatar = tab != StudentTab.SETTINGS,

@@ -91,16 +91,21 @@ fun CoordinatorTimetableView(userUid: String) {
     LaunchedEffect(userUid) {
         loading = true
         val portals = PortalRepository.getMyPortals().getOrNull()
-        isCoordinatorAllowed = portals?.isCoordinator == true || portals?.isAdmin == true
+
+        // Same resolution the rest of the coordinator portal uses: `my_portals` can leave
+        // is_coordinator false even though `course_coordinators` grants the rights, so the ruled
+        // class list is the fallback. Checking only my_portals locked valid coordinators out here.
+        val classesRes = PortalRepository.getMyCoordinatorClasses()
+        ruledClasses = classesRes.getOrDefault(emptyList())
+        isCoordinatorAllowed = portals?.isCoordinator == true ||
+            portals?.isAdmin == true ||
+            ruledClasses.isNotEmpty()
 
         if (isCoordinatorAllowed) {
             val profRes = PortalRepository.getTeacherProfile(userUid)
             coordinatorProfile = profRes.getOrNull()
 
-            val classesRes = PortalRepository.getMyCoordinatorClasses()
-            ruledClasses = classesRes.getOrDefault(emptyList())
-
-            val ttRes = PortalRepository.getTimetables()
+            val ttRes = PortalRepository.getTimetablesForClasses(ruledClasses.map { it.classId })
             timetables = ttRes.getOrDefault(emptyList())
             if (timetables.isNotEmpty()) {
                 selectedTimetable = timetables.first()
@@ -155,7 +160,7 @@ fun CoordinatorTimetableView(userUid: String) {
 
     CoordinatorRefreshBox(
         onRefresh = {
-            val refreshed = PortalRepository.getTimetables()
+            val refreshed = PortalRepository.getTimetablesForClasses(ruledClasses.map { it.classId })
             timetables = refreshed.getOrDefault(emptyList())
             val current = selectedTimetable ?: timetables.firstOrNull()
             if (current != null) {
@@ -283,7 +288,7 @@ fun CoordinatorTimetableView(userUid: String) {
                                         res.fold(
                                             onSuccess = { newId ->
                                                 actionMsg = "Duplicated as new draft TT #$newId"
-                                                val refresh = PortalRepository.getTimetables()
+                                                val refresh = PortalRepository.getTimetablesForClasses(ruledClasses.map { it.classId })
                                                 timetables = refresh.getOrDefault(emptyList())
                                             },
                                             onFailure = { err ->
@@ -315,7 +320,7 @@ fun CoordinatorTimetableView(userUid: String) {
                                             onSuccess = {
                                                 selectedTimetable = updated
                                                 actionMsg = "Timetable status updated to ${if (updated.isPublished) "Published" else "Draft"}"
-                                                val refresh = PortalRepository.getTimetables()
+                                                val refresh = PortalRepository.getTimetablesForClasses(ruledClasses.map { it.classId })
                                                 timetables = refresh.getOrDefault(emptyList())
                                             },
                                             onFailure = { err ->

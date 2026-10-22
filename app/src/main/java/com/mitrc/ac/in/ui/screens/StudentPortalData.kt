@@ -55,6 +55,10 @@ import com.mitrc.ac.`in`.ui.theme.SurfaceWhite
 import com.mitrc.ac.`in`.ui.theme.TextPrimary
 import com.mitrc.ac.`in`.ui.theme.TextSecondary
 import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
@@ -94,6 +98,21 @@ val PortalGreen = SuccessGreen
 val PortalSkeletonBase = DividerSoft
 /** The darker grey band that sweeps across [PortalSkeletonBase] during a shimmer. */
 val PortalSkeletonShine = DarkTextMuted
+
+/**
+ * Formats a `students.ptm_schedule` timestamp for display. PostgREST returns ISO-8601 with an
+ * offset (`2026-10-22T10:30:00+00:00`) or a `Z`; anything unparsable is shown verbatim so the
+ * scheduled time is never silently hidden.
+ */
+internal fun formatPtmSchedule(raw: String?): String? {
+    val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val instant = runCatching { OffsetDateTime.parse(value).toInstant() }
+        .recoverCatching { Instant.parse(value) }
+        .getOrNull() ?: return value
+    return instant
+        .atZone(ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern("EEE, dd MMM yyyy â€¢ hh:mm a", Locale.getDefault()))
+}
 
 /**
  * Reusable shimmer modifier for skeleton previews across all cards & screens.
@@ -185,6 +204,74 @@ data class PortalPdfNote(
     val teacherName: String,
     val createdAt: String
 )
+
+/**
+ * One card in the Notes segment: the faculty member, the subject they teach this class and the
+ * chapter-wise notes published for it.
+ */
+data class FacultyNotesGroup(
+    val subjectName: String,
+    val subjectCode: String,
+    val teacherName: String,
+    val teacherEmail: String?,
+    val chapters: List<PortalPdfNote>
+) {
+    /** Stable identity for expand/collapse state, independent of list order. */
+    val key: String get() = "$subjectCode|$subjectName|$teacherName"
+}
+
+/**
+ * Groups published notes into one card per enrolled subject, in the student's enrolment order.
+ * Anything that cannot be matched to an enrolled subject still gets its own card so notes never
+ * silently disappear.
+ */
+fun buildFacultyNoteGroups(
+    subjects: List<ClassSubjectView>,
+    notes: List<PortalPdfNote>
+): List<FacultyNotesGroup> {
+    val used = mutableSetOf<Int>()
+    val groups = mutableListOf<FacultyNotesGroup>()
+
+    subjects.forEach { subject ->
+        val chapters = notes
+            .filter { note ->
+                note.id !in used && (
+                    (note.classSubjectId != 0 && note.classSubjectId == subject.classSubjectId) ||
+                        note.subjectName.equals(subject.subjectName, ignoreCase = true)
+                    )
+            }
+            .sortedChapters()
+
+        used += chapters.map { it.id }
+        groups += FacultyNotesGroup(
+            subjectName = subject.subjectName,
+            subjectCode = subject.subjectCode,
+            teacherName = subject.teacherName,
+            teacherEmail = subject.teacherEmail,
+            chapters = chapters
+        )
+    }
+
+    notes.filter { it.id !in used }
+        .groupBy { "${it.subjectCode}|${it.subjectName}|${it.teacherName}" }
+        .values
+        .forEach { leftovers ->
+            val first = leftovers.first()
+            groups += FacultyNotesGroup(
+                subjectName = first.subjectName,
+                subjectCode = first.subjectCode,
+                teacherName = first.teacherName,
+                teacherEmail = null,
+                chapters = leftovers.sortedChapters()
+            )
+        }
+
+    return groups
+}
+
+/** Units first (Unit 1, Unit 2, ...), then assignments, papers and other material. */
+private fun List<PortalPdfNote>.sortedChapters(): List<PortalPdfNote> =
+    sortedWith(compareBy({ !it.title.startsWith("Unit ", ignoreCase = true) }, { it.title }))
 
 // ---------------------------------------------------------------------------------------------
 // notes table -> card model
@@ -285,57 +372,65 @@ data class CollegeEvent(
 )
 
 /**
- * Placeholder event feed. `picsum.photos` seeds return a stable image per seed, so the carousel
- * looks identical on every launch instead of reshuffling.
+ * Event feed shared by the Home carousel and the Events tab, so both surfaces show the same
+ * cards. The posters are the college's own event artwork.
  */
 fun sampleCollegeEvents(): List<CollegeEvent> = listOf(
     CollegeEvent(
         id = 1,
-        title = "TechFest 2026 \u2014 National Level Hackathon",
-        category = "TECH",
-        whenLabel = "28 Sep \u00b7 09:00 AM",
-        venue = "Innovation Hall, Block C",
-        image = "https://picsum.photos/seed/mitrc-techfest/900/600"
+        title = "Techspark \u201926 \u2014 Annual Tech Exhibition",
+        category = "TECH FEST",
+        whenLabel = "12 \u2013 19 OCT 2026 \u00b7 9:15 AM",
+        venue = "Central Lawn, MITRC",
+        image = "https://ik.imagekit.io/Mainimages/Event26/techspark26.jpg"
     ),
     CollegeEvent(
         id = 2,
-        title = "Annual Cultural Night \u2014 Rhythms of Rajasthan",
+        title = "Arambh \u2014 Annual Campus Fest",
         category = "CULTURAL",
-        whenLabel = "02 Oct \u00b7 06:30 PM",
+        whenLabel = "13 \u2013 15 Feb 2026 \u00b7 05:00 PM",
         venue = "Open Air Amphitheatre",
-        image = "https://picsum.photos/seed/mitrc-cultural/900/600"
+        image = "https://mitrc.ac.in/images/campus/arambh-fest.jpg"
     ),
     CollegeEvent(
         id = 3,
-        title = "Campus Placement Drive \u2014 TCS & Infosys",
-        category = "PLACEMENT",
-        whenLabel = "05 Oct \u00b7 08:00 AM",
-        venue = "Training & Placement Cell",
-        image = "https://picsum.photos/seed/mitrc-placement/900/600"
+        title = "Smart India Hackathon \u2014 MITRC Nodal Centre",
+        category = "HACKATHON",
+        whenLabel = "25 \u2013 26 Aug 2022",
+        venue = "Innovation Hall, Block C",
+        image = "https://mitrc.ac.in/images/hackathons/sih-2022.jpg"
     ),
     CollegeEvent(
         id = 4,
-        title = "International Yoga & Wellness Workshop",
-        category = "WELLNESS",
-        whenLabel = "09 Oct \u00b7 07:00 AM",
-        venue = "Sports Complex",
-        image = "https://picsum.photos/seed/mitrc-yoga/900/600"
+        title = "Manipal Hackathon \u2014 Inter-College Edition",
+        category = "HACKATHON",
+        whenLabel = "15 \u2013 16 Oct 2022",
+        venue = "Innovation Lab, Block A",
+        image = "https://mitrc.ac.in/images/hackathons/manipal-hackathon.jpg"
     ),
     CollegeEvent(
         id = 5,
-        title = "Robotics League \u2014 Inter-College Finals",
-        category = "TECH",
-        whenLabel = "12 Oct \u00b7 10:00 AM",
-        venue = "Robotics Lab, Block A",
-        image = "https://picsum.photos/seed/mitrc-robotics/900/600"
+        title = "Toycathon \u2014 Toy Innovation Challenge",
+        category = "INNOVATION",
+        whenLabel = "10 \u2013 12 Jun 2021",
+        venue = "Design Studio, Block B",
+        image = "https://mitrc.ac.in/images/hackathons/toycathon.png"
     ),
     CollegeEvent(
         id = 6,
-        title = "Industry Guest Lecture on AI & Data Science",
-        category = "SEMINAR",
-        whenLabel = "16 Oct \u00b7 11:00 AM",
-        venue = "Seminar Hall 2",
-        image = "https://picsum.photos/seed/mitrc-ai-lecture/900/600"
+        title = "Samadhan \u2014 National Solution Challenge",
+        category = "HACKATHON",
+        whenLabel = "21 \u2013 22 Feb 2020",
+        venue = "Seminar Hall 2, MITRC",
+        image = "https://mitrc.ac.in/images/hackathons/samadhan.jpg"
+    ),
+    CollegeEvent(
+        id = 7,
+        title = "CVA \u2014 National Level Hackathon",
+        category = "HACKATHON",
+        whenLabel = "08 \u2013 09 Mar 2019",
+        venue = "Computer Science Block",
+        image = "https://mitrc.ac.in/images/hackathons/cva-2019.jpg"
     )
 )
 
@@ -365,11 +460,11 @@ fun sampleNotifications(): List<PortalNotification> = listOf(
     ),
     PortalNotification(
         id = 2,
-        title = "TechFest 2026 registrations open",
-        body = "Team registrations for the national level hackathon are now live. Last date is 26 Sep.",
+        title = "Techspark \u201926 registrations open",
+        body = "Team registrations for the annual tech exhibition are now live. Last date to register is 14 Nov.",
         time = "1 hr ago",
         tone = NotificationTone.INFO,
-        image = "https://picsum.photos/seed/notif-techfest/800/500"
+        image = "https://ik.imagekit.io/Mainimages/Event26/techspark26.jpg"
     ),
     PortalNotification(
         id = 3,
@@ -380,19 +475,19 @@ fun sampleNotifications(): List<PortalNotification> = listOf(
     ),
     PortalNotification(
         id = 4,
-        title = "Timetable revised for Week 6",
-        body = "Thursday's second period has been shifted to Seminar Hall 2 for all Section B students.",
+        title = "Arambh \u201926 \u2014 campus fest dates announced",
+        body = "Arambh returns on 13 \u2013 15 Feb with 40+ cultural events across the amphitheatre and main lawn.",
         time = "Yesterday",
         tone = NotificationTone.INFO,
-        image = "https://picsum.photos/seed/notif-timetable/800/500"
+        image = "https://mitrc.ac.in/images/campus/arambh-fest.jpg"
     ),
     PortalNotification(
         id = 5,
-        title = "Placement drive shortlist",
-        body = "The Training & Placement Cell has published the first shortlist for the TCS drive.",
+        title = "Smart India Hackathon \u2014 MITRC nodal centre",
+        body = "MITRC will host the SIH internal round in Innovation Hall, Block C. Team registrations close 30 Oct.",
         time = "2 days ago",
         tone = NotificationTone.INFO,
-        image = "https://picsum.photos/seed/notif-placement/800/500"
+        image = "https://mitrc.ac.in/images/hackathons/sih-2022.jpg"
     ),
     PortalNotification(
         id = 6,
@@ -491,7 +586,7 @@ fun portalDisplayName(profile: StudentProfileView?): String {
 
 /** 1 = Monday ... 7 = Sunday, matching `MyTimetableEntryView.dayOfWeek`. */
 fun currentDayOfWeek(): Int = Calendar.getInstance().get(Calendar.DAY_OF_WEEK).let {
-    if (it == Calendar.SUNDAY) 7 else it
+    if (it == Calendar.SUNDAY) 7 else it - 1
 }
 
 /** Deterministic stub data behind the streak card. */
@@ -504,204 +599,6 @@ val streakDays: List<Pair<String, Boolean>>
 /** Attendance for each of the last 7 days, used by the small bar chart. */
 val weekBars: List<Pair<String, Int>>
     get() = listOf("Mon" to 7, "Tue" to 6, "Wed" to 6, "Thu" to 5, "Fri" to 6, "Sat" to 4, "Sun" to 0)
-
-// ---------------------------------------------------------------------------------------------
-// Mock list content - stands in for the Timetable and Notes segments until those tables have rows
-// ---------------------------------------------------------------------------------------------
-
-/**
- * Placeholder weekly timetable for the Timetable segment.
- *
- * Rendered through the very same day-card UI the real `v_my_timetable` rows use, so the list
- * design can be reviewed (and adjusted) before the timetable table is populated. The segment
- * only falls back to this when the real query came back empty.
- */
-fun sampleTimetableEntries(): List<MyTimetableEntryView> {
-    fun entry(
-        id: Int,
-        day: Int,
-        start: Int,
-        end: Int,
-        code: String,
-        name: String,
-        kind: String,
-        teacher: String,
-        room: String,
-        group: String? = null
-    ) = MyTimetableEntryView(
-        entryId = id,
-        timetableId = 1,
-        classId = 1,
-        effectiveFrom = "2026-07-01",
-        isPublished = true,
-        dayOfWeek = day,
-        startPeriod = start,
-        endPeriod = end,
-        subjectCode = code,
-        subjectName = name,
-        subjectKind = kind,
-        teacherName = teacher,
-        room = room,
-        groupName = group
-    )
-
-    return listOf(
-        // Monday
-        entry(101, 1, 1, 2, "CS-301", "Data Structures & Algorithms", "theory", "Dr. Meena Sharma", "A-204"),
-        entry(102, 1, 3, 4, "CS-303", "Database Management Systems", "theory", "Mr. Rahul Verma", "A-204"),
-        entry(103, 1, 5, 6, "MA-201", "Applied Mathematics-III", "theory", "Prof. R. K. Sinha", "B-105"),
-
-        // Tuesday
-        entry(111, 2, 1, 2, "CS-302", "Operating Systems", "theory", "Dr. Anjali Gupta", "A-206"),
-        entry(112, 2, 3, 4, "CS-304", "Computer Networks", "theory", "Mr. Sandeep Yadav", "A-206"),
-        entry(113, 2, 5, 6, "CSL-303", "DBMS Laboratory", "lab", "Mr. Rahul Verma", "Lab-2", "Group A"),
-
-        // Wednesday
-        entry(121, 3, 1, 2, "CS-305", "Machine Learning", "theory", "Ms. Kavita Joshi", "B-105"),
-        entry(122, 3, 3, 4, "CS-301", "Data Structures & Algorithms", "theory", "Dr. Meena Sharma", "A-204"),
-        entry(123, 3, 5, 6, "IT-201", "Software Engineering", "theory", "Mr. Sandeep Yadav", "A-206"),
-
-        // Thursday
-        entry(131, 4, 1, 2, "CS-302", "Operating Systems", "theory", "Dr. Anjali Gupta", "A-206"),
-        entry(132, 4, 3, 4, "CSL-301", "Data Structures Laboratory", "lab", "Dr. Meena Sharma", "Lab-3", "Group A"),
-        entry(133, 4, 5, 6, "CS-304", "Computer Networks", "theory", "Mr. Sandeep Yadav", "A-204"),
-
-        // Friday
-        entry(141, 5, 1, 2, "CS-303", "Database Management Systems", "theory", "Mr. Rahul Verma", "A-204"),
-        entry(142, 5, 3, 4, "CS-305", "Machine Learning", "theory", "Ms. Kavita Joshi", "B-105"),
-        entry(143, 5, 5, 6, "MA-201", "Applied Mathematics-III", "theory", "Prof. R. K. Sinha", "B-105"),
-
-        // Saturday
-        entry(151, 6, 1, 2, "CS-301", "Data Structures & Algorithms", "theory", "Dr. Meena Sharma", "A-204"),
-        entry(152, 6, 3, 4, "IT-201", "Software Engineering", "theory", "Mr. Sandeep Yadav", "A-206"),
-        entry(153, 6, 5, 6, "CSL-304", "Computer Networks Laboratory", "lab", "Mr. Sandeep Yadav", "Lab-3", "Group B")
-    )
-}
-
-/**
- * Placeholder enrolled subjects for the Notes segment's subject/faculty cards and filter chips.
- */
-fun sampleSubjectCards(): List<ClassSubjectView> = listOf(
-    ClassSubjectView(
-        rawClassSubjectId = 901,
-        rawSubjectCode = "CS-301",
-        rawSubjectName = "Data Structures & Algorithms",
-        rawSubjectKind = "theory",
-        rawTeacherName = "Dr. Meena Sharma",
-        rawTeacherEmail = "meena.sharma@mitrc.ac.in"
-    ),
-    ClassSubjectView(
-        rawClassSubjectId = 902,
-        rawSubjectCode = "CS-302",
-        rawSubjectName = "Operating Systems",
-        rawSubjectKind = "theory",
-        rawTeacherName = "Dr. Anjali Gupta",
-        rawTeacherEmail = "anjali.gupta@mitrc.ac.in"
-    ),
-    ClassSubjectView(
-        rawClassSubjectId = 903,
-        rawSubjectCode = "CS-303",
-        rawSubjectName = "Database Management Systems",
-        rawSubjectKind = "theory",
-        rawTeacherName = "Mr. Rahul Verma",
-        rawTeacherEmail = "rahul.verma@mitrc.ac.in"
-    ),
-    ClassSubjectView(
-        rawClassSubjectId = 904,
-        rawSubjectCode = "CS-304",
-        rawSubjectName = "Computer Networks",
-        rawSubjectKind = "theory",
-        rawTeacherName = "Mr. Sandeep Yadav",
-        rawTeacherEmail = "sandeep.yadav@mitrc.ac.in"
-    ),
-    ClassSubjectView(
-        rawClassSubjectId = 905,
-        rawSubjectCode = "CSL-303",
-        rawSubjectName = "DBMS Laboratory",
-        rawSubjectKind = "lab",
-        rawTeacherName = "Mr. Rahul Verma",
-        rawTeacherEmail = "rahul.verma@mitrc.ac.in"
-    )
-)
-
-/**
- * Placeholder study material for the Notes segment's PDF cards, spread over the subject and
- * category filters so every chip has something to show.
- */
-fun samplePdfNotes(): List<PortalPdfNote> = listOf(
-    PortalPdfNote(
-        id = 9001,
-        classSubjectId = 901,
-        subjectName = "Data Structures & Algorithms",
-        subjectCode = "CS-301",
-        title = "Unit 3 - Trees, Heaps & Hashing",
-        description = "Lecture notes covering traversals, BST operations, heap property and collision handling.",
-        category = "notes",
-        driveUrl = "https://drive.google.com/file/d/sample-dsa-unit3/view",
-        teacherName = "Dr. Meena Sharma",
-        createdAt = "2026-10-04T10:30:00+00:00"
-    ),
-    PortalPdfNote(
-        id = 9002,
-        classSubjectId = 902,
-        subjectName = "Operating Systems",
-        subjectCode = "CS-302",
-        title = "Assignment 2 - CPU Scheduling Algorithms",
-        description = "Compare FCFS, SJF, Round Robin and Priority scheduling with solved examples.",
-        category = "assignment",
-        driveUrl = "https://drive.google.com/file/d/sample-os-assign2/view",
-        teacherName = "Dr. Anjali Gupta",
-        createdAt = "2026-10-03T09:15:00+00:00"
-    ),
-    PortalPdfNote(
-        id = 9003,
-        classSubjectId = 903,
-        subjectName = "Database Management Systems",
-        subjectCode = "CS-303",
-        title = "Mid Semester Question Paper 2026",
-        description = "Previous year paper with section-wise marking scheme and important questions.",
-        category = "question_paper",
-        driveUrl = "https://drive.google.com/file/d/sample-dbms-midsem/view",
-        teacherName = "Mr. Rahul Verma",
-        createdAt = "2026-09-28T14:00:00+00:00"
-    ),
-    PortalPdfNote(
-        id = 9004,
-        classSubjectId = 905,
-        subjectName = "DBMS Laboratory",
-        subjectCode = "CSL-303",
-        title = "Lab Manual - SQL & Normalisation Exercises",
-        description = "Step by step instructions for all 12 lab sessions with sample schemas.",
-        category = "lab_manual",
-        driveUrl = "https://drive.google.com/file/d/sample-dbms-labmanual/view",
-        teacherName = "Mr. Rahul Verma",
-        createdAt = "2026-09-25T11:45:00+00:00"
-    ),
-    PortalPdfNote(
-        id = 9005,
-        classSubjectId = 904,
-        subjectName = "Computer Networks",
-        subjectCode = "CS-304",
-        title = "Unit 2 - OSI & TCP/IP Reference Models",
-        description = "Layer by layer notes with diagrams for encapsulation, addressing and routing.",
-        category = "notes",
-        driveUrl = "https://drive.google.com/file/d/sample-cn-unit2/view",
-        teacherName = "Mr. Sandeep Yadav",
-        createdAt = "2026-09-22T16:20:00+00:00"
-    ),
-    PortalPdfNote(
-        id = 9006,
-        classSubjectId = 901,
-        subjectName = "Data Structures & Algorithms",
-        subjectCode = "CS-301",
-        title = "Revised Syllabus & Reference Books",
-        description = "Course structure, internal marks split and the prescribed reference list.",
-        category = "syllabus",
-        driveUrl = "https://drive.google.com/file/d/sample-dsa-syllabus/view",
-        teacherName = "Dr. Meena Sharma",
-        createdAt = "2026-09-15T08:00:00+00:00"
-    )
-)
 
 /** Placeholder entries for the notebook's "Saved notes" list. */
 fun samplePersonalNotes(): List<PortalNote> = listOf(

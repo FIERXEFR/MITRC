@@ -14,6 +14,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,6 +36,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Badge
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
@@ -54,6 +57,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -65,12 +70,17 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -91,6 +101,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.mitrc.ac.`in`.data.AttendanceSummaryView
 import com.mitrc.ac.`in`.data.MarkView
 import com.mitrc.ac.`in`.data.PortalRepository
@@ -107,6 +119,13 @@ import com.mitrc.ac.`in`.ui.theme.SurfaceWhite
 import com.mitrc.ac.`in`.ui.theme.TextPrimary
 import com.mitrc.ac.`in`.ui.theme.TextSecondary
 import com.mitrc.ac.`in`.ui.theme.WarningAmber
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlinx.coroutines.launch
 
 // ---------------------------------------------------------------------------
@@ -125,6 +144,7 @@ fun CoordinatorStudentsView(userUid: String) {
     var loading by remember { mutableStateOf(true) }
     var classCount by remember { mutableStateOf(0) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
+    var actionError by remember { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Identity (name, roll, phone, email, group, lock/PTM flags) is read from the `students`
@@ -142,6 +162,13 @@ fun CoordinatorStudentsView(userUid: String) {
         PortalRepository.getStudentsForClasses(classes)
             .onSuccess { allStudents = it }
             .onFailure { errorMsg = it.message }
+    }
+
+    // Applies a saved change to both the roster and the open sheet, so the UI never shows an
+    // update the database rejected (failures surface through `actionError` instead).
+    fun applyStudentChange(uid: String, transform: (StudentProfileView) -> StudentProfileView) {
+        allStudents = allStudents.map { if (it.studentUid == uid) transform(it) else it }
+        selectedStudent = selectedStudent?.let { if (it.studentUid == uid) transform(it) else it }
     }
 
     // ---- load ----
@@ -171,6 +198,13 @@ fun CoordinatorStudentsView(userUid: String) {
         onRefresh = { loadStudents() },
         skeleton = { CoordinatorStudentListSkeleton() }
     ) {
+        // Initial load shows the same shimmer preview the pull-to-refresh uses instead of a
+        // centred spinner, so the tab never flashes a blank screen.
+        if (loading) {
+            CoordinatorStudentListSkeleton()
+            return@CoordinatorRefreshBox
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -186,7 +220,6 @@ fun CoordinatorStudentsView(userUid: String) {
             StudentsCountRow(count = filtered.size, totalCount = allStudents.size)
 
             when {
-                loading -> LoadingState()
                 errorMsg != null -> ErrorState(
                     message = errorMsg!!,
                     onRetry = {
@@ -231,34 +264,64 @@ fun CoordinatorStudentsView(userUid: String) {
             StudentDetailSheet(
                 student = selectedStudent!!,
                 onDismiss = { selectedStudent = null },
-                onLockToggle = { uid, locked ->
+                onLockToggle = { uid, locked, reason ->
                     scope.launch {
-                        PortalRepository.updateStudentLockStatus(uid, locked)
+                        PortalRepository.updateStudentLockStatus(uid, locked, reason)
                             .onSuccess {
-                                allStudents = allStudents.map { s ->
-                                    if (s.studentUid == uid) s.copy(isLocked = locked) else s
+                                val clean = reason?.trim()?.takeIf { it.isNotEmpty() }
+                                applyStudentChange(uid) {
+                                    it.copy(
+                                        isLocked = locked,
+                                        lockReason = if (locked) clean else null
+                                    )
                                 }
-                                selectedStudent = selectedStudent?.let {
-                                    if (it.studentUid == uid) it.copy(isLocked = locked) else it
-                                }
+                            }
+                            .onFailure {
+                                actionError = it.message ?: "Couldn't update this student."
                             }
                     }
                 },
-                onPtmToggle = { uid, ptm ->
+                onPtmUpdate = { uid, update ->
                     scope.launch {
-                        PortalRepository.updateStudentPtmStatus(uid, ptm)
+                        PortalRepository.updateStudentPtmStatus(
+                            studentUid = uid,
+                            isPtm = update.scheduled,
+                            scheduledAt = update.scheduledAt,
+                            lockProfile = update.lockProfile,
+                            lockReason = update.lockReason
+                        )
                             .onSuccess {
-                                allStudents = allStudents.map { s ->
-                                    if (s.studentUid == uid) s.copy(isPtm = ptm) else s
+                                val clean = update.lockReason?.trim()?.takeIf { it.isNotEmpty() }
+                                applyStudentChange(uid) {
+                                    it.copy(
+                                        isPtm = update.scheduled,
+                                        ptmSchedule = if (update.scheduled) update.scheduledAt else null,
+                                        isLocked = if (update.lockProfile) true else it.isLocked,
+                                        lockReason = if (update.lockProfile && clean != null) clean else it.lockReason
+                                    )
                                 }
-                                selectedStudent = selectedStudent?.let {
-                                    if (it.studentUid == uid) it.copy(isPtm = ptm) else it
-                                }
+                            }
+                            .onFailure {
+                                actionError = it.message ?: "Couldn't update this student."
                             }
                     }
                 }
             )
         }
+    }
+
+    if (actionError != null) {
+        AlertDialog(
+            onDismissRequest = { actionError = null },
+            title = { Text("Update failed", color = TextPrimary, fontWeight = FontWeight.SemiBold) },
+            text = { Text(actionError!!, color = TextSecondary, fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = { actionError = null }) {
+                    Text("OK", color = Navy, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            containerColor = SurfaceWhite
+        )
     }
 }
 
@@ -449,8 +512,8 @@ private fun StudentChip(label: String, color: Color) {
 private fun StudentDetailSheet(
     student: StudentProfileView,
     onDismiss: () -> Unit,
-    onLockToggle: (String, Boolean) -> Unit,
-    onPtmToggle: (String, Boolean) -> Unit
+    onLockToggle: (String, Boolean, String?) -> Unit,
+    onPtmUpdate: (String, PtmUpdate) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var attendance by remember { mutableStateOf<List<AttendanceSummaryView>>(emptyList()) }
@@ -571,6 +634,13 @@ private fun StudentDetailSheet(
             checked = student.isLocked == true,
             onToggle = { showLockDialog = true }
         )
+        if (student.isLocked == true) {
+            val reason = student.lockReason?.trim()?.takeIf { it.isNotEmpty() }
+            ActionNote(
+                if (reason != null) "Reason shown to student: $reason"
+                else "No reason set - the student sees a generic message."
+            )
+        }
         Spacer(Modifier.height(8.dp))
         ActionToggleRow(
             icon = Icons.Outlined.NotificationsActive,
@@ -580,6 +650,10 @@ private fun StudentDetailSheet(
             checked = student.isPtm == true,
             onToggle = { showPtmDialog = true }
         )
+        if (student.isPtm == true) {
+            val at = formatPtmSchedule(student.ptmSchedule)
+            ActionNote(if (at != null) "PTM scheduled for: $at" else "PTM time has not been set.")
+        }
 
         Spacer(Modifier.height(20.dp))
         Divider(color = DividerSoft, thickness = 1.dp)
@@ -625,41 +699,466 @@ private fun StudentDetailSheet(
         Spacer(Modifier.height(32.dp))
     }
 
-    // ---- Lock confirmation dialog ---- //
+    // ---- Lock dialog: reason on lock, plain confirm on unlock ----
     if (showLockDialog) {
-        val targetLocked = student.isLocked != true
-        ConfirmDialog(
-            title = if (targetLocked) "Lock Profile?" else "Unlock Profile?",
-            message = if (targetLocked)
-                "Locking ${student.name}'s profile will restrict their access. Continue?"
-            else
-                "Unlocking will restore ${student.name}'s access. Continue?",
-            confirmLabel = if (targetLocked) "Lock" else "Unlock",
-            confirmColor = if (targetLocked) ErrorRed else SuccessGreen,
-            onConfirm = {
-                showLockDialog = false
-                onLockToggle(student.studentUid, targetLocked)
-            },
-            onDismiss = { showLockDialog = false }
-        )
+        if (student.isLocked != true) {
+            LockProfileDialog(
+                studentName = student.name ?: "this student",
+                onDismiss = { showLockDialog = false },
+                onConfirm = { reason ->
+                    showLockDialog = false
+                    onLockToggle(student.studentUid, true, reason)
+                }
+            )
+        } else {
+            ConfirmDialog(
+                title = "Unlock Profile?",
+                message = "Unlocking will restore ${student.name}'s access. The saved reason is cleared.",
+                confirmLabel = "Unlock",
+                confirmColor = SuccessGreen,
+                onConfirm = {
+                    showLockDialog = false
+                    onLockToggle(student.studentUid, false, null)
+                },
+                onDismiss = { showLockDialog = false }
+            )
+        }
     }
 
-    // ---- PTM confirmation dialog ----
+    // ---- PTM dialog: pick date + time, optionally lock in the same step ----
     if (showPtmDialog) {
-        val targetPtm = student.isPtm != true
-        ConfirmDialog(
-            title = if (targetPtm) "Schedule PTM?" else "Cancel PTM?",
-            message = if (targetPtm)
-                "This will mark a PTM for ${student.name}. Parents will be notified."
-            else
-                "This will cancel the scheduled PTM for ${student.name}.",
-            confirmLabel = if (targetPtm) "Schedule" else "Cancel PTM",
-            confirmColor = if (targetPtm) Gold else ErrorRed,
-            onConfirm = {
-                showPtmDialog = false
-                onPtmToggle(student.studentUid, targetPtm)
+        if (student.isPtm == true) {
+            ConfirmDialog(
+                title = "Cancel PTM?",
+                message = "This will cancel the scheduled PTM for ${student.name}.",
+                confirmLabel = "Cancel PTM",
+                confirmColor = ErrorRed,
+                onConfirm = {
+                    showPtmDialog = false
+                    onPtmUpdate(student.studentUid, PtmUpdate(scheduled = false))
+                },
+                onDismiss = { showPtmDialog = false }
+            )
+        } else {
+            SchedulePtmDialog(
+                studentName = student.name ?: "this student",
+                alreadyLocked = student.isLocked == true,
+                onDismiss = { showPtmDialog = false },
+                onConfirm = { scheduledAt, lockProfile, lockReason ->
+                    showPtmDialog = false
+                    onPtmUpdate(
+                        student.studentUid,
+                        PtmUpdate(
+                            scheduled = true,
+                            scheduledAt = scheduledAt,
+                            lockProfile = lockProfile,
+                            lockReason = lockReason
+                        )
+                    )
+                }
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PTM / lock dialogs
+// ---------------------------------------------------------------------------
+
+/** One PTM change, so the sheet can hand the whole intent to the repository in one update. */
+private data class PtmUpdate(
+    val scheduled: Boolean,
+    val scheduledAt: String? = null,
+    val lockProfile: Boolean = false,
+    val lockReason: String? = null
+)
+
+@Composable
+private fun ActionNote(text: String) {
+    Text(
+        text = text,
+        color = TextSecondary,
+        fontSize = 11.5.sp,
+        lineHeight = 16.sp,
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 3.dp)
+    )
+}
+
+/**
+ * Locking always asks for the reason first - that text is what the student reads on the lock
+ * screen. The reason is optional so a coordinator can still lock someone quickly.
+ */
+@Composable
+private fun LockProfileDialog(
+    studentName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String?) -> Unit
+) {
+    var reason by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SurfaceWhite,
+        shape = RoundedCornerShape(22.dp),
+        icon = {
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(ErrorRed.copy(alpha = 0.10f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Outlined.Lock,
+                    contentDescription = null,
+                    tint = ErrorRed,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        },
+        title = {
+            Text(
+                text = "Lock profile?",
+                color = TextPrimary,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        text = {
+            Column {
+                Text(
+                    text = "The student's portal stays closed until you unlock it. " +
+                        "Add a reason - it is shown on their lock screen.",
+                    color = TextSecondary,
+                    fontSize = 12.5.sp,
+                    lineHeight = 18.sp
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = reason,
+                    onValueChange = { reason = it.take(240) },
+                    label = { Text("Reason (optional)") },
+                    placeholder = { Text("e.g. Attendance below 75%") },
+                    minLines = 2,
+                    maxLines = 4,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Navy,
+                        unfocusedBorderColor = DividerSoft,
+                        focusedLabelColor = Navy,
+                        unfocusedLabelColor = TextSecondary,
+                        cursorColor = Navy
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = studentName,
+                    color = TextSecondary,
+                    fontSize = 11.sp
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(reason.trim().takeIf { it.isNotEmpty() }) }) {
+                Text("Lock Profile", color = ErrorRed, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = TextSecondary)
+            }
+        }
+    )
+}
+
+/**
+ * Scheduling a PTM asks for the date, the time, and - because a PTM usually needs the student to
+ * stop using the portal that day - whether to lock the profile in the same step. All of it is
+ * written by one UPDATE so the PTM can never be saved without the lock it was paired with.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SchedulePtmDialog(
+    studentName: String,
+    alreadyLocked: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (scheduledAtIso: String, lockProfile: Boolean, lockReason: String?) -> Unit
+) {
+    val zone = remember { ZoneId.systemDefault() }
+    val now = remember { LocalDateTime.now(zone) }
+
+    var date by remember { mutableStateOf(now.toLocalDate().plusDays(1)) }
+    var hour by remember { mutableIntStateOf(10) }
+    var minute by remember { mutableIntStateOf(0) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
+    var lockProfile by remember { mutableStateOf(!alreadyLocked) }
+    var reason by remember { mutableStateOf("") }
+
+    val scheduled = remember(date, hour, minute, zone) {
+        date.atTime(hour, minute).atZone(zone)
+    }
+    val scheduledIso = remember(scheduled) { scheduled.toInstant().toString() }
+    val dateLabel = remember(date) {
+        date.format(DateTimeFormatter.ofPattern("EEE, dd MMM yyyy", Locale.getDefault()))
+    }
+    val timeLabel = remember(hour, minute) {
+        LocalTime.of(hour, minute).format(DateTimeFormatter.ofPattern("hh:mm a", Locale.getDefault()))
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SurfaceWhite,
+        shape = RoundedCornerShape(22.dp),
+        icon = {
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(Gold.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Outlined.CalendarMonth,
+                    contentDescription = null,
+                    tint = GoldDeep,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        },
+        title = {
+            Text(
+                text = "Schedule PTM",
+                color = TextPrimary,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    text = "Pick when the PTM is scheduled. $studentName sees this on their lock screen.",
+                    color = TextSecondary,
+                    fontSize = 12.5.sp,
+                    lineHeight = 18.sp
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PickerField(
+                        label = "Date",
+                        value = dateLabel,
+                        modifier = Modifier.weight(1f),
+                        onClick = { showDatePicker = true }
+                    )
+                    PickerField(
+                        label = "Time",
+                        value = timeLabel,
+                        modifier = Modifier.weight(1f),
+                        onClick = { showTimePicker = true }
+                    )
+                }
+
+                Spacer(Modifier.height(14.dp))
+                Divider(color = DividerSoft, thickness = 1.dp)
+                Spacer(Modifier.height(10.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Lock the profile too",
+                            color = TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = if (alreadyLocked) {
+                                "This profile is already locked."
+                            } else {
+                                "The student can't open the app until you unlock it."
+                            },
+                            color = TextSecondary,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
+                        )
+                    }
+                    Switch(
+                        checked = lockProfile || alreadyLocked,
+                        onCheckedChange = { lockProfile = it },
+                        enabled = !alreadyLocked,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = SurfaceWhite,
+                            checkedTrackColor = Navy,
+                            uncheckedThumbColor = SurfaceWhite,
+                            uncheckedTrackColor = DividerSoft
+                        )
+                    )
+                }
+
+                if (lockProfile && !alreadyLocked) {
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = reason,
+                        onValueChange = { reason = it.take(240) },
+                        label = { Text("Lock reason (optional)") },
+                        placeholder = { Text("e.g. PTM on campus - portal paused") },
+                        minLines = 2,
+                        maxLines = 3,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Navy,
+                            unfocusedBorderColor = DividerSoft,
+                            focusedLabelColor = Navy,
+                            unfocusedLabelColor = TextSecondary,
+                            cursorColor = Navy
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onConfirm(
+                        scheduledIso,
+                        lockProfile || alreadyLocked,
+                        reason.trim().takeIf { it.isNotEmpty() }
+                    )
+                }
+            ) {
+                Text("Schedule", color = Navy, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = TextSecondary)
+            }
+        }
+    )
+
+    if (showDatePicker) {
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = date
+                .atStartOfDay(ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pickerState.selectedDateMillis?.let { millis ->
+                            date = Instant.ofEpochMilli(millis)
+                                .atZone(ZoneOffset.UTC)
+                                .toLocalDate()
+                        }
+                        showDatePicker = false
+                    }
+                ) {
+                    Text("OK", color = Navy, fontWeight = FontWeight.Bold)
+                }
             },
-            onDismiss = { showPtmDialog = false }
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            }
+        ) {
+            DatePicker(
+                state = pickerState,
+                title = null,
+                headline = null,
+                showModeToggle = false
+            )
+        }
+    }
+
+    if (showTimePicker) {
+        val timeState = rememberTimePickerState(
+            initialHour = hour,
+            initialMinute = minute,
+            is24Hour = false
+        )
+        Dialog(
+            onDismissRequest = { showTimePicker = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = SurfaceWhite
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Select time",
+                        color = TextPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    TimePicker(state = timeState)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = { showTimePicker = false }) {
+                            Text("Cancel", color = TextSecondary)
+                        }
+                        TextButton(
+                            onClick = {
+                                hour = timeState.hour
+                                minute = timeState.minute
+                                showTimePicker = false
+                            }
+                        ) {
+                            Text("OK", color = Navy, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PickerField(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .border(1.dp, DividerSoft, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Text(
+            text = label.uppercase(),
+            color = TextSecondary,
+            fontSize = 9.5.sp,
+            letterSpacing = 1.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = value,
+            color = TextPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1
         )
     }
 }
@@ -916,17 +1415,6 @@ private fun ConfirmDialog(
 // ---------------------------------------------------------------------------
 // Generic states
 // ---------------------------------------------------------------------------
-
-@Composable
-private fun LoadingState() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator(color = Navy, strokeWidth = 3.dp)
-            Spacer(Modifier.height(12.dp))
-            Text("Loading students…", color = TextSecondary, fontSize = 14.sp)
-        }
-    }
-}
 
 @Composable
 private fun ErrorState(message: String, onRetry: () -> Unit) {

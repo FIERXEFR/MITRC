@@ -90,6 +90,10 @@ data class StudentRow(
     @SerialName("group_name") val groupName: String? = null,
     @SerialName("is_locked") val isLocked: Boolean? = null,
     @SerialName("is_ptm") val isPtm: Boolean? = null,
+    /** Shown verbatim on the student's lock screen; null when unlocked or no reason was typed. */
+    @SerialName("lock_reason") val lockReason: String? = null,
+    /** Timestamptz of the scheduled PTM (ISO-8601), displayed on the student's lock screen. */
+    @SerialName("ptm_schedule") val ptmSchedule: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
 )
@@ -353,6 +357,8 @@ data class StudentProfileView(
     @SerialName("group_name") val groupName: String? = null,
     @SerialName("is_locked") val isLocked: Boolean? = null,
     @SerialName("is_ptm") val isPtm: Boolean? = null,
+    @SerialName("lock_reason") val lockReason: String? = null,
+    @SerialName("ptm_schedule") val ptmSchedule: String? = null,
     @SerialName("course") val course: String? = null,
     @SerialName("branch") val branch: String? = null,
     @SerialName("semester") val semester: Int? = null,

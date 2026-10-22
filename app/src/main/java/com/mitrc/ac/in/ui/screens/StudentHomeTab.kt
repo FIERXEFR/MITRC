@@ -148,14 +148,11 @@ fun StudentHomeTab(
                 }
                 Spacer(Modifier.height(20.dp))
 
-                Stagger(4, animateEntrance) { TodayClassesSection(classes = todayClasses) }
-                Spacer(Modifier.height(20.dp))
-
-                Stagger(5, animateEntrance) { QuickAccessGrid(actions = quickActions, onNavigate = onNavigate) }
+                Stagger(4, animateEntrance) { QuickAccessGrid(actions = quickActions, onNavigate = onNavigate) }
 
                 if (overallPct in 0.01..74.99) {
                     Spacer(Modifier.height(16.dp))
-                    Stagger(6, animateEntrance) {
+                    Stagger(5, animateEntrance) {
                         LowAttendanceBanner(percent = overallPct, attended = totalAttended, total = totalClasses)
                     }
                 }
@@ -607,131 +604,6 @@ private fun EventCard(event: CollegeEvent) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Today's classes
-// ---------------------------------------------------------------------------------------------
-
-@Composable
-private fun TodayClassesSection(classes: List<com.mitrc.ac.`in`.data.MyTimetableEntryView>) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        PortalSectionLabel(text = "TODAY'S CLASSES")
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = if (classes.isEmpty()) "Free day" else "${classes.size} periods",
-            color = PortalTextSecondary,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-    }
-
-    Spacer(Modifier.height(12.dp))
-
-    if (classes.isEmpty()) {
-        PortalEmptyCard(message = "No classes scheduled for today. Enjoy your day!")
-        return
-    }
-
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        classes.forEachIndexed { index, entry ->
-            ClassRow(index = index, entry = entry)
-        }
-    }
-}
-
-@Composable
-private fun ClassRow(index: Int, entry: com.mitrc.ac.`in`.data.MyTimetableEntryView) {
-    val status = when {
-        index < 2 -> "Present"
-        index == 2 -> "Absent"
-        else -> "Upcoming"
-    }
-    val statusColor = when (status) {
-        "Present" -> PortalGreen
-        "Absent" -> PortalRose
-        else -> PortalBlue
-    }
-
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = PortalCard,
-        border = androidx.compose.foundation.BorderStroke(1.dp, PortalStroke),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.width(56.dp)) {
-                Text(
-                    text = "0${8 + index}:00",
-                    color = PortalBlue,
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "0${9 + index}:00",
-                    color = PortalTextSecondary,
-                    fontSize = 11.sp
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .width(3.dp)
-                    .height(40.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(PortalBlue)
-            )
-
-            Spacer(Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = entry.subjectName,
-                    color = PortalTextPrimary,
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    text = buildString {
-                        append(entry.room ?: "TBA")
-                        if (!entry.teacherName.isNullOrBlank()) {
-                            append(" \u00b7 ").append(entry.teacherName)
-                        }
-                    },
-                    color = PortalTextSecondary,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            Spacer(Modifier.width(8.dp))
-
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(statusColor.copy(alpha = 0.12f))
-                    .border(1.dp, statusColor.copy(alpha = 0.45f), RoundedCornerShape(9.dp))
-                    .padding(horizontal = 9.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    text = status,
-                    color = statusColor,
-                    fontSize = 10.5.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------------------------
 // Quick access
 // ---------------------------------------------------------------------------------------------
 
@@ -740,21 +612,36 @@ private fun QuickAccessGrid(
     actions: List<QuickAction>,
     onNavigate: (StudentTab, ScheduleMode?) -> Unit
 ) {
-    PortalSectionLabel(text = "QUICK ACCESS")
-    Spacer(Modifier.height(12.dp))
+    // A single root container: this sits inside Stagger's Box, where sibling composables would
+    // stack on top of each other and the grid would cover its own heading.
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Quick Access",
+            color = PortalTextPrimary,
+            fontSize = 15.5.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = "Everything you need, one tap away.",
+            color = PortalTextSecondary,
+            fontSize = 11.5.sp
+        )
+        Spacer(Modifier.height(12.dp))
 
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        actions.chunked(2).forEach { pair ->
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                pair.forEach { action ->
-                    QuickActionCard(
-                        action = action,
-                        modifier = Modifier.weight(1f),
-                        onClick = { onNavigate(action.target, action.mode) }
-                    )
-                }
-                if (pair.size == 1) {
-                    Spacer(Modifier.weight(1f))
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            actions.chunked(2).forEach { pair ->
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    pair.forEach { action ->
+                        QuickActionCard(
+                            action = action,
+                            modifier = Modifier.weight(1f),
+                            onClick = { onNavigate(action.target, action.mode) }
+                        )
+                    }
+                    if (pair.size == 1) {
+                        Spacer(Modifier.weight(1f))
+                    }
                 }
             }
         }
