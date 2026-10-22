@@ -388,7 +388,8 @@ data class MyPortalsResponse(
 
 @Serializable
 data class StudentProfileView(
-    @SerialName("student_uid") val studentUid: String = "",
+    @SerialName("student_uid") private val _studentUid: String = "",
+    @SerialName("uid") private val _uid: String = "",
     @SerialName("name") val name: String? = null,
     @SerialName("serial_no") val serialNo: String? = null,
     @SerialName("father_name") val fatherName: String? = null,
@@ -407,8 +408,60 @@ data class StudentProfileView(
     @SerialName("section") val section: String? = null,
     @SerialName("academic_year") val academicYear: String? = null,
     @SerialName("class_id") val classId: Int? = null,
+    @SerialName("explicit_student_uid") private val _explicitStudentUid: String = "",
 ) {
+    val studentUid: String
+        get() = _explicitStudentUid.trim().ifEmpty {
+            _studentUid.trim().ifEmpty {
+                _uid.trim()
+            }
+        }
+
     val uid: String get() = studentUid
+
+    constructor(
+        studentUid: String,
+        name: String? = null,
+        serialNo: String? = null,
+        fatherName: String? = null,
+        studentPhoneNo: String? = null,
+        fatherPhoneNo: String? = null,
+        studentEmail: String? = null,
+        groupId: Int? = null,
+        groupName: String? = null,
+        isLocked: Boolean? = null,
+        isPtm: Boolean? = null,
+        lockReason: String? = null,
+        ptmSchedule: String? = null,
+        course: String? = null,
+        branch: String? = null,
+        semester: Int? = null,
+        section: String? = null,
+        academicYear: String? = null,
+        classId: Int? = null,
+    ) : this(
+        _studentUid = studentUid,
+        _uid = studentUid,
+        name = name,
+        serialNo = serialNo,
+        fatherName = fatherName,
+        studentPhoneNo = studentPhoneNo,
+        fatherPhoneNo = fatherPhoneNo,
+        studentEmail = studentEmail,
+        groupId = groupId,
+        groupName = groupName,
+        isLocked = isLocked,
+        isPtm = isPtm,
+        lockReason = lockReason,
+        ptmSchedule = ptmSchedule,
+        course = course,
+        branch = branch,
+        semester = semester,
+        section = section,
+        academicYear = academicYear,
+        classId = classId,
+        _explicitStudentUid = studentUid,
+    )
 }
 
 @Serializable

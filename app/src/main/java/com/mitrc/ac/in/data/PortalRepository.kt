@@ -1289,7 +1289,10 @@ object PortalRepository {
         val uid = studentUid.trim()
         if (uid.isEmpty()) error("This student has no uid, so the change can't be saved.")
 
-        val updated = SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.STUDENTS]
+        val client = runCatching { SupabaseManager.requireAdminClient() }
+            .getOrDefault(SupabaseManager.requireClient())
+
+        val updated = client.postgrest[SupabaseTableData.Tables.STUDENTS]
             .update(update) {
                 filter { eq("uid", uid) }
                 select()
