@@ -498,6 +498,7 @@ private fun StudentCard(student: StudentProfileView, onClick: () -> Unit) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     student.branch?.let { StudentChip(it, Navy) }
                     student.academicYear?.let { StudentChip(it, GoldDeep) }
+                    student.groupName?.let { StudentChip(it, SuccessGreen) }
                     if (student.isLocked == true) StudentChip("Locked", ErrorRed)
                     if (student.isPtm == true) StudentChip("PTM Scheduled", SuccessGreen)
                 }
@@ -846,6 +847,13 @@ private fun EditStudentDetailsDialog(
         }
 
         val selectedGroup = groups.firstOrNull { it.id == groupId }
+        val resolvedGroupName = when {
+            groupId == null -> null
+            selectedGroup != null -> selectedGroup.name
+            groupId == student.groupId -> student.groupName
+            else -> groups.firstOrNull { it.id == groupId }?.name ?: student.groupName ?: "Group $groupId"
+        }
+
         val update = StudentDetailsUpdate(
             name = cleanName,
             serialNo = serialNo.trim().takeIf { it.isNotEmpty() },
@@ -854,7 +862,7 @@ private fun EditStudentDetailsDialog(
             fatherPhoneNo = fatherPhone.trim().takeIf { it.isNotEmpty() },
             studentEmail = studentEmail.trim().takeIf { it.isNotEmpty() },
             groupId = groupId,
-            groupName = selectedGroup?.name ?: student.groupName.takeIf { groupId == student.groupId }
+            groupName = resolvedGroupName
         )
 
         saving = true

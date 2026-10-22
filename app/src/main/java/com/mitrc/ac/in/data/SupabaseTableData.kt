@@ -308,7 +308,7 @@ data class TimetableEntryRow(
     @SerialName("day_of_week") val dayOfWeek: Int, // 1=Mon..7=Sun
     @SerialName("start_period") val startPeriod: Int,
     @SerialName("end_period") val endPeriod: Int,
-    @SerialName("class_subject_id") val classSubjectId: Int,
+    @SerialName("class_subject_id") val classSubjectId: Int? = null,
     @SerialName("group_id") val groupId: Int? = null,
     @SerialName("faculty_id") val facultyId: Int? = null,
     @SerialName("room") val room: String? = null,
@@ -324,7 +324,7 @@ data class NewTimetableEntryRow(
     @SerialName("day_of_week") val dayOfWeek: Int,
     @SerialName("start_period") val startPeriod: Int,
     @SerialName("end_period") val endPeriod: Int,
-    @SerialName("class_subject_id") val classSubjectId: Int,
+    @SerialName("class_subject_id") val classSubjectId: Int? = null,
     @SerialName("group_id") val groupId: Int? = null,
     @SerialName("faculty_id") val facultyId: Int? = null,
     @SerialName("room") val room: String? = null,
@@ -600,9 +600,9 @@ data class TimetableEntryView(
     @SerialName("end_period") val endPeriod: Int,
     @SerialName("start_time") val startTime: String? = null,
     @SerialName("end_time") val endTime: String? = null,
-    @SerialName("subject_code") val subjectCode: String,
-    @SerialName("subject_name") val subjectName: String,
-    @SerialName("subject_kind") val subjectKind: String,
+    @SerialName("subject_code") val subjectCode: String? = "",
+    @SerialName("subject_name") val subjectName: String? = "",
+    @SerialName("subject_kind") val subjectKind: String? = "theory",
     @SerialName("group_id") val groupId: Int? = null,
     @SerialName("group_name") val groupName: String? = null,
     @SerialName("faculty_id") val facultyId: Int? = null,
@@ -777,3 +777,86 @@ data class TakeAttendanceRecord(
 typealias StudentDirectoryView = StudentProfileView
 typealias StudentSubjectView = ClassSubjectView
 typealias SubjectTeacherView = StaffDirectoryView
+
+// ---------------------------------------------------------------------------------------------
+// Notifications & ImageKit
+// ---------------------------------------------------------------------------------------------
+
+@Serializable
+data class NotificationRow(
+    @SerialName("id") val id: Long = 0L,
+    @SerialName("title") val title: String,
+    @SerialName("body") val body: String? = null,
+    @SerialName("image_url") val imageUrl: String? = null,
+    @SerialName("image_id") val imageId: String? = null,
+    @SerialName("category") val category: String = "announcement",
+    @SerialName("priority") val priority: String = "normal",
+    @SerialName("audience") val audience: String = "everyone",
+    @SerialName("course_id") val courseId: Int? = null,
+    @SerialName("class_id") val classId: Int? = null,
+    @SerialName("group_id") val groupId: Int? = null,
+    @SerialName("class_subject_id") val classSubjectId: Int? = null,
+    @SerialName("is_cancelled") val isCancelled: Boolean = false,
+    @SerialName("expires_at") val expiresAt: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+)
+
+@Serializable
+data class NewNotificationRow(
+    @SerialName("title") val title: String,
+    @SerialName("body") val body: String? = null,
+    @SerialName("image_url") val imageUrl: String? = null,
+    @SerialName("image_id") val imageId: String? = null,
+    @SerialName("category") val category: String = "announcement",
+    @SerialName("priority") val priority: String = "normal",
+    @SerialName("audience") val audience: String = "everyone",
+    @SerialName("course_id") val courseId: Int? = null,
+    @SerialName("class_id") val classId: Int? = null,
+    @SerialName("group_id") val groupId: Int? = null,
+    @SerialName("class_subject_id") val classSubjectId: Int? = null,
+    @SerialName("expires_at") val expiresAt: String? = null,
+)
+
+@Serializable
+data class NotificationReadRow(
+    @SerialName("user_uid") val userUid: String,
+    @SerialName("notification_id") val notificationId: Long,
+)
+
+@Serializable
+data class ImageKitUploadResponse(
+    @SerialName("url") val url: String,
+    @SerialName("fileId") val fileId: String,
+    @SerialName("name") val name: String? = null,
+    @SerialName("filePath") val filePath: String? = null,
+)
+
+@Serializable
+data class EventRow(
+    @SerialName("id") val id: Long = 0L,
+    @SerialName("title") val title: String,
+    @SerialName("description") val description: String? = null,
+    @SerialName("image_url") val imageUrl: String? = null,
+    @SerialName("image_id") val imageId: String? = null,
+    @SerialName("category") val category: String = "general",
+    @SerialName("venue") val venue: String? = null,
+    @SerialName("starts_at") val startsAt: String,
+    @SerialName("ends_at") val endsAt: String? = null,
+    @SerialName("registration_url") val registrationUrl: String? = null,
+    @SerialName("is_published") val isPublished: Boolean = true,
+    @SerialName("created_at") val createdAt: String? = null,
+)
+
+@Serializable
+data class NewEventRow(
+    @SerialName("title") val title: String,
+    @SerialName("description") val description: String? = null,
+    @SerialName("image_url") val imageUrl: String? = null,
+    @SerialName("image_id") val imageId: String? = null,
+    @SerialName("category") val category: String = "general",
+    @SerialName("venue") val venue: String? = null,
+    @SerialName("starts_at") val startsAt: String,
+    @SerialName("ends_at") val endsAt: String? = null,
+    @SerialName("registration_url") val registrationUrl: String? = null,
+    @SerialName("is_published") val isPublished: Boolean = true,
+)

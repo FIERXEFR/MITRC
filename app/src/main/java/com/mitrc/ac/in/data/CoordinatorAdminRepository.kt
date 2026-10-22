@@ -1,10 +1,23 @@
 package com.mitrc.ac.`in`.data
 
+import android.content.Context
+import android.net.Uri
+import com.mitrc.ac.`in`.utils.NativeUtils
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.PostgrestUpdate
 import io.github.jan.supabase.postgrest.rpc
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.request.forms.formData
+import io.ktor.client.request.forms.submitFormWithBinaryData
+import io.ktor.client.request.header
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.Headers
+import io.ktor.http.HttpHeaders
+import io.ktor.http.isSuccess
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.time.Instant
@@ -239,7 +252,11 @@ object CoordinatorAdminRepository {
                 set("day_of_week", entry.dayOfWeek)
                 set("start_period", entry.startPeriod)
                 set("end_period", entry.endPeriod)
-                set("class_subject_id", entry.classSubjectId)
+                if (entry.classSubjectId != null && entry.classSubjectId > 0) {
+                    set("class_subject_id", entry.classSubjectId)
+                } else {
+                    setToNull("class_subject_id")
+                }
                 if (entry.groupId != null && entry.groupId > 0) {
                     set("group_id", entry.groupId)
                 } else {
@@ -339,6 +356,90 @@ object CoordinatorAdminRepository {
 
         if (updated.isEmpty()) {
             error("The group was not saved: this student has no enrollment in class $classId.")
+        }
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Notifications & ImageKit
+    // -----------------------------------------------------------------------------------------
+
+    /** Uploads an image file to ImageKit.io under the `/Notifications` folder. */
+    suspend fun uploadToImageKit(
+        context: Context,
+        imageUri: Uri,
+        folder: String = "/Notifications"
+    ): Result<ImageKitUploadResponse> = runCatching {
+        val privateKey = NativeUtils.getImagekitPrivateKey()
+        require(privateKey.isNotBlank()) { "ImageKit private key is missing." }
+
+        val inputStream = context.contentResolver.openInputStream(imageUri)
+            ?: error("Could not open input stream for image.")
+        val bytes = inputStream.readBytes()
+        inputStream.close()
+
+        val fileName = "notification_${System.currentTimeMillis()}.jpg"
+        val credentials = android.util.Base64.encodeToString("$privateKey:".toByteArray(), android.util.Base64.NO_WRAP)
+
+        val client = HttpClient(OkHttp)
+        val response = client.submitFormWithBinaryData(
+            url = "https://upload.imagekit.io/api/v1/files/upload",
+            formData = formData {
+                append("file", bytes, Headers.build {
+                    append(HttpHeaders.ContentType, "image/jpeg")
+                    append(HttpHeaders.ContentDisposition, "filename=\"$fileName\"")
+                })
+                append("fileName", fileName)
+                append("folder", folder)
+            }
+        ) {
+            header("Authorization", "Basic $credentials")
+        }
+
+        val responseText = response.bodyAsText()
+        client.close()
+
+        if (!response.status.isSuccess()) {
+            throw IllegalStateException("ImageKit upload failed (${response.status}): $responseText")
+        }
+
+        val json = Json { ignoreUnknownKeys = true }
+        json.decodeFromString<ImageKitUploadResponse>(responseText)
+    }
+
+    /** Posts a new official notification into `notifications` via service-role key. */
+    suspend fun createNotification(row: NewNotificationRow): Result<Unit> = admin { client ->
+        val inserted = client.postgrest["notifications"]
+            .insert(row) { select() }
+            .decodeList<NotificationRow>()
+
+        if (inserted.isEmpty()) {
+            error("The notification was not posted: the database returned no inserted row.")
+        }
+    }
+
+    /** Marks a notification as read in `notification_reads`. */
+    suspend fun markNotificationRead(userUid: String, notificationId: Long): Result<Unit> = admin { client ->
+        val row = NotificationReadRow(userUid = userUid.trim(), notificationId = notificationId)
+        client.postgrest["notification_reads"].upsert(row)
+    }
+
+    suspend fun getCourses(): List<CourseRow> = admin { client ->
+        client.postgrest[SupabaseTableData.Tables.COURSES].select().decodeList<CourseRow>()
+    }.getOrDefault(emptyList())
+
+    suspend fun getEvents(): Result<List<EventRow>> = admin { client ->
+        client.postgrest["events"]
+            .select { order("starts_at", Order.DESCENDING) }
+            .decodeList<EventRow>()
+    }
+
+    suspend fun createEvent(row: NewEventRow): Result<Unit> = admin { client ->
+        val inserted = client.postgrest["events"]
+            .insert(row) { select() }
+            .decodeList<EventRow>()
+
+        if (inserted.isEmpty()) {
+            error("The event was not created: database returned no row.")
         }
     }
 

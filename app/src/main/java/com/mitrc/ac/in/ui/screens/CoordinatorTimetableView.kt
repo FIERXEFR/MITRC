@@ -909,6 +909,8 @@ private fun SlotEntryRow(
     onDelete: () -> Unit
 ) {
     val daysMap = mapOf(1 to "Mon", 2 to "Tue", 3 to "Wed", 4 to "Thu", 5 to "Fri", 6 to "Sat")
+    val isBlank = entry.subjectCode.isNullOrBlank() && entry.subjectName.isNullOrBlank()
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -926,14 +928,23 @@ private fun SlotEntryRow(
                 color = Navy
             )
             Spacer(Modifier.height(2.dp))
-            Text(
-                text = "${entry.subjectName} (${entry.subjectCode})",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = TextPrimary
-            )
-            if (!entry.teacherName.isNullOrBlank()) {
-                Text(text = "Teacher: ${entry.teacherName}", fontSize = 11.sp, color = TextSecondary)
+            if (isBlank) {
+                Text(
+                    text = "⚡ Blank / Free Period (Neutral)",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextSecondary
+                )
+            } else {
+                Text(
+                    text = "${entry.subjectName} (${entry.subjectCode})",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextPrimary
+                )
+                if (!entry.teacherName.isNullOrBlank()) {
+                    Text(text = "Teacher: ${entry.teacherName}", fontSize = 11.sp, color = TextSecondary)
+                }
             }
             val place = entry.room?.takeIf { it.isNotBlank() } ?: entry.classRoom?.takeIf { it.isNotBlank() }
             if (place != null) {
@@ -999,10 +1010,6 @@ private fun TimetableSlotDialog(
     val periodChoices = (1..10).toList()
 
     suspend fun save() {
-        if (subjectId <= 0) {
-            error = "Choose a subject for this slot."
-            return
-        }
         if (startPeriod > endPeriod) {
             error = "The start period must be before the end period."
             return
@@ -1010,7 +1017,8 @@ private fun TimetableSlotDialog(
 
         saving = true
         error = null
-        val facultyId = selectedSubject?.facultyId?.takeIf { it > 0 } ?: entry?.facultyId
+        val cleanSubjectId = subjectId.takeIf { it > 0 }
+        val facultyId = selectedSubject?.facultyId?.takeIf { cleanSubjectId != null && it > 0 }
         val cleanRoom = room.trim().takeIf { it.isNotEmpty() }
 
         val result = if (entry == null) {
@@ -1020,7 +1028,7 @@ private fun TimetableSlotDialog(
                     dayOfWeek = day,
                     startPeriod = startPeriod,
                     endPeriod = endPeriod,
-                    classSubjectId = subjectId,
+                    classSubjectId = cleanSubjectId,
                     groupId = groupId,
                     facultyId = facultyId,
                     room = cleanRoom
@@ -1034,7 +1042,7 @@ private fun TimetableSlotDialog(
                     dayOfWeek = day,
                     startPeriod = startPeriod,
                     endPeriod = endPeriod,
-                    classSubjectId = subjectId,
+                    classSubjectId = cleanSubjectId,
                     groupId = groupId,
                     facultyId = facultyId,
                     room = cleanRoom
@@ -1110,31 +1118,34 @@ private fun TimetableSlotDialog(
                 }
 
                 SlotDialogLabel("Subject")
-                if (subjects.isEmpty()) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    TimetableChoiceChip(
+                        label = "⚡ Blank / Free",
+                        selected = subjectId <= 0
+                    ) { subjectId = 0 }
+
+                    subjects.forEach { subject ->
+                        TimetableChoiceChip(
+                            label = subject.subjectCode,
+                            selected = subjectId == subject.classSubjectId
+                        ) { subjectId = subject.classSubjectId }
+                    }
+                }
+                if (subjectId > 0 && selectedSubject != null) {
                     Text(
-                        text = "No subjects are linked to this class yet.",
-                        color = ErrorRed,
-                        fontSize = 11.5.sp
+                        text = "${selectedSubject.subjectName} · ${selectedSubject.teacherName}",
+                        color = TextSecondary,
+                        fontSize = 11.sp
                     )
-                } else {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        subjects.forEach { subject ->
-                            TimetableChoiceChip(
-                                label = subject.subjectCode,
-                                selected = subjectId == subject.classSubjectId
-                            ) { subjectId = subject.classSubjectId }
-                        }
-                    }
-                    if (selectedSubject != null) {
-                        Text(
-                            text = "${selectedSubject.subjectName} · ${selectedSubject.teacherName}",
-                            color = TextSecondary,
-                            fontSize = 11.sp
-                        )
-                    }
+                } else if (subjectId <= 0) {
+                    Text(
+                        text = "Neutral slot (no subject or teacher assigned)",
+                        color = TextSecondary,
+                        fontSize = 11.sp
+                    )
                 }
 
                 if (groups.isNotEmpty()) {

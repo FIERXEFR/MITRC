@@ -397,9 +397,9 @@ object PortalRepository {
         endPeriod = endPeriod,
         startTime = startTime,
         endTime = endTime,
-        subjectCode = subjectCode,
-        subjectName = subjectName,
-        subjectKind = subjectKind,
+        subjectCode = subjectCode.orEmpty(),
+        subjectName = subjectName.orEmpty(),
+        subjectKind = subjectKind ?: "theory",
         groupId = groupId,
         groupName = groupName,
         facultyId = facultyId,
@@ -1161,12 +1161,31 @@ object PortalRepository {
             )
         }
 
+        val groupRows = runCatching {
+            client.postgrest[SupabaseTableData.Tables.CLASS_GROUPS]
+                .select { filter { isIn("class_id", classIds) } }
+                .decodeList<ClassGroupRow>()
+        }.getOrElse { emptyList() }
+        val groupMap = groupRows.associateBy { it.id }
+        val enrollmentMap = enrollments.associateBy { it.studentUid }
+
         // A student can still surface twice under two different uids (duplicate `students` rows,
         // or a per-class key in a view). The roster is one card per person, so collapse rows that
         // would render as the same card.
         val seen = HashSet<String>()
         rows.values
-            .map { overlayIdentity(it, identities[it.studentUid]) }
+            .map { row ->
+                val enrollment = enrollmentMap[row.studentUid]
+                val gId = row.groupId ?: enrollment?.groupId
+                val gName = row.groupName?.takeIf { it.isNotBlank() }
+                    ?: (gId?.let { groupMap[it]?.name })
+
+                val updatedRow = row.copy(
+                    groupId = gId,
+                    groupName = gName
+                )
+                overlayIdentity(updatedRow, identities[row.studentUid])
+            }
             .filter { seen.add(it.rosterKey()) }
     }
 

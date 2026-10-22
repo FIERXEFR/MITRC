@@ -22,6 +22,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
@@ -43,8 +48,10 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Class
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Event
 import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.outlined.Group
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
@@ -60,6 +67,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -84,6 +92,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -92,9 +101,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mitrc.ac.`in`.auth.AuthRepository
+import com.mitrc.ac.`in`.data.CoordinatorAdminRepository
+import com.mitrc.ac.`in`.data.CourseRow
+import com.mitrc.ac.`in`.data.EventRow
 import com.mitrc.ac.`in`.data.FacultyMasterRow
 import com.mitrc.ac.`in`.data.GreetingStore
 import com.mitrc.ac.`in`.data.MyCoordinatorClassView
+import com.mitrc.ac.`in`.data.NewEventRow
+import com.mitrc.ac.`in`.data.NewNotificationRow
 import com.mitrc.ac.`in`.data.NoteInsertRow
 import com.mitrc.ac.`in`.data.PortalRepository
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
@@ -115,7 +129,7 @@ sealed class CoordinatorTab(val route: String, val label: String, val icon: Imag
     data object Overview : CoordinatorTab("overview", "Overview", Icons.Outlined.Dashboard)
     data object Students : CoordinatorTab("students", "Students", Icons.Outlined.Group)
     data object Timetable : CoordinatorTab("timetable", "Timetable", Icons.Outlined.CalendarMonth)
-    data object Resources : CoordinatorTab("resources", "Resources", Icons.Outlined.Description)
+    data object Events : CoordinatorTab("events", "Events", Icons.Outlined.Event)
     data object Settings : CoordinatorTab("settings", "Settings", Icons.Outlined.Settings)
 }
 
@@ -130,6 +144,7 @@ fun CoordinatorPortalShell(
     var showNotifications by remember { mutableStateOf(false) }
     var showProfileSheet by remember { mutableStateOf(false) }
     var showPostNoticeDialog by remember { mutableStateOf(false) }
+    var showPostEventDialog by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var signingOut by remember { mutableStateOf(false) }
     var signOutComplete by remember { mutableStateOf(false) }
@@ -188,6 +203,8 @@ fun CoordinatorPortalShell(
         when {
             showNotifications -> showNotifications = false
             showProfileSheet -> showProfileSheet = false
+            showPostNoticeDialog -> showPostNoticeDialog = false
+            showPostEventDialog -> showPostEventDialog = false
             showLogoutDialog && !signingOut -> showLogoutDialog = false
         }
     }
@@ -198,25 +215,6 @@ fun CoordinatorPortalShell(
                 selected = selectedTab,
                 onSelect = { selectedTab = it }
             )
-        },
-        floatingActionButton = {
-            if (selectedTab == CoordinatorTab.Overview || selectedTab == CoordinatorTab.Resources) {
-                FloatingActionButton(
-                    onClick = { showPostNoticeDialog = true },
-                    containerColor = Gold,
-                    contentColor = NavyDeep,
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(Icons.Outlined.Campaign, contentDescription = "Post Notice")
-                        Text("Post Notice", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
         }
     ) { innerPadding ->
         Box(
@@ -254,8 +252,7 @@ fun CoordinatorPortalShell(
                                 CoordinatorOverviewView(
                                     onRefresh = refreshProfile,
                                     onNavigateStudents = { selectedTab = CoordinatorTab.Students },
-                                    onNavigateTimetable = { selectedTab = CoordinatorTab.Timetable },
-                                    onPostNotice = { showPostNoticeDialog = true }
+                                    onNavigateTimetable = { selectedTab = CoordinatorTab.Timetable }
                                 )
                             }
                             CoordinatorTab.Students -> {
@@ -264,10 +261,10 @@ fun CoordinatorPortalShell(
                             CoordinatorTab.Timetable -> {
                                 CoordinatorTimetableView(userUid = userUid)
                             }
-                            CoordinatorTab.Resources -> {
-                                CoordinatorResourcesView(
+                            CoordinatorTab.Events -> {
+                                CoordinatorEventsView(
                                     onRefresh = refreshProfile,
-                                    onPostNotice = { showPostNoticeDialog = true }
+                                    onPostEvent = { showPostEventDialog = true }
                                 )
                             }
                             CoordinatorTab.Settings -> {
@@ -292,6 +289,12 @@ fun CoordinatorPortalShell(
                 )
             }
 
+            if (showPostEventDialog) {
+                PostEventDialog(
+                    onDismiss = { showPostEventDialog = false },
+                    onPosted = { showPostEventDialog = false }
+                )
+            }
             if (showLogoutDialog) {
                 LogoutConfirmDialog(
                     signingOut = signingOut,
@@ -549,7 +552,7 @@ private fun CoordinatorBottomBar(
         CoordinatorTab.Overview,
         CoordinatorTab.Students,
         CoordinatorTab.Timetable,
-        CoordinatorTab.Resources,
+        CoordinatorTab.Events,
         CoordinatorTab.Settings
     )
 
@@ -620,8 +623,7 @@ private fun CoordinatorBottomBar(
 fun CoordinatorOverviewView(
     onRefresh: suspend () -> Unit,
     onNavigateStudents: () -> Unit,
-    onNavigateTimetable: () -> Unit,
-    onPostNotice: () -> Unit
+    onNavigateTimetable: () -> Unit
 ) {
     CoordinatorRefreshBox(
         onRefresh = onRefresh,
@@ -880,12 +882,39 @@ private fun ActionCard(
 }
 
 @Composable
-private fun CoordinatorResourcesView(
+private fun mitrcFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = TextPrimary,
+    unfocusedTextColor = TextPrimary,
+    disabledTextColor = TextPrimary.copy(alpha = 0.6f),
+    cursorColor = Navy,
+    focusedBorderColor = Navy,
+    unfocusedBorderColor = DividerSoft,
+    focusedContainerColor = SurfaceWhite,
+    unfocusedContainerColor = SurfaceWhite,
+    focusedLabelColor = TextSecondary,
+    unfocusedLabelColor = TextSecondary
+)
+
+@Composable
+private fun CoordinatorEventsView(
     onRefresh: suspend () -> Unit,
-    onPostNotice: () -> Unit
+    onPostEvent: () -> Unit
 ) {
+    val scope = rememberCoroutineScope()
+    var events by remember { mutableStateOf<List<EventRow>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        loading = true
+        events = CoordinatorAdminRepository.getEvents().getOrDefault(emptyList())
+        loading = false
+    }
+
     CoordinatorRefreshBox(
-        onRefresh = onRefresh,
+        onRefresh = {
+            scope.launch { onRefresh() }
+            events = CoordinatorAdminRepository.getEvents().getOrDefault(emptyList())
+        },
         skeleton = { CoordinatorResourcesSkeleton() }
     ) {
         Column(
@@ -895,31 +924,473 @@ private fun CoordinatorResourcesView(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("RESOURCES & OFFICIAL BROADCASTS", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextSecondary, letterSpacing = 1.2.sp)
-
-            ElevatedCard(
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.elevatedCardColors(containerColor = SurfaceWhite),
-                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 3.dp),
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onPostNotice)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(modifier = Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier.size(44.dp).clip(CircleShape).background(Gold.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
+                Text("CAMPUS EVENTS & ACTIVITIES", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextSecondary, letterSpacing = 1.2.sp)
+                Button(
+                    onClick = onPostEvent,
+                    colors = ButtonDefaults.buttonColors(containerColor = Navy),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Outlined.Add, null, modifier = Modifier.size(16.dp), tint = Color.White)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Post Event", fontSize = 12.sp, color = Color.White)
+                }
+            }
+
+            if (events.isEmpty()) {
+                ElevatedCard(
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.elevatedCardColors(containerColor = SurfaceWhite),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("No events posted yet.", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Spacer(Modifier.height(6.dp))
+                        Text("Tap 'Post Event' above to publish campus events.", fontSize = 12.sp, color = TextSecondary)
+                    }
+                }
+            } else {
+                events.forEach { event ->
+                    ElevatedCard(
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.elevatedCardColors(containerColor = SurfaceWhite),
+                        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Outlined.Campaign, null, tint = Navy, modifier = Modifier.size(22.dp))
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(event.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Navy)
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Gold.copy(alpha = 0.2f))
+                                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                                ) {
+                                    Text(event.category.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Navy)
+                                }
+                            }
+                            if (!event.description.isNullOrBlank()) {
+                                Spacer(Modifier.height(6.dp))
+                                Text(event.description, fontSize = 13.sp, color = TextPrimary)
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                if (!event.venue.isNullOrBlank()) {
+                                    Text("📍 ${event.venue}", fontSize = 11.5.sp, color = TextSecondary)
+                                }
+                                Text("📅 ${event.startsAt.take(10)}", fontSize = 11.5.sp, color = TextSecondary)
+                            }
+                        }
                     }
-                    Spacer(Modifier.width(14.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Broadcast New Notice", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                        Text("Push official announcements to student portal", fontSize = 12.sp, color = TextSecondary)
-                    }
-                    Icon(Icons.Outlined.Add, null, tint = Navy)
                 }
             }
         }
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PostEventDialog(
+    onDismiss: () -> Unit,
+    onPosted: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var title by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    var venue by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf("general") }
+    var startsAt by remember { mutableStateOf(getTodayIsoDateTime()) }
+    var registrationUrl by remember { mutableStateOf("") }
+
+    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    var imageUrl by remember { mutableStateOf<String?>(null) }
+    var imageId by remember { mutableStateOf<String?>(null) }
+
+    var posting by remember { mutableStateOf(false) }
+    var uploadingImage by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            imageUri = uri
+            uploadingImage = true
+            scope.launch {
+                CoordinatorAdminRepository.uploadToImageKit(context, uri, "/Events")
+                    .fold(
+                        onSuccess = { res ->
+                            imageUrl = res.url
+                            imageId = res.fileId
+                            uploadingImage = false
+                        },
+                        onFailure = { err ->
+                            error = "Image upload failed: ${err.message}"
+                            uploadingImage = false
+                        }
+                    )
+            }
+        }
+    }
+
+    val categories = listOf("general", "cultural", "technical", "sports", "academic", "workshop", "seminar", "other")
+
+    AlertDialog(
+        onDismissRequest = { if (!posting) onDismiss() },
+        title = { Text("Post Campus Event", color = Navy, fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Event Title") },
+                    singleLine = true,
+                    colors = mitrcFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description (Optional)") },
+                    minLines = 3,
+                    colors = mitrcFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                OutlinedTextField(
+                    value = venue,
+                    onValueChange = { venue = it },
+                    label = { Text("Venue (Optional)") },
+                    singleLine = true,
+                    colors = mitrcFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                OutlinedTextField(
+                    value = startsAt,
+                    onValueChange = { startsAt = it },
+                    label = { Text("Starts At (ISO-8601 e.g. 2026-03-01T10:00:00Z)") },
+                    singleLine = true,
+                    colors = mitrcFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                OutlinedTextField(
+                    value = registrationUrl,
+                    onValueChange = { registrationUrl = it },
+                    label = { Text("Registration URL (Optional)") },
+                    singleLine = true,
+                    colors = mitrcFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Text("CATEGORY", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TextSecondary)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    categories.forEach { cat ->
+                        NoticeChoiceChip(label = cat, selected = category == cat) { category = cat }
+                    }
+                }
+
+                Button(
+                    onClick = { imageLauncher.launch("image/*") },
+                    enabled = !uploadingImage && !posting,
+                    colors = ButtonDefaults.buttonColors(containerColor = NavySoft),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Outlined.Image, null, modifier = Modifier.size(16.dp), tint = Color.White)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (uploadingImage) "Uploading to ImageKit..." else if (imageUrl != null) "Change Attached Image" else "Attach Event Image", color = Color.White, fontSize = 12.sp)
+                }
+
+                if (imageUrl != null) {
+                    Text("Image attached successfully!", color = SuccessGreen, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
+
+                if (error != null) {
+                    Text(error.orEmpty(), color = ErrorRed, fontSize = 11.5.sp)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (title.isNotBlank() && startsAt.isNotBlank()) {
+                        scope.launch {
+                            posting = true
+                            error = null
+                            val res = CoordinatorAdminRepository.createEvent(
+                                NewEventRow(
+                                    title = title.trim(),
+                                    description = description.trim().takeIf { it.isNotEmpty() },
+                                    imageUrl = imageUrl,
+                                    imageId = imageId,
+                                    category = category,
+                                    venue = venue.trim().takeIf { it.isNotEmpty() },
+                                    startsAt = startsAt.trim(),
+                                    registrationUrl = registrationUrl.trim().takeIf { it.isNotEmpty() }
+                                )
+                            )
+                            posting = false
+                            res.fold(
+                                onSuccess = { onPosted() },
+                                { err -> error = err.message ?: "Failed to post event" }
+                            )
+                        }
+                    }
+                },
+                enabled = !posting && !uploadingImage && title.isNotBlank()
+            ) {
+                Text(if (posting) "Posting..." else "Post Event", color = Navy, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !posting) {
+                Text("Cancel", color = TextSecondary)
+            }
+        },
+        containerColor = SurfaceWhite
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PostNoticeDialog(
+    onDismiss: () -> Unit,
+    onPosted: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var title by remember { mutableStateOf("") }
+    var body by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf("announcement") }
+    var priority by remember { mutableStateOf("normal") }
+    var audience by remember { mutableStateOf("everyone") }
+
+    var courses by remember { mutableStateOf<List<CourseRow>>(emptyList()) }
+    var classes by remember { mutableStateOf<List<MyCoordinatorClassView>>(emptyList()) }
+    var selectedCourseId by remember { mutableStateOf<Int?>(null) }
+    var selectedClassId by remember { mutableStateOf<Int?>(null) }
+
+    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    var imageUrl by remember { mutableStateOf<String?>(null) }
+    var imageId by remember { mutableStateOf<String?>(null) }
+
+    var posting by remember { mutableStateOf(false) }
+    var uploadingImage by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(audience) {
+        if (audience == "course" && courses.isEmpty()) {
+            courses = CoordinatorAdminRepository.getCourses()
+        } else if (audience == "class" && classes.isEmpty()) {
+            classes = CoordinatorAdminRepository.getAllClassesWithDetails().getOrDefault(emptyList())
+        }
+    }
+
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            imageUri = uri
+            uploadingImage = true
+            scope.launch {
+                CoordinatorAdminRepository.uploadToImageKit(context, uri, "/Notifications")
+                    .fold(
+                        onSuccess = { res ->
+                            imageUrl = res.url
+                            imageId = res.fileId
+                            uploadingImage = false
+                        },
+                        onFailure = { err ->
+                            error = "Image upload failed: ${err.message}"
+                            uploadingImage = false
+                        }
+                    )
+            }
+        }
+    }
+
+    val categories = listOf("announcement", "exam", "holiday", "event", "timetable", "notes", "attendance", "marks", "alert", "system")
+    val priorities = listOf("normal", "high", "urgent")
+    val audiences = listOf("everyone", "all_students", "all_staff", "course", "class", "group", "class_subject")
+
+    AlertDialog(
+        onDismissRequest = { if (!posting) onDismiss() },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Campaign, null, tint = Navy, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Broadcast Official Notice", color = Navy, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Notice Title") },
+                    singleLine = true,
+                    colors = mitrcFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                OutlinedTextField(
+                    value = body,
+                    onValueChange = { body = it },
+                    label = { Text("Notice Body / Message") },
+                    minLines = 3,
+                    colors = mitrcFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Text("CATEGORY", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TextSecondary)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    categories.forEach { cat ->
+                        NoticeChoiceChip(label = cat, selected = category == cat) { category = cat }
+                    }
+                }
+
+                Text("PRIORITY", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TextSecondary)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    priorities.forEach { pri ->
+                        NoticeChoiceChip(label = pri, selected = priority == pri) { priority = pri }
+                    }
+                }
+
+                Text("AUDIENCE TARGET", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TextSecondary)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    audiences.forEach { aud ->
+                        NoticeChoiceChip(label = aud, selected = audience == aud) { audience = aud }
+                    }
+                }
+
+                if (audience == "course" && courses.isNotEmpty()) {
+                    Text("SELECT COURSE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TextSecondary)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        courses.forEach { course ->
+                            NoticeChoiceChip(label = course.name, selected = selectedCourseId == course.id) {
+                                selectedCourseId = course.id
+                            }
+                        }
+                    }
+                }
+
+                if (audience == "class" && classes.isNotEmpty()) {
+                    Text("SELECT CLASS / BATCH", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TextSecondary)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        classes.forEach { cls ->
+                            val label = "${cls.course ?: ""} Sem ${cls.semester} ${cls.section}"
+                            NoticeChoiceChip(label = label, selected = selectedClassId == cls.classId) {
+                                selectedClassId = cls.classId
+                            }
+                        }
+                    }
+                }
+
+                Button(
+                    onClick = { imageLauncher.launch("image/*") },
+                    enabled = !uploadingImage && !posting,
+                    colors = ButtonDefaults.buttonColors(containerColor = NavySoft),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Outlined.Image, null, modifier = Modifier.size(16.dp), tint = Color.White)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (uploadingImage) "Uploading to ImageKit..." else if (imageUrl != null) "Change Attached Image" else "Attach Notice Image", color = Color.White, fontSize = 12.sp)
+                }
+
+                if (imageUrl != null) {
+                    Text("Image attached successfully!", color = SuccessGreen, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
+
+                if (error != null) {
+                    Text(error.orEmpty(), color = ErrorRed, fontSize = 11.5.sp)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (title.isNotBlank()) {
+                        scope.launch {
+                            posting = true
+                            error = null
+                            val res = CoordinatorAdminRepository.createNotification(
+                                NewNotificationRow(
+                                    title = title.trim(),
+                                    body = body.trim().takeIf { it.isNotEmpty() },
+                                    imageUrl = imageUrl,
+                                    imageId = imageId,
+                                    category = category,
+                                    priority = priority,
+                                    audience = audience,
+                                    courseId = selectedCourseId,
+                                    classId = selectedClassId
+                                )
+                            )
+                            posting = false
+                            res.fold(
+                                onSuccess = { onPosted() },
+                                { err -> error = err.message ?: "Failed to post notification" }
+                            )
+                        }
+                    }
+                },
+                enabled = !posting && !uploadingImage && title.isNotBlank()
+            ) {
+                Text(if (posting) "Broadcasting..." else "Broadcast Notice", color = Navy, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !posting) {
+                Text("Cancel", color = TextSecondary)
+            }
+        },
+        containerColor = SurfaceWhite
+    )
+}
+
+@Composable
+private fun NoticeChoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(if (selected) Navy else Slate)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text = label,
+            color = if (selected) Color.White else TextPrimary,
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+        )
+    }
+}
+
+private fun getTodayIsoDateTime(): String {
+    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
+    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+    return sdf.format(java.util.Date())
 }
 
 @Composable
@@ -1047,74 +1518,4 @@ private fun CoordinatorSettingsCard(title: String, subtitle: String, icon: Image
     }
 }
 
-@Composable
-private fun PostNoticeDialog(
-    onDismiss: () -> Unit,
-    onPosted: () -> Unit
-) {
-    val scope = rememberCoroutineScope()
-    var title by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var driveUrl by remember { mutableStateOf("") }
-    var posting by remember { mutableStateOf(false) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Post Notice to Student Portal", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Notice Title") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it },
-                    label = { Text("Notice Body / Message") },
-                    minLines = 3,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = driveUrl,
-                    onValueChange = { driveUrl = it },
-                    label = { Text("Resource Link (Optional)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (title.isNotBlank()) {
-                        scope.launch {
-                            posting = true
-                            PortalRepository.createNote(
-                                NoteInsertRow(
-                                    classSubjectId = 1,
-                                    title = title,
-                                    description = description,
-                                    category = "notes",
-                                    driveUrl = driveUrl.ifBlank { "https://mitrc.ac.in" }
-                                )
-                            )
-                            posting = false
-                            onPosted()
-                        }
-                    }
-                },
-                enabled = !posting && title.isNotBlank()
-            ) {
-                Text(if (posting) "Posting..." else "Post Notice")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
