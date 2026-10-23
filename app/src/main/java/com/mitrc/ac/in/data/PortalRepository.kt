@@ -1405,6 +1405,12 @@ object PortalRepository {
         client.postgrest.rpc("set_student_group", params)
     }
 
+    suspend fun getNotifications(): Result<List<NotificationRow>> = query {
+        SupabaseManager.requireClient().postgrest["notifications"]
+            .select { order("created_at", Order.DESCENDING) }
+            .decodeList<NotificationRow>()
+    }
+
     suspend fun getSubjectTeachers(classId: Int): Result<List<ClassSubjectView>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_SUBJECT_TEACHERS]
             .select { filter { eq("class_id", classId) } }

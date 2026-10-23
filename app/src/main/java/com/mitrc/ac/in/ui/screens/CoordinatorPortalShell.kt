@@ -330,7 +330,29 @@ fun CoordinatorPortalShell(
                 exit = fadeOut(tween(180)) + slideOutHorizontally(tween(260)) { it },
                 modifier = Modifier.fillMaxSize()
             ) {
-                NotificationsScreen(onBack = { showNotifications = false })
+                Scaffold(
+                    floatingActionButton = {
+                        FloatingActionButton(
+                            onClick = { showPostNoticeDialog = true },
+                            containerColor = Gold,
+                            contentColor = NavyDeep,
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Outlined.Campaign, contentDescription = "Post Notice")
+                                Text("Post Notice", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                ) { innerPadding ->
+                    Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+                        NotificationsScreen(onBack = { showNotifications = false })
+                    }
+                }
             }
         }
     }

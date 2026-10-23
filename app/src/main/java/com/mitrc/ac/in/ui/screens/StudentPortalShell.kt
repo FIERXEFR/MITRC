@@ -1147,14 +1147,40 @@ internal fun PortalNoProfileState() {
 @Composable
 internal fun NotificationsScreen(onBack: () -> Unit) {
     var isRefreshing by remember { mutableStateOf(false) }
-    // Brief first-paint skeleton so the list doesn't pop in fully formed.
     var isLoading by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
-    val notifications = remember { sampleNotifications().toMutableStateList() }
+    val notifications = remember { mutableStateListOf<PortalNotification>() }
+
+    suspend fun loadNotifications() {
+        val rows = PortalRepository.getNotifications().getOrDefault(emptyList())
+        notifications.clear()
+        if (rows.isNotEmpty()) {
+            notifications.addAll(
+                rows.map { row ->
+                    val tone = when (row.priority) {
+                        "urgent", "high" -> NotificationTone.ALERT
+                        else -> NotificationTone.INFO
+                    }
+                    PortalNotification(
+                        id = row.id.toInt(),
+                        title = row.title,
+                        body = row.body ?: "",
+                        time = row.createdAt?.take(10) ?: "Recent",
+                        tone = tone,
+                        image = row.imageUrl,
+                        unread = true
+                    )
+                }
+            )
+        } else {
+            notifications.addAll(sampleNotifications())
+        }
+    }
 
     LaunchedEffect(Unit) {
-        delay(650)
+        isLoading = true
+        loadNotifications()
         isLoading = false
     }
 
@@ -1226,9 +1252,7 @@ internal fun NotificationsScreen(onBack: () -> Unit) {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 scope.launch {
                     isRefreshing = true
-                    delay(1200)
-                    notifications.clear()
-                    notifications.addAll(sampleNotifications())
+                    loadNotifications()
                     isRefreshing = false
                 }
             },
