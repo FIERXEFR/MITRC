@@ -110,6 +110,38 @@ object PortalRepository {
     }
 
     /**
+     * Resolves the student's real name from the `students` row. The profile view can omit the
+     * name and Firebase's display name is usually unset, so the header must not settle for the
+     * email's local part. Falls back to matching `student_email` for rows not yet linked to a
+     * Firebase uid.
+     */
+    suspend fun getStudentName(uid: String, email: String?): Result<String?> = query {
+        val client = SupabaseManager.requireClient()
+
+        val byUid = runCatching {
+            client.postgrest[SupabaseTableData.Tables.STUDENTS]
+                .select { filter { eq("uid", uid) } }
+                .decodeList<StudentRow>()
+                .firstOrNull()
+                ?.name
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+        }.getOrNull()
+        if (byUid != null) return@query byUid
+
+        val mail = email?.trim()?.takeIf { it.isNotEmpty() } ?: return@query null
+        runCatching {
+            client.postgrest[SupabaseTableData.Tables.STUDENTS]
+                .select { filter { ilike("student_email", mail) } }
+                .decodeList<StudentRow>()
+                .firstOrNull()
+                ?.name
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+        }.getOrNull()
+    }
+
+    /**
      * `v_student_profiles` predates `lock_reason` / `ptm_schedule`, and a view is not rebuilt in
      * lockstep with its table, so the authoritative `students` row is overlaid here. Without this
      * the lock screen could keep showing a stale state (or no reason and no PTM time at all).

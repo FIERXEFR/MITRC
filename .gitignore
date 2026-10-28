@@ -29,7 +29,6 @@ app/release/
 # Supabase local CLI
 supabase/.temp/
 supabase/.env
-supabase/config.toml
 
 # OS junk
 .DS_Store

@@ -169,6 +169,13 @@ object SupabaseManager {
     fun requireClient(): SupabaseClient =
         client ?: error("Supabase is not configured. Run scripts/generate_xor_cpp.ps1 with real credentials.")
 
+    /** Project URL for direct REST calls the SDK does not cover (e.g. Edge Functions). */
+    fun supabaseUrl(): String = readSecret("supabaseUrl") { NativeUtils.getSupabaseUrl() }
+
+    /** Anon key sent alongside Edge Function calls as the gateway's `apikey` header. */
+    fun supabaseAnonKey(): String =
+        readSecret("supabaseAnonKey") { NativeUtils.getSupabaseAnonKey() }
+
     /**
      * The privileged client used by the coordinator timetable and student editors.
      *

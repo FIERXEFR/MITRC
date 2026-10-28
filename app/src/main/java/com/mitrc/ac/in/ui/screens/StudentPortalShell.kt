@@ -49,6 +49,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Campaign
@@ -110,6 +111,7 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import kotlin.math.roundToInt
 import com.mitrc.ac.`in`.R
+import com.mitrc.ac.`in`.auth.AuthRepository
 import com.mitrc.ac.`in`.data.*
 import com.mitrc.ac.`in`.ui.theme.Gold
 import com.mitrc.ac.`in`.ui.theme.GoldLight
@@ -134,7 +136,12 @@ data class StudentPortalData(
      */
     val pdfNotes: List<PortalPdfNote> = emptyList(),
     /** Coordinator contact shown on the lock / PTM screen; null while the profile is active. */
-    val coordinator: StudentCoordinatorContact? = null
+    val coordinator: StudentCoordinatorContact? = null,
+    /**
+     * The student's real name resolved from the `students` row (never the email local part).
+     * Null only while the portal is still loading or when no name exists anywhere.
+     */
+    val displayName: String? = null
 )
 
 /**
@@ -147,6 +154,17 @@ data class StudentPortalData(
 private suspend fun loadPortalData(userUid: String): StudentPortalData {
     val profileResult = PortalRepository.getStudentProfile(userUid)
     val profile = profileResult.getOrNull()
+
+    // Greeting name: the `students` row is authoritative. Only when it has no name do we try a
+    // direct lookup (uid, then student_email) and finally the Firebase display name. The email's
+    // local part is never used - "Welcome, amit.yadav" is not this student's name.
+    val displayName = profile?.name?.trim()?.takeIf { it.isNotEmpty() }
+        ?: PortalRepository.getStudentName(
+            uid = userUid,
+            email = profile?.studentEmail ?: AuthRepository.currentUser?.email
+        ).getOrNull()
+        ?: AuthRepository.currentUser?.displayName?.trim()?.takeIf { it.isNotEmpty() }
+
     val classId = profile?.classId ?: 0
     val subjects = if (classId > 0) {
         PortalRepository.getStudentSubjects(classId).getOrDefault(emptyList())
@@ -190,6 +208,7 @@ private suspend fun loadPortalData(userUid: String): StudentPortalData {
             .getOrDefault(emptyList())
             .toPortalPdfNotes(subjects = subjects),
         coordinator = coordinator,
+        displayName = displayName,
         error = if (profileResult.isFailure) {
             profileResult.exceptionOrNull()?.message ?: "Failed to load your student profile."
         } else {
@@ -327,7 +346,8 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
             PortalHeader(
                 tab = tab,
                 scheduleMode = scheduleMode,
-                name = portalDisplayName(data?.profile),
+                name = data?.displayName,
+                loading = data == null,
                 scrolledPx = { headerOffset.floatValue },
                 onBellClick = { showNotifications = true },
                 onAvatarClick = { showProfile = true }
@@ -341,7 +361,20 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
             ) {
                 val current = data
                 if (current == null) {
-                    PortalLoading()
+                    // Load a skeleton that matches the tab the student is actually on, so the
+                    // Academics tab never shows the Home layout while attendance is loading.
+                    if (tab == StudentTab.ATTENDANCE && scheduleMode == ScheduleMode.ATTENDANCE) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(attendanceScroll)
+                                .padding(horizontal = 20.dp, vertical = 18.dp)
+                        ) {
+                            AttendanceSkeleton()
+                        }
+                    } else {
+                        PortalLoading()
+                    }
                 } else if (current.profile == null) {
                     if (current.error != null) {
                         PortalErrorState(
@@ -441,6 +474,7 @@ private fun PortalHeader(
     tab: StudentTab,
     scheduleMode: ScheduleMode,
     name: String?,
+    loading: Boolean,
     scrolledPx: () -> Float,
     onBellClick: () -> Unit,
     onAvatarClick: () -> Unit
@@ -450,6 +484,10 @@ private fun PortalHeader(
     val greeting = remember { GreetingStore.greeting() }
 
     val title = when {
+        // No placeholder text while loading: the hero shows a shimmer instead so a student is
+        // never greeted with a derived name that is about to be replaced.
+        loading -> ""
+
         tab == StudentTab.HOME ->
             "$greeting, ${firstNameOf(name)} \ud83d\udc4b"
 
@@ -584,16 +622,29 @@ internal fun PortalHeroHeader(
                     },
                     label = "headerTitle"
                 ) { text ->
-                    Text(
-                        text = text,
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        lineHeight = 24.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = (-0.4).sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    if (text.isBlank()) {
+                        // Placeholder sized like the headline so the hero never flashes a
+                        // derived name and doesn't jump when the real one arrives.
+                        Box(
+                            modifier = Modifier
+                                .padding(vertical = 3.dp)
+                                .width(176.dp)
+                                .height(18.dp)
+                                .clip(RoundedCornerShape(5.dp))
+                                .shimmerEffect()
+                        )
+                    } else {
+                        Text(
+                            text = text,
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            lineHeight = 24.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = (-0.4).sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
 
                 Spacer(Modifier.height(2.dp))
@@ -930,7 +981,7 @@ private fun ProfileSheetContent(
             Spacer(Modifier.width(14.dp))
             Column {
                 Text(
-                    text = portalDisplayName(profile).takeIf { it != "Student" } ?: "Student Profile",
+                    text = data?.displayName ?: portalDisplayName(profile).takeIf { it != "Student" } ?: "Student Profile",
                     color = PortalTextPrimary,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.ExtraBold,

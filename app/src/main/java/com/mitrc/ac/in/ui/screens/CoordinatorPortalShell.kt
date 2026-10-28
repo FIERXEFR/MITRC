@@ -106,6 +106,7 @@ import com.mitrc.ac.`in`.data.CourseRow
 import com.mitrc.ac.`in`.data.EventRow
 import com.mitrc.ac.`in`.data.FacultyMasterRow
 import com.mitrc.ac.`in`.data.GreetingStore
+import com.mitrc.ac.`in`.data.GoogleDriveStorage
 import com.mitrc.ac.`in`.data.MyCoordinatorClassView
 import com.mitrc.ac.`in`.data.NewEventRow
 import com.mitrc.ac.`in`.data.NewNotificationRow
@@ -1046,7 +1047,7 @@ private fun PostEventDialog(
             imageUri = uri
             uploadingImage = true
             scope.launch {
-                CoordinatorAdminRepository.uploadToImageKit(context, uri, "/Events")
+                GoogleDriveStorage.upload(context, uri, folder = "Events")
                     .fold(
                         onSuccess = { res ->
                             imageUrl = res.url
@@ -1136,7 +1137,7 @@ private fun PostEventDialog(
                 ) {
                     Icon(Icons.Outlined.Image, null, modifier = Modifier.size(16.dp), tint = Color.White)
                     Spacer(Modifier.width(6.dp))
-                    Text(if (uploadingImage) "Uploading to ImageKit..." else if (imageUrl != null) "Change Attached Image" else "Attach Event Image", color = Color.White, fontSize = 12.sp)
+                    Text(if (uploadingImage) "Uploading..." else if (imageUrl != null) "Change Attached Image" else "Attach Event Image", color = Color.White, fontSize = 12.sp)
                 }
 
                 if (imageUrl != null) {
@@ -1229,7 +1230,7 @@ private fun PostNoticeDialog(
             imageUri = uri
             uploadingImage = true
             scope.launch {
-                CoordinatorAdminRepository.uploadToImageKit(context, uri, "/Notifications")
+                GoogleDriveStorage.upload(context, uri, folder = "Notifications")
                     .fold(
                         onSuccess = { res ->
                             imageUrl = res.url
@@ -1337,7 +1338,7 @@ private fun PostNoticeDialog(
                 ) {
                     Icon(Icons.Outlined.Image, null, modifier = Modifier.size(16.dp), tint = Color.White)
                     Spacer(Modifier.width(6.dp))
-                    Text(if (uploadingImage) "Uploading to ImageKit..." else if (imageUrl != null) "Change Attached Image" else "Attach Notice Image", color = Color.White, fontSize = 12.sp)
+                    Text(if (uploadingImage) "Uploading..." else if (imageUrl != null) "Change Attached Image" else "Attach Notice Image", color = Color.White, fontSize = 12.sp)
                 }
 
                 if (imageUrl != null) {

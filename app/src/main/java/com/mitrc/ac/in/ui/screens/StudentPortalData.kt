@@ -40,7 +40,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import com.mitrc.ac.`in`.auth.AuthRepository
+import com.mitrc.ac.`in`.R
 import com.mitrc.ac.`in`.data.*
 import com.mitrc.ac.`in`.ui.theme.DarkTextMuted
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
@@ -369,7 +369,7 @@ data class CollegeEvent(
     val category: String,
     val whenLabel: String,
     val venue: String,
-    val image: String
+    val image: Any
 )
 
 /**
@@ -383,7 +383,7 @@ fun sampleCollegeEvents(): List<CollegeEvent> = listOf(
         category = "TECH FEST",
         whenLabel = "12 \u2013 19 OCT 2026 \u00b7 9:15 AM",
         venue = "Central Lawn, MITRC",
-        image = "https://ik.imagekit.io/Mainimages/Event26/techspark26.jpg"
+        image = R.drawable.techspark26
     ),
     CollegeEvent(
         id = 2,
@@ -447,7 +447,7 @@ data class PortalNotification(
     val body: String,
     val time: String,
     val tone: NotificationTone,
-    val image: String? = null,
+    val image: Any? = null,
     val unread: Boolean = true
 )
 
@@ -465,7 +465,7 @@ fun sampleNotifications(): List<PortalNotification> = listOf(
         body = "Team registrations for the annual tech exhibition are now live. Last date to register is 14 Nov.",
         time = "1 hr ago",
         tone = NotificationTone.INFO,
-        image = "https://ik.imagekit.io/Mainimages/Event26/techspark26.jpg"
+        image = R.drawable.techspark26
     ),
     PortalNotification(
         id = 3,
@@ -566,22 +566,14 @@ fun firstNameOf(fullName: String?): String {
 }
 
 /**
- * Name for the portal header and avatar.
+ * Name shown on the portal header and avatar.
  *
- * The profile row is the source of truth, but it is not the only place the student's name lives:
- * the admin panel writes the name into Firebase's `displayName` when it creates the account, and
- * the sign-in address always has a usable local part. Falling back through those keeps the header
- * from greeting a student as "Student" whenever `students.name` comes back NULL.
+ * The `students` row is the only authority: the app must never greet a student with the local
+ * part of their email address. [StudentPortalShell] resolves the database name into
+ * `StudentPortalData.displayName`, so this stays a last-resort label.
  */
 fun portalDisplayName(profile: StudentProfileView?): String {
     profile?.name?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
-
-    val user = AuthRepository.currentUser
-    user?.displayName?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
-    user?.email?.substringBefore('@')?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
-
-    profile?.studentEmail?.substringBefore('@')?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
-
     return "Student"
 }
 

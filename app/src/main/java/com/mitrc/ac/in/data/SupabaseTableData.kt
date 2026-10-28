@@ -779,7 +779,7 @@ typealias StudentSubjectView = ClassSubjectView
 typealias SubjectTeacherView = StaffDirectoryView
 
 // ---------------------------------------------------------------------------------------------
-// Notifications & ImageKit
+// Notifications
 // ---------------------------------------------------------------------------------------------
 
 @Serializable
@@ -821,14 +821,6 @@ data class NewNotificationRow(
 data class NotificationReadRow(
     @SerialName("user_uid") val userUid: String,
     @SerialName("notification_id") val notificationId: Long,
-)
-
-@Serializable
-data class ImageKitUploadResponse(
-    @SerialName("url") val url: String,
-    @SerialName("fileId") val fileId: String,
-    @SerialName("name") val name: String? = null,
-    @SerialName("filePath") val filePath: String? = null,
 )
 
 @Serializable

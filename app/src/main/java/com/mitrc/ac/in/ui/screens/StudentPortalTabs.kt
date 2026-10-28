@@ -252,7 +252,7 @@ fun StudentScheduleTab(
                 }
                 Column(modifier = Modifier.fillMaxSize().verticalScroll(pageScroll)) {
                     when (pageMode) {
-                        ScheduleMode.ATTENDANCE -> AttendanceContent(data = data)
+                        ScheduleMode.ATTENDANCE -> AttendanceContent(data = data, loading = isRefreshing)
                         ScheduleMode.TIMETABLE -> TimetableContent(data = data, refreshing = isRefreshing)
                         ScheduleMode.NOTES -> NotesContent(
                             data = data,
@@ -305,7 +305,15 @@ private fun ScheduleSegmentedControl(
 }
 
 @Composable
-private fun AttendanceContent(data: StudentPortalData) {
+private fun AttendanceContent(
+    data: StudentPortalData,
+    loading: Boolean = false
+) {
+    if (loading) {
+        AttendanceSkeleton()
+        return
+    }
+
     val attended = remember(data.attendance) { data.attendance.sumOf { it.attended } }
     val total = remember(data.attendance) { data.attendance.sumOf { it.total } }
     val pct = if (total > 0) attended * 100.0 / total else 0.0
@@ -372,6 +380,239 @@ private fun AttendanceContent(data: StudentPortalData) {
                     SubjectAttendanceCard(row)
                 }
             }
+        }
+    }
+}
+
+/** Shimmer preview that mirrors the Attendance tab while it loads or refreshes. */
+@Composable
+internal fun AttendanceSkeleton() {
+    Column {
+        Box(
+            modifier = Modifier
+                .width(148.dp)
+                .height(11.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .shimmerEffect()
+        )
+        Spacer(Modifier.height(12.dp))
+
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = PortalCard,
+            border = BorderStroke(1.dp, PortalStroke),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(78.dp)
+                        .clip(CircleShape)
+                        .shimmerEffect()
+                )
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.55f)
+                            .height(15.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .shimmerEffect()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.75f)
+                            .height(11.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .shimmerEffect()
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(118.dp)
+                            .height(10.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .shimmerEffect()
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        Box(
+            modifier = Modifier
+                .width(132.dp)
+                .height(11.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .shimmerEffect()
+        )
+        Spacer(Modifier.height(12.dp))
+
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = PortalCard,
+            border = BorderStroke(1.dp, PortalStroke),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .shimmerEffect()
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Box(
+                        modifier = Modifier
+                            .width(104.dp)
+                            .height(13.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .shimmerEffect()
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .shimmerEffect()
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    repeat(7) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(9.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .shimmerEffect()
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                repeat(5) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        repeat(7) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(34.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .shimmerEffect()
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                }
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = PortalCard,
+            border = BorderStroke(1.dp, PortalStroke),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .shimmerEffect()
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.45f)
+                            .height(12.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .shimmerEffect()
+                    )
+                    Spacer(Modifier.height(7.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.7f)
+                            .height(10.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .shimmerEffect()
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        Box(
+            modifier = Modifier
+                .width(108.dp)
+                .height(11.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .shimmerEffect()
+        )
+        Spacer(Modifier.height(12.dp))
+
+        repeat(3) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = PortalCard,
+                border = BorderStroke(1.dp, PortalStroke),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .shimmerEffect()
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.55f)
+                                .height(13.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .shimmerEffect()
+                        )
+                        Spacer(Modifier.height(7.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.8f)
+                                .height(10.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .shimmerEffect()
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(46.dp)
+                            .height(22.dp)
+                            .clip(RoundedCornerShape(7.dp))
+                            .shimmerEffect()
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
         }
     }
 }
@@ -2101,7 +2342,7 @@ private fun ExamsResultsContent(data: StudentPortalData) {
                         }
                         Column {
                             Text(
-                                text = profile?.name ?: "Student Profile",
+                                text = data.displayName ?: profile?.name ?: "Student Profile",
                                 color = Color.White,
                                 fontSize = 17.sp,
                                 fontWeight = FontWeight.Bold
@@ -2586,7 +2827,7 @@ fun StudentSettingsTab(data: StudentPortalData, scroll: ScrollState, onSignedOut
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = profile?.name ?: "Student Profile",
+                            text = data.displayName ?: profile?.name ?: "Student Profile",
                             color = PortalTextPrimary,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
@@ -2722,6 +2963,7 @@ fun StudentSettingsTab(data: StudentPortalData, scroll: ScrollState, onSignedOut
     ) {
         ProfileDetailsSheet(
             profile = profile,
+            displayName = data.displayName,
             onDismiss = { showProfileSheet = false }
         )
     }
@@ -2961,7 +3203,11 @@ private fun SettingsOptionCard(
 }
 
 @Composable
-fun ProfileDetailsSheet(profile: StudentProfileView?, onDismiss: () -> Unit) {
+fun ProfileDetailsSheet(
+    profile: StudentProfileView?,
+    displayName: String? = null,
+    onDismiss: () -> Unit
+) {
     Surface(
         color = PortalCard,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
@@ -2982,7 +3228,7 @@ fun ProfileDetailsSheet(profile: StudentProfileView?, onDismiss: () -> Unit) {
             Spacer(Modifier.height(16.dp))
 
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SheetDetailRow("Full Name", profile?.name ?: "N/A")
+                SheetDetailRow("Full Name", displayName ?: profile?.name ?: "N/A")
                 SheetDetailRow("Roll / Serial No.", profile?.serialNo ?: "N/A")
                 SheetDetailRow("Student Email", profile?.studentEmail ?: "N/A")
                 SheetDetailRow("Student Phone", profile?.studentPhoneNo ?: "N/A")

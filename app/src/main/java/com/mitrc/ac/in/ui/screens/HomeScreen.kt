@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -30,6 +31,7 @@ import com.mitrc.ac.`in`.data.PortalRepository
 import com.mitrc.ac.`in`.ui.theme.Gold
 import com.mitrc.ac.`in`.ui.theme.TextPrimary
 import com.mitrc.ac.`in`.ui.theme.TextSecondary
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 enum class StaffRole {
@@ -133,8 +135,8 @@ fun HomeScreen(onSignedOut: () -> Unit) {
             return@LaunchedEffect
         }
 
-        Log.w(TAG, "No role matched for uid=$userUid, email=$userEmail. Defaulting to STUDENT")
-        resolvedRole = StaffRole.STUDENT
+        Log.w(TAG, "No role matched for uid=$userUid, email=$userEmail. Blocking portal access")
+        resolvedRole = StaffRole.NOT_LINKED
     }
 
     when (resolvedRole) {
@@ -161,6 +163,18 @@ fun HomeScreen(onSignedOut: () -> Unit) {
 @Composable
 private fun NotLinkedScreen(onSignedOut: () -> Unit) {
     val scope = rememberCoroutineScope()
+    var signingOut by remember { mutableStateOf(false) }
+
+    // Unlinked accounts never reach a portal: sign them out automatically within 3 seconds.
+    LaunchedEffect(Unit) {
+        delay(2500)
+        if (!signingOut) {
+            signingOut = true
+            AuthRepository.signOut()
+            onSignedOut()
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -175,22 +189,37 @@ private fun NotLinkedScreen(onSignedOut: () -> Unit) {
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Your account isn't linked to any portal record yet. Contact the admin panel to activate your ID.",
+            text = "Your account isn't linked to any student or staff record. You'll be signed out automatically. Contact the admin panel to activate your ID.",
             style = MaterialTheme.typography.bodyMedium,
             color = TextSecondary,
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(24.dp))
-        Button(
-            onClick = {
-                scope.launch {
-                    AuthRepository.signOut()
-                    onSignedOut()
-                }
-            },
-            shape = RoundedCornerShape(14.dp)
-        ) {
-            Text("Sign Out")
+        if (signingOut) {
+            CircularProgressIndicator(
+                color = Gold,
+                strokeWidth = 2.5.dp,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = "Signing out...",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary
+            )
+        } else {
+            Button(
+                onClick = {
+                    signingOut = true
+                    scope.launch {
+                        AuthRepository.signOut()
+                        onSignedOut()
+                    }
+                },
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text("Sign Out Now")
+            }
         }
     }
 }

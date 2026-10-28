@@ -80,6 +80,7 @@ import com.mitrc.ac.`in`.auth.AdminRepository
 import com.mitrc.ac.`in`.auth.AuthRepository
 import com.mitrc.ac.`in`.data.OnboardingStore
 import com.mitrc.ac.`in`.data.PasswordResetStore
+import com.mitrc.ac.`in`.data.PortalRepository
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
 import com.mitrc.ac.`in`.ui.theme.ErrorRed
 import com.mitrc.ac.`in`.ui.theme.Gold
@@ -143,40 +144,31 @@ fun LoginScreen(onLoggedIn: () -> Unit, onAdminLoggedIn: () -> Unit) {
                     // finished issuing yet, which surfaces as a JWT error on first login.
                     runCatching { user.getIdToken(true).await() }
 
-                    if (!isStaff) {
-                        loading = false
-                        onLoggedIn()
-                    } else {
-                        when (val gate = AdminRepository.resolveStaffGate(user.uid, user.email)) {
-                            AdminRepository.StaffGate.Admin -> {
-                                loading = false
-                                onAdminLoggedIn()
-                            }
+                    when (resolveAccountLink(user.uid, user.email, isStaff)) {
+                        AccountLink.ADMIN -> {
+                            loading = false
+                            onAdminLoggedIn()
+                        }
 
-                            AdminRepository.StaffGate.Staff -> {
-                                loading = false
-                                onLoggedIn()
-                            }
+                        AccountLink.STAFF, AccountLink.STUDENT -> {
+                            loading = false
+                            onLoggedIn()
+                        }
 
-                            AdminRepository.StaffGate.Neither -> {
-                                // faculty_master (and the other staff probes) are gated by the
-                                // `is_college_user()` RLS policy, so a legitimate staff account can
-                                // still come back unmatched here - e.g. an unlinked firebase_uid or a
-                                // slow first token. Signing out and hard-blocking locked staff out of
-                                // the portal. Sign in anyway and let HomeScreen's role router link the
-                                // account and pick the right portal; RLS still protects every row.
-                                Log.i(TAG, "Staff gate unmatched for uid=${user.uid}; deferring role to HomeScreen")
-                                loading = false
-                                onLoggedIn()
-                            }
+                        AccountLink.UNKNOWN -> {
+                            // Transient auth/RLS/network failure while checking. Don't block a
+                            // possibly valid account here; HomeScreen re-resolves it and enforces
+                            // the linked-account rule with an automatic sign-out.
+                            Log.w(TAG, "Account link check failed for uid=${user.uid}; deferring to HomeScreen")
+                            loading = false
+                            onLoggedIn()
+                        }
 
-                            is AdminRepository.StaffGate.Failed -> {
-                                // Transient auth/RLS/network failure while checking - the portal's own
-                                // error recovery handles it, so don't bounce the user back to login.
-                                Log.w(TAG, "Staff gate check failed (${gate.reason}); deferring role to HomeScreen")
-                                loading = false
-                                onLoggedIn()
-                            }
+                        AccountLink.NOT_LINKED -> {
+                            Log.i(TAG, "Account uid=${user.uid} is not linked to student or staff records; blocking login")
+                            AuthRepository.signOut()
+                            loading = false
+                            error = "This account isn't linked to any student or staff record. Contact the admin to activate it."
                         }
                     }
                 },
@@ -691,3 +683,28 @@ private fun mitrcFieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedContainerColor = SurfaceWhite,
     focusedContainerColor = SurfaceWhite
 )
+
+private enum class AccountLink { ADMIN, STAFF, STUDENT, NOT_LINKED, UNKNOWN }
+
+/**
+ * Decides whether a Firebase account may enter the app. Student-chip logins check the student
+ * record first (one query); staff-chip logins run the staff probes first. A definitive "no row
+ * anywhere" blocks the login; a transient failure is left to HomeScreen to resolve.
+ */
+private suspend fun resolveAccountLink(uid: String, email: String?, staffFirst: Boolean): AccountLink {
+    suspend fun staffGate(): AccountLink = when (val gate = AdminRepository.resolveStaffGate(uid, email)) {
+        AdminRepository.StaffGate.Admin -> AccountLink.ADMIN
+        AdminRepository.StaffGate.Staff -> AccountLink.STAFF
+        AdminRepository.StaffGate.Neither -> AccountLink.NOT_LINKED
+        is AdminRepository.StaffGate.Failed -> AccountLink.UNKNOWN
+    }
+
+    if (staffFirst) {
+        val staff = staffGate()
+        if (staff != AccountLink.NOT_LINKED) return staff
+        return if (PortalRepository.getStudentProfile(uid).getOrNull() != null) AccountLink.STUDENT else AccountLink.NOT_LINKED
+    }
+
+    if (PortalRepository.getStudentProfile(uid).getOrNull() != null) return AccountLink.STUDENT
+    return staffGate()
+}
