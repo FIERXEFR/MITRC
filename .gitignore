@@ -3,34 +3,63 @@
 build/
 .kotlin/
 local.properties
+gradle-app.setting
 
 # Android Studio / IDE
 .idea/
 .vscode/
+.fleet/
 *.iml
+*.ipr
+*.iws
 captures/
+out/
 
 # Native build artifacts
 .externalNativeBuild/
 .cxx/
+obj/
 
 # Build outputs (never push)
 *.apk
 *.aab
 *.ap_
+*.apks
+*.xapk
 app/release/
+*.hprof
+*.prof
 
-../AndroidStudioProjects/FIERXETOOL/
-../AndroidStudioProjects/FIERXETOOL2/
-# Signing keystores (create locally, never commit)
+# Signing keystores and local secrets (create locally, never commit)
 *.jks
 *.keystore
+*.p12
+*.pfx
+keystore.properties
+signing.properties
+secrets.properties
+.env
+.env.*
+!.env.example
 
 # Supabase local CLI
 supabase/.temp/
+supabase/.branches/
 supabase/.env
+supabase/.env.*
+node_modules/
+
+# Firebase CLI
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Local scratch workspace
+scratch/
 
 # OS junk
 .DS_Store
 Thumbs.db
+Desktop.ini
 *.log
