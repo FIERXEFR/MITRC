@@ -2,6 +2,7 @@ package com.mitrc.ac.`in`.data
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Single source of truth for every Supabase (PostgREST) table, view, and row model.
@@ -360,12 +361,28 @@ data class NoteInsertRow(
 
 @Serializable
 data class AppUpdateRow(
-    @SerialName("version_code") val versionCode: Int = 0,
-    @SerialName("version_name") val versionName: String = "",
-    @SerialName("min_version_code") val minVersionCode: Int = 0,
-    @SerialName("apk_url") val apkUrl: String? = null,
-    @SerialName("changelog") val changelog: String? = null,
-    @SerialName("is_mandatory") val isMandatory: Boolean = false,
+    @SerialName("id") val id: Long = 1,
+    @SerialName("is_bigpacket") val isBigPacket: Boolean = false,
+    @SerialName("small_version") val smallVersion: String? = null,
+    @SerialName("big_version") val bigVersion: String? = null,
+    @SerialName("is_force") val isForce: Boolean = true,
+    @SerialName("download_url") val downloadUrl: String? = null,
+    @SerialName("app_status") val appStatus: String? = "inactive",
+    @SerialName("dialog_title") val dialogTitle: String? = null,
+    @SerialName("dialog_body") val dialogBody: String? = null,
+    @SerialName("whats_new") val whatsNew: String? = null,
+    @SerialName("is_maintenance") val isMaintenance: Boolean = false,
+    @SerialName("maintenance_title") val maintenanceTitle: String? = null,
+    @SerialName("maintenance_message") val maintenanceMessage: String? = null,
+    @SerialName("maintenance_until") val maintenanceUntil: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
+    @SerialName("updated_by") val updatedBy: String? = null,
+    /**
+     * Server-driven config for small packets. It is stored locally when a new small version is
+     * accepted. The app cannot change compiled code without a new APK; this payload is the
+     * supported way to change flags, copy, links and other wired-in behavior without a version bump.
+     */
+    @SerialName("small_payload") val smallPayload: JsonObject = JsonObject(emptyMap()),
 )
 
 // ---------------------------------------------------------------------------------------------

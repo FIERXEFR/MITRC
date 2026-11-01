@@ -22,6 +22,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.mitrc.ac.`in`.ui.components.AppUpdateGate
 import com.mitrc.ac.`in`.ui.components.OfflineDialog
 import com.mitrc.ac.`in`.ui.components.rememberIsOnline
 import com.mitrc.ac.`in`.ui.screens.HomeScreen
@@ -128,6 +129,10 @@ fun MitrcRoot(
                 )
             }
         }
+
+        // Maintenance and release checks run above the normal navigation. The admin activity
+        // does not include this gate so an admin can still turn maintenance off.
+        AppUpdateGate()
 
         // Splash and onboarding are branding/education screens with no server calls, so they
         // stay usable offline. Everything else needs a live connection.

@@ -49,6 +49,7 @@ import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.SupervisorAccount
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.Work
@@ -128,6 +129,12 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val user = AuthRepository.currentUser
+
+    var showAppControl by remember { mutableStateOf(false) }
+    if (showAppControl) {
+        AppUpdateAdminScreen(onBack = { showAppControl = false })
+        return
+    }
 
     var selectedTab by remember { mutableStateOf(AdminEntryTab.STUDENT) }
     var tabSwitching by remember { mutableStateOf(false) }
@@ -356,19 +363,39 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
                             }
                         }
 
-                        Surface(
-                            shape = CircleShape,
-                            color = Gold.copy(alpha = 0.15f),
-                            border = BorderStroke(1.5.dp, GoldLight),
-                            modifier = Modifier.size(42.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Outlined.AdminPanelSettings,
-                                    contentDescription = "Admin",
-                                    tint = GoldLight,
-                                    modifier = Modifier.size(22.dp)
-                                )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Gold.copy(alpha = 0.15f),
+                                border = BorderStroke(1.5.dp, GoldLight),
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clickable { showAppControl = true }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Outlined.SystemUpdate,
+                                        contentDescription = "App updates and maintenance",
+                                        tint = GoldLight,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                shape = CircleShape,
+                                color = Gold.copy(alpha = 0.15f),
+                                border = BorderStroke(1.5.dp, GoldLight),
+                                modifier = Modifier.size(42.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Outlined.AdminPanelSettings,
+                                        contentDescription = "Admin",
+                                        tint = GoldLight,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
                             }
                         }
                     }

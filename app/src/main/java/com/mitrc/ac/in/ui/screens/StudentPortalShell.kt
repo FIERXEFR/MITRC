@@ -106,6 +106,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -166,55 +168,80 @@ private suspend fun loadPortalData(userUid: String): StudentPortalData {
         ?: AuthRepository.currentUser?.displayName?.trim()?.takeIf { it.isNotEmpty() }
 
     val classId = profile?.classId ?: 0
-    val subjects = if (classId > 0) {
-        PortalRepository.getStudentSubjects(classId).getOrDefault(emptyList())
-    } else {
-        emptyList()
-    }
-
-    // Only needed for the lock / PTM screen; skipped for an active profile so the extra
-    // coordinator lookup never costs anything on the normal path.
-    val coordinator = if (profile?.isLocked == true || profile?.isPtm == true) {
-        PortalRepository.getStudentCoordinator(
-            classId = profile.classId,
-            courseName = profile.course,
-            semester = profile.semester
-        ).getOrNull()
-    } else {
-        null
-    }
-
-    val timetable = PortalRepository.getMyTimetable(classId.takeIf { it > 0 }).getOrDefault(emptyList())
-
-    // Six months of day-by-day attendance powers the calendar's month navigation. The table pair
-    // is empty in fresh deployments, so this returns [] and the calendar falls back to holidays.
     val today = LocalDate.now()
-    val dailyAttendance = PortalRepository.getStudentDailyAttendance(
-        uid = userUid,
-        fromIsoDate = today.minusMonths(6).withDayOfMonth(1).toString(),
-        toIsoDate = today.toString()
-    ).getOrDefault(emptyList())
 
-    return StudentPortalData(
-        profile = profile,
-        subjects = subjects,
-        attendance = PortalRepository.getStudentAttendance(userUid).getOrDefault(emptyList()),
-        marks = PortalRepository.getStudentMarks(userUid).getOrDefault(emptyList()),
-        timetable = timetable,
-        dailyAttendance = dailyAttendance,
-        faculty = subjects,
-        // Notes live in their own table; the mapper drops rows outside this student's subjects.
-        pdfNotes = PortalRepository.getPublishedNotes(userUid, classId.takeIf { it > 0 })
-            .getOrDefault(emptyList())
-            .toPortalPdfNotes(subjects = subjects),
-        coordinator = coordinator,
-        displayName = displayName,
-        error = if (profileResult.isFailure) {
-            profileResult.exceptionOrNull()?.message ?: "Failed to load your student profile."
-        } else {
-            null
+    // Everything below only needs the profile (for classId) and is independent of the other
+    // calls. Run them concurrently: before this change the shell fired eight or nine requests
+    // one after another, so the full-screen skeleton stayed up for the sum of every round trip.
+    return coroutineScope {
+        val subjectsDeferred = async {
+            if (classId > 0) {
+                PortalRepository.getStudentSubjects(classId).getOrDefault(emptyList())
+            } else {
+                emptyList()
+            }
         }
-    )
+
+        // Only needed for the lock / PTM screen; skipped for an active profile so the extra
+        // coordinator lookup never costs anything on the normal path.
+        val coordinatorDeferred = async {
+            if (profile?.isLocked == true || profile?.isPtm == true) {
+                PortalRepository.getStudentCoordinator(
+                    classId = profile.classId,
+                    courseName = profile.course,
+                    semester = profile.semester
+                ).getOrNull()
+            } else {
+                null
+            }
+        }
+
+        val timetableDeferred = async {
+            PortalRepository.getMyTimetable(classId.takeIf { it > 0 }).getOrDefault(emptyList())
+        }
+
+        // Six months of day-by-day attendance powers the calendar's month navigation. The table
+        // pair is empty in fresh deployments, so this returns [] and the calendar falls back to
+        // holidays.
+        val dailyAttendanceDeferred = async {
+            PortalRepository.getStudentDailyAttendance(
+                uid = userUid,
+                fromIsoDate = today.minusMonths(6).withDayOfMonth(1).toString(),
+                toIsoDate = today.toString()
+            ).getOrDefault(emptyList())
+        }
+
+        val attendanceDeferred = async {
+            PortalRepository.getStudentAttendance(userUid).getOrDefault(emptyList())
+        }
+        val marksDeferred = async {
+            PortalRepository.getStudentMarks(userUid).getOrDefault(emptyList())
+        }
+        val notesDeferred = async {
+            // Notes live in their own table; the mapper drops rows outside this student's subjects.
+            PortalRepository.getPublishedNotes(userUid, classId.takeIf { it > 0 })
+                .getOrDefault(emptyList())
+        }
+
+        val subjects = subjectsDeferred.await()
+        StudentPortalData(
+            profile = profile,
+            subjects = subjects,
+            attendance = attendanceDeferred.await(),
+            marks = marksDeferred.await(),
+            timetable = timetableDeferred.await(),
+            dailyAttendance = dailyAttendanceDeferred.await(),
+            faculty = subjects,
+            pdfNotes = notesDeferred.await().toPortalPdfNotes(subjects = subjects),
+            coordinator = coordinatorDeferred.await(),
+            displayName = displayName,
+            error = if (profileResult.isFailure) {
+                profileResult.exceptionOrNull()?.message ?: "Failed to load your student profile."
+            } else {
+                null
+            }
+        )
+    }
 }
 
 /**
@@ -522,10 +549,11 @@ internal fun PortalHeroHeader(
     name: String?,
     scrolledPx: () -> Float,
     showAvatar: Boolean = true,
+    unreadCount: Int = sampleNotifications().count { it.unread },
     onBellClick: () -> Unit,
     onAvatarClick: () -> Unit
 ) {
-    val unread = remember { sampleNotifications().count { it.unread } }
+    val unread = unreadCount
 
     val headerShape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
     val verticalPad = 6.dp
@@ -752,67 +780,11 @@ private fun StudentBottomBar(
     selected: StudentTab,
     onSelect: (StudentTab) -> Unit
 ) {
-    Surface(
-        color = PortalCard,
-        shadowElevation = 16.dp
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 14.dp, vertical = 10.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(PortalCardAlt, RoundedCornerShape(18.dp))
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            StudentTab.entries.forEach { item ->
-                val isSelected = item == selected
-                val scale by animateFloatAsState(
-                    targetValue = if (isSelected) 1.06f else 1f,
-                    animationSpec = tween(240),
-                    label = "navScale"
-                )
-                val container by animateColorAsState(
-                    targetValue = if (isSelected) PortalBlue else Color.Transparent,
-                    animationSpec = tween(240),
-                    label = "navBg"
-                )
-                val content by animateColorAsState(
-                    targetValue = if (isSelected) Color.White else PortalTextSecondary,
-                    animationSpec = tween(240),
-                    label = "navContent"
-                )
-
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(13.dp))
-                        .background(container)
-                        .clickable { onSelect(item) }
-                        .padding(vertical = 9.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        item.icon,
-                        contentDescription = item.label,
-                        tint = content,
-                        modifier = Modifier
-                            .size(22.dp)
-                            .scale(scale)
-                    )
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        text = item.label,
-                        fontSize = 11.sp,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                        color = content,
-                        maxLines = 1
-                    )
-                }
-            }
-        }
-    }
+    PortalBottomBar(
+        items = StudentTab.entries.map { PortalNavItem(label = it.label, icon = it.icon) },
+        selectedIndex = StudentTab.entries.indexOf(selected),
+        onSelect = { index -> onSelect(StudentTab.entries[index]) },
+    )
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -1,10 +1,17 @@
 package com.mitrc.ac.`in`.ui.screens
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,325 +23,560 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
-import androidx.compose.material.icons.outlined.Analytics
-import androidx.compose.material.icons.outlined.Assignment
-import androidx.compose.material.icons.outlined.Badge
-import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.Class
+import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.Dashboard
-import androidx.compose.material.icons.outlined.Group
-import androidx.compose.material.icons.outlined.HistoryEdu
-import androidx.compose.material.icons.outlined.MenuBook
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.Scaffold
+import androidx.compose.material.icons.outlined.FactCheck
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.google.firebase.auth.FirebaseAuth
 import com.mitrc.ac.`in`.auth.AuthRepository
+import com.mitrc.ac.`in`.data.ClassSubjectView
+import com.mitrc.ac.`in`.data.FacultyMasterRow
+import com.mitrc.ac.`in`.data.GreetingStore
+import com.mitrc.ac.`in`.data.PortalRepository
+import com.mitrc.ac.`in`.data.TeacherClassInfo
+import com.mitrc.ac.`in`.ui.theme.DividerSoft
 import com.mitrc.ac.`in`.ui.theme.Gold
-import com.mitrc.ac.`in`.ui.theme.Navy
-import com.mitrc.ac.`in`.ui.theme.NavySoft
+import com.mitrc.ac.`in`.ui.theme.NavyDeep
 import com.mitrc.ac.`in`.ui.theme.Slate
-import com.mitrc.ac.`in`.ui.theme.SuccessGreen
 import com.mitrc.ac.`in`.ui.theme.SurfaceWhite
-import com.mitrc.ac.`in`.ui.theme.TextPrimary
-import com.mitrc.ac.`in`.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 
-sealed class TeacherTab(val route: String, val label: String, val icon: ImageVector) {
-    data object Dashboard : TeacherTab("dashboard", "Overview", Icons.Outlined.Dashboard)
-    data object Academics : TeacherTab("academics", "Teaching", Icons.Outlined.HistoryEdu)
-    data object Mentees : TeacherTab("mentees", "Mentees", Icons.Outlined.Group)
-    data object Notes : TeacherTab("notes", "Resources", Icons.Outlined.MenuBook)
+internal enum class TeacherTab(
+    val label: String,
+    val icon: ImageVector,
+) {
+    Overview("Overview", Icons.Outlined.Dashboard),
+    Classroom("Classroom", Icons.Outlined.FactCheck),
+    Notices("Notices", Icons.Outlined.Campaign),
+    Settings("Settings", Icons.Outlined.Settings),
 }
 
 @Composable
 fun TeacherPortalShell(
     userUid: String,
-    onSignedOut: () -> Unit
+    onSignedOut: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var selectedTab by remember { mutableStateOf<TeacherTab>(TeacherTab.Dashboard) }
+    var selectedTabName by rememberSaveable { mutableStateOf(TeacherTab.Overview.name) }
+    val selectedTab = TeacherTab.entries.firstOrNull { it.name == selectedTabName } ?: TeacherTab.Overview
 
-    Scaffold(
-        bottomBar = {
-            NavigationBar(
-                containerColor = SurfaceWhite,
-                tonalElevation = 8.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                val tabs = listOf(
-                    TeacherTab.Dashboard,
-                    TeacherTab.Academics,
-                    TeacherTab.Mentees,
-                    TeacherTab.Notes
-                )
+    var classroomModeName by rememberSaveable { mutableStateOf(TeacherWorkMode.ATTENDANCE.name) }
+    val classroomMode = TeacherWorkMode.entries
+        .firstOrNull { it.name == classroomModeName }
+        ?: TeacherWorkMode.ATTENDANCE
 
-                tabs.forEach { tab ->
-                    val isSelected = selectedTab == tab
-                    NavigationBarItem(
-                        selected = isSelected,
-                        onClick = { selectedTab = tab },
-                        icon = {
-                            Icon(
-                                imageVector = tab.icon,
-                                contentDescription = tab.label,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        },
-                        label = {
-                            Text(
-                                text = tab.label,
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                            )
-                        },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Navy,
-                            selectedTextColor = Navy,
-                            indicatorColor = Gold.copy(alpha = 0.2f),
-                            unselectedIconColor = Color.Gray,
-                            unselectedTextColor = Color.Gray
-                        )
-                    )
-                }
+    var loading by remember { mutableStateOf(true) }
+    var teacher by remember { mutableStateOf<FacultyMasterRow?>(null) }
+    var subjects by remember { mutableStateOf<List<ClassSubjectView>>(emptyList()) }
+    var classInfo by remember { mutableStateOf<Map<Int, TeacherClassInfo>>(emptyMap()) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var reloadTick by remember { mutableIntStateOf(0) }
+    var selectedClassSubjectId by rememberSaveable { mutableIntStateOf(0) }
+
+    LaunchedEffect(userUid, reloadTick) {
+        loading = true
+        loadError = null
+
+        val email = FirebaseAuth.getInstance().currentUser?.email.orEmpty()
+        val profile = PortalRepository.getTeacherProfile(userUid).getOrNull()
+            ?: PortalRepository.getFacultyByUidOrEmail(userUid, email).getOrNull()
+
+        if (profile == null) {
+            teacher = null
+            subjects = emptyList()
+            classInfo = emptyMap()
+            loadError = "No faculty profile is linked to this account. Ask the admin to link your login to your faculty record."
+            loading = false
+            return@LaunchedEffect
+        }
+
+        teacher = profile
+        val assignmentResult = PortalRepository.getTeacherSubjects(profile.id)
+        val assignments = assignmentResult
+            .getOrDefault(emptyList())
+            .filter { it.classSubjectId > 0 && it.classId > 0 }
+            .distinctBy { it.classSubjectId }
+
+        subjects = assignments
+        classInfo = if (assignments.isEmpty()) {
+            emptyMap()
+        } else {
+            PortalRepository.getClassInfo(assignments.map { it.classId })
+                .getOrDefault(emptyMap())
+        }
+
+        if (assignmentResult.isFailure) {
+            loadError = assignmentResult.exceptionOrNull()?.message
+                ?.ifBlank { "Your class assignments could not be loaded." }
+                ?: "Your class assignments could not be loaded."
+        } else if (assignments.isNotEmpty() && assignments.none { it.classSubjectId == selectedClassSubjectId }) {
+            selectedClassSubjectId = assignments.first().classSubjectId
+        }
+
+        loading = false
+    }
+
+    val selectedSubject = subjects.firstOrNull { it.classSubjectId == selectedClassSubjectId }
+        ?: subjects.firstOrNull()
+    val profile = teacher
+    val greeting = remember { GreetingStore.greeting() }
+
+    // Same fold gesture as the student portal: the hero collapses through nested scroll instead
+    // of mirroring list offsets, so the content never double-hitches at the end of a scroll.
+    val foldDistancePx = with(LocalDensity.current) { 96.dp.toPx() }
+    val headerOffset = remember { mutableFloatStateOf(0f) }
+    val headerNestedScroll = remember(foldDistancePx) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val delta = available.y
+                if (delta == 0f) return Offset.Zero
+                val next = (headerOffset.floatValue - delta).coerceIn(0f, foldDistancePx)
+                val used = next - headerOffset.floatValue
+                if (used == 0f) return Offset.Zero
+                headerOffset.floatValue = next
+                return Offset(0f, -used)
             }
         }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Slate)
-                .padding(innerPadding)
-        ) {
-            AnimatedContent(
-                targetState = selectedTab,
-                transitionSpec = {
-                    fadeIn().togetherWith(fadeOut())
-                },
-                label = "TeacherPortalContent"
-            ) { targetTab ->
-                when (targetTab) {
-                    TeacherTab.Dashboard -> {
-                        TeacherDashboardView(
-                            onSignOut = {
-                                scope.launch {
-                                    AuthRepository.signOut()
-                                    onSignedOut()
-                                }
+    }
+    LaunchedEffect(selectedTab, classroomModeName) { headerOffset.floatValue = 0f }
+
+    val headerTitle = when {
+        loading -> ""
+        selectedTab == TeacherTab.Overview -> profile?.name
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { "$greeting, ${firstNameOf(it)} \ud83d\udc4b" }
+            ?: "Teacher portal"
+        else -> selectedTab.label
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Slate),
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            PortalHeroHeader(
+                overline = "TEACHER PORTAL",
+                title = headerTitle,
+                name = profile?.name,
+                scrolledPx = { headerOffset.floatValue },
+                showAvatar = selectedTab != TeacherTab.Settings,
+                unreadCount = 0,
+                onBellClick = { selectedTabName = TeacherTab.Notices.name },
+                onAvatarClick = { selectedTabName = TeacherTab.Settings.name },
+            )
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .nestedScroll(headerNestedScroll),
+            ) {
+                when {
+                    loading -> TeacherPortalSkeleton()
+
+                    profile == null -> TeacherProfileUnavailable(
+                        message = loadError ?: "Your faculty workspace is not available right now.",
+                        onRetry = { reloadTick++ },
+                        onSignOut = {
+                            scope.launch {
+                                AuthRepository.signOut()
+                                onSignedOut()
                             }
-                        )
-                    }
-                    TeacherTab.Academics -> {
-                        Box(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-                            TeacherAttendanceView(userUid = userUid)
+                        },
+                    )
+
+                    subjects.isEmpty() -> TeacherNoAssignments(
+                        message = loadError,
+                        onRetry = { reloadTick++ },
+                        onSignOut = {
+                            scope.launch {
+                                AuthRepository.signOut()
+                                onSignedOut()
+                            }
+                        },
+                    )
+
+                    else -> AnimatedContent(
+                        targetState = selectedTab,
+                        transitionSpec = {
+                            val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                            (slideInHorizontally(
+                                animationSpec = tween(240, easing = FastOutSlowInEasing),
+                                initialOffsetX = { direction * it / 8 },
+                            ) + fadeIn(tween(210))) togetherWith
+                                (slideOutHorizontally(
+                                    animationSpec = tween(190, easing = FastOutSlowInEasing),
+                                    targetOffsetX = { -direction * it / 10 },
+                                ) + fadeOut(tween(150)))
+                        },
+                        label = "teacherTab",
+                        modifier = Modifier.fillMaxSize(),
+                    ) { tab ->
+                        when (tab) {
+                            TeacherTab.Overview -> TeacherOverviewView(
+                                teacher = profile,
+                                subjects = subjects,
+                                selectedSubject = selectedSubject,
+                                classInfo = classInfo,
+                                onSelectSubject = { selectedClassSubjectId = it.classSubjectId },
+                                onOpenClassroom = {
+                                    classroomModeName = TeacherWorkMode.ATTENDANCE.name
+                                    selectedTabName = TeacherTab.Classroom.name
+                                },
+                                onOpenMaterials = {
+                                    classroomModeName = TeacherWorkMode.MATERIALS.name
+                                    selectedTabName = TeacherTab.Classroom.name
+                                },
+                                onOpenNotices = { selectedTabName = TeacherTab.Notices.name },
+                                onSignOut = {
+                                    scope.launch {
+                                        AuthRepository.signOut()
+                                        onSignedOut()
+                                    }
+                                },
+                            )
+
+                            TeacherTab.Classroom -> TeacherClassroomView(
+                                subjects = subjects,
+                                selectedSubject = selectedSubject,
+                                classInfo = classInfo,
+                                onSelectSubject = { selectedClassSubjectId = it.classSubjectId },
+                                activeMode = classroomMode,
+                                onModeChange = { classroomModeName = it.name },
+                            )
+
+                            TeacherTab.Notices -> TeacherNoticesView(
+                                subjects = subjects,
+                                selectedSubject = selectedSubject,
+                                classInfo = classInfo,
+                                onSelectSubject = { selectedClassSubjectId = it.classSubjectId },
+                            )
+
+                            TeacherTab.Settings -> TeacherSettingsView(
+                                teacher = profile,
+                                subjects = subjects,
+                                selectedSubject = selectedSubject,
+                                classInfo = classInfo,
+                                onSelectSubject = { selectedClassSubjectId = it.classSubjectId },
+                                onSignOut = {
+                                    scope.launch {
+                                        AuthRepository.signOut()
+                                        onSignedOut()
+                                    }
+                                },
+                            )
                         }
-                    }
-                    TeacherTab.Mentees -> {
-                        PlaceholderView("Mentee Management & Counseling")
-                    }
-                    TeacherTab.Notes -> {
-                        PlaceholderView("Study Material & Notes Upload")
                     }
                 }
             }
+
+            PortalBottomBar(
+                items = TeacherTab.entries.map { PortalNavItem(label = it.label, icon = it.icon) },
+                selectedIndex = TeacherTab.entries.indexOf(selectedTab),
+                onSelect = { index -> selectedTabName = TeacherTab.entries[index].name },
+            )
         }
     }
 }
 
 @Composable
-fun TeacherDashboardView(onSignOut: () -> Unit) {
+private fun TeacherPortalSkeleton() {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(24.dp)
+            .padding(horizontal = 16.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text(
-            text = "TEACHER CLASSROOM DESK",
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            color = TextSecondary,
-            letterSpacing = 1.2.sp
-        )
-        Spacer(Modifier.height(14.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            TeacherMetricCard(
-                title = "Today's Lectures",
-                value = "3 Classes",
-                subtext = "Next: 11:30 AM (Lab 3)",
-                icon = Icons.Outlined.Class,
-                color = NavySoft,
-                modifier = Modifier.weight(1f)
-            )
-            TeacherMetricCard(
-                title = "Mentee Strength",
-                value = "22 Students",
-                subtext = "Weekly meet pending",
-                icon = Icons.Outlined.Badge,
-                color = SuccessGreen,
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Spacer(Modifier.height(24.dp))
-
-        Text(
-            text = "CLASSROOM ACTIONS",
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            color = TextSecondary,
-            letterSpacing = 1.2.sp
-        )
-        Spacer(Modifier.height(12.dp))
-
-        Card(
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Assignment, contentDescription = null, tint = Navy, modifier = Modifier.size(24.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text(text = "Quick Attendance", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                        Text(text = "Launch batch entry for current period", fontSize = 12.sp, color = TextSecondary)
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        Card(
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Analytics, contentDescription = null, tint = Navy, modifier = Modifier.size(24.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text(text = "Internal Assessment", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                        Text(text = "Record marks for Mid-term or UTs", fontSize = 12.sp, color = TextSecondary)
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(32.dp))
-
-        Button(
-            onClick = onSignOut,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(54.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFFEE2E2),
-                contentColor = Color(0xFFDC2626)
-            )
-        ) {
-            Icon(Icons.AutoMirrored.Outlined.Logout, null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(10.dp))
-            Text(text = "Sign Out from Portal", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-        }
-        
-        Spacer(Modifier.height(20.dp))
-    }
-}
-
-@Composable
-private fun TeacherMetricCard(
-    title: String,
-    value: String,
-    subtext: String,
-    icon: ImageVector,
-    color: Color,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        modifier = modifier
-    ) {
-        Column(modifier = Modifier.padding(18.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .background(color.copy(alpha = 0.1f), RoundedCornerShape(10.dp)),
-                contentAlignment = Alignment.Center
+                Modifier
+                    .width(74.dp)
+                    .height(10.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .shimmerEffect(),
+            )
+            Box(
+                Modifier
+                    .width(168.dp)
+                    .height(22.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .shimmerEffect(),
+            )
+            Box(
+                Modifier
+                    .width(236.dp)
+                    .height(12.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .shimmerEffect(),
+            )
+        }
+
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = NavyDeep,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(54.dp)
+                            .clip(CircleShape)
+                            .background(Gold.copy(alpha = 0.18f)),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        Box(
+                            Modifier
+                                .width(88.dp)
+                                .height(9.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color.White.copy(alpha = 0.16f)),
+                        )
+                        Box(
+                            Modifier
+                                .width(160.dp)
+                                .height(18.dp)
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(Color.White.copy(alpha = 0.2f)),
+                        )
+                        Box(
+                            Modifier
+                                .width(210.dp)
+                                .height(10.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color.White.copy(alpha = 0.12f)),
+                        )
+                    }
+                }
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(Color.White.copy(alpha = 0.1f)),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.White.copy(alpha = 0.1f)),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        Box(
+                            Modifier
+                                .width(74.dp)
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color.White.copy(alpha = 0.13f)),
+                        )
+                        Box(
+                            Modifier
+                                .fillMaxWidth(0.78f)
+                                .height(12.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color.White.copy(alpha = 0.18f)),
+                        )
+                    }
+                    Box(
+                        Modifier
+                            .size(20.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.1f)),
+                    )
+                }
             }
-            Spacer(Modifier.height(16.dp))
-            Text(text = value, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-            Spacer(Modifier.height(4.dp))
-            Text(text = title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
-            Text(text = subtext, fontSize = 11.sp, color = TextSecondary.copy(alpha = 0.8f))
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            repeat(3) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = SurfaceWhite,
+                    border = BorderStroke(1.dp, DividerSoft),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        Box(
+                            Modifier
+                                .width(30.dp)
+                                .height(20.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .shimmerEffect(),
+                        )
+                        Box(
+                            Modifier
+                                .fillMaxWidth(0.72f)
+                                .height(10.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .shimmerEffect(),
+                        )
+                        Box(
+                            Modifier
+                                .fillMaxWidth(0.5f)
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .shimmerEffect(),
+                        )
+                    }
+                }
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            repeat(3) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = SurfaceWhite,
+                    border = BorderStroke(1.dp, DividerSoft),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .shimmerEffect(),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Box(
+                                Modifier
+                                    .width(138.dp)
+                                    .height(12.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .shimmerEffect(),
+                            )
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(0.68f)
+                                    .height(9.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .shimmerEffect(),
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun PlaceholderView(title: String) {
+private fun TeacherProfileUnavailable(
+    message: String,
+    onRetry: () -> Unit,
+    onSignOut: () -> Unit,
+) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
+            .background(Slate),
+        contentAlignment = Alignment.Center,
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                Icons.Outlined.Analytics,
-                contentDescription = null,
-                modifier = Modifier.size(64.dp),
-                tint = Navy.copy(alpha = 0.3f)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            TeacherEmptyState(
+                icon = Icons.Outlined.Person,
+                title = "Faculty profile not linked",
+                body = message,
+                actionLabel = "Try again",
+                onAction = onRetry,
             )
-            Spacer(Modifier.height(16.dp))
-            Text(
-                text = title,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = Navy.copy(alpha = 0.6f)
+            TeacherPrimaryButton(
+                label = "Sign out",
+                icon = Icons.AutoMirrored.Outlined.Logout,
+                onClick = onSignOut,
             )
-            Text(
-                text = "Module coming soon in the next update.",
-                fontSize = 13.sp,
-                color = Color.Gray
+        }
+    }
+}
+
+@Composable
+private fun TeacherNoAssignments(
+    message: String?,
+    onRetry: () -> Unit,
+    onSignOut: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Slate),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            TeacherEmptyState(
+                icon = Icons.Outlined.FactCheck,
+                title = "No classes assigned",
+                body = message?.takeIf { it.isNotBlank() }
+                    ?: "Your faculty account is active, but no class or subject is assigned yet. Ask the admin to add your teaching assignment.",
+                actionLabel = "Refresh",
+                onAction = onRetry,
+            )
+            TeacherPrimaryButton(
+                label = "Sign out",
+                icon = Icons.AutoMirrored.Outlined.Logout,
+                onClick = onSignOut,
             )
         }
     }

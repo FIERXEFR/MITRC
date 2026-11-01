@@ -13,7 +13,6 @@ import com.mitrc.ac.`in`.ui.screens.SplashContent
 import com.mitrc.ac.`in`.ui.theme.MITRCTheme
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 class SplashActivity : ComponentActivity() {
 
@@ -52,8 +51,9 @@ class SplashActivity : ComponentActivity() {
 
         lifecycleScope.launch {
             if (loggedIn) {
-                // Bounded so a dead network can never strand the user on the splash screen.
-                val isAdmin = withTimeoutOrNull(ADMIN_CHECK_TIMEOUT_MS) { adminCheck.await() } ?: false
+                // The splash animation already gave the admin lookup its full 1.5s window.
+                // Never hold the splash open longer for a network call.
+                val isAdmin = if (adminCheck.isCompleted) adminCheck.await() else false
                 if (isFinishing) return@launch
                 if (isAdmin) {
                     startActivity(Intent(this@SplashActivity, AdminPanelActivity::class.java))
@@ -77,9 +77,5 @@ class SplashActivity : ComponentActivity() {
             overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
             finish()
         }
-    }
-
-    private companion object {
-        const val ADMIN_CHECK_TIMEOUT_MS = 4_000L
     }
 }

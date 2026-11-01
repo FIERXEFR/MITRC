@@ -1,6 +1,7 @@
 package com.mitrc.ac.`in`.ui.screens
 
 import android.util.Log
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -68,13 +69,31 @@ fun HomeScreen(onSignedOut: () -> Unit) {
         val portals = PortalRepository.getMyPortals().getOrNull()
         Log.d(TAG, "my_portals: $portals")
 
-        // 1. Check if user is a Coordinator FIRST
-        if (portals?.isCoordinator == true) {
-            Log.i(TAG, "Role resolved as COORDINATOR via my_portals")
-            resolvedRole = StaffRole.COORDINATOR
-            return@LaunchedEffect
+        // `my_portals` is the single authoritative role RPC. When it succeeds, trust its flags
+        // and return immediately; the old fallback probes (coordinator classes, staff directory,
+        // faculty lookup, student profile) were only needed when that RPC was broken or a row had
+        // not been linked yet. Running them for every student added four or five serial requests
+        // before the skeleton could even start.
+        if (portals != null) {
+            if (portals.isCoordinator) {
+                Log.i(TAG, "Role resolved as COORDINATOR via my_portals")
+                resolvedRole = StaffRole.COORDINATOR
+                return@LaunchedEffect
+            }
+            if (portals.isTeacher || portals.isFaculty || portals.isMentor || portals.isHod) {
+                Log.i(TAG, "Role resolved as TEACHER via my_portals")
+                resolvedRole = StaffRole.TEACHER
+                return@LaunchedEffect
+            }
+            if (portals.isStudent) {
+                Log.i(TAG, "Role resolved as STUDENT via my_portals")
+                resolvedRole = StaffRole.STUDENT
+                return@LaunchedEffect
+            }
         }
 
+        // Fallbacks for a failed `my_portals` call or an older deployment whose RPC does not
+        // expose a role yet.
         val myClassesRes = PortalRepository.getMyCoordinatorClasses()
         val myClasses = myClassesRes.getOrNull()
         Log.d(TAG, "v_my_coordinator_classes rows=${myClasses?.size}")
@@ -101,13 +120,6 @@ fun HomeScreen(onSignedOut: () -> Unit) {
         if (staffRow != null && staffRow.isCoordinator) {
             Log.i(TAG, "Role resolved as COORDINATOR via v_staff_directory (isCoordinator=true)")
             resolvedRole = StaffRole.COORDINATOR
-            return@LaunchedEffect
-        }
-
-        // 2. Check if user is a Teacher / Faculty SECOND
-        if (portals?.isTeacher == true || portals?.isFaculty == true || portals?.isMentor == true || portals?.isHod == true) {
-            Log.i(TAG, "Role resolved as TEACHER via my_portals")
-            resolvedRole = StaffRole.TEACHER
             return@LaunchedEffect
         }
 
@@ -141,9 +153,13 @@ fun HomeScreen(onSignedOut: () -> Unit) {
 
     when (resolvedRole) {
         StaffRole.LOADING -> {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Gold)
-            }
+            // The splash has already branded the launch. Keep the same portal background
+            // instead of flashing a progress spinner while the role RPC settles.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(PortalBackground)
+            )
         }
         StaffRole.STUDENT -> {
             StudentPortalShell(userUid = userUid, onSignedOut = onSignedOut)

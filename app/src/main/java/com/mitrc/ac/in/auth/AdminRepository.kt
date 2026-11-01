@@ -60,7 +60,48 @@ object AdminRepository {
     }
 
     suspend fun isAdmin(uid: String?, email: String?): Boolean {
-        return resolveStaffGate(uid, email) is StaffGate.Admin
+        val id = uid?.trim().orEmpty()
+        val mail = email?.trim().orEmpty().lowercase()
+        if (id.isEmpty() && mail.isEmpty()) return false
+
+        // Admin routing only needs the admin_db row. Do not run the full staff-resolution
+        // chain (link RPC + my_portals + faculty + staff directory probes): none of those can
+        // turn a non-admin into an admin, and together they can keep the splash on screen.
+        return try {
+            SupabaseManager.withAuthRetry {
+                val client = SupabaseManager.requireClient()
+                val rows = client.postgrest[SupabaseTableData.Tables.ADMIN_DB]
+                    .select {
+                        filter {
+                            if (id.isNotEmpty() && mail.isNotEmpty()) {
+                                or {
+                                    eq("uid", id)
+                                    ilike("email", mail)
+                                }
+                            } else if (id.isNotEmpty()) {
+                                eq("uid", id)
+                            } else {
+                                ilike("email", mail)
+                            }
+                        }
+                    }
+                    .decodeList<AdminDbRow>()
+
+                val match = rows.firstOrNull() ?: return@withAuthRetry false
+                if (id.isNotEmpty() && !match.uid.equals(id, ignoreCase = true)) {
+                    runCatching {
+                        client.postgrest[SupabaseTableData.Tables.ADMIN_DB]
+                            .update({ set("uid", id) }) {
+                                filter { ilike("email", match.email ?: mail) }
+                            }
+                    }
+                }
+                true
+            }
+        } catch (error: Throwable) {
+            Log.w(TAG, "admin_db check failed: ${error.message}")
+            false
+        }
     }
 
     suspend fun resolveStaffGate(uid: String?, email: String?): StaffGate {

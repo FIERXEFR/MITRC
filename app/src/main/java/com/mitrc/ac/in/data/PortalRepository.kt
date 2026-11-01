@@ -25,6 +25,27 @@ data class StudentCoordinatorContact(
     val phoneNo: String? = null,
 )
 
+/**
+ * The human-readable class context for a teacher assignment. `v_subject_teachers` is keyed by
+ * subject, so the class label is resolved separately from `classes -> branches -> courses`.
+ */
+data class TeacherClassInfo(
+    val classId: Int,
+    val courseName: String? = null,
+    val branchName: String? = null,
+    val semester: Int? = null,
+    val section: String? = null,
+    val academicYear: String? = null,
+) {
+    val label: String
+        get() = listOfNotNull(
+            courseName?.trim()?.takeIf { it.isNotEmpty() },
+            branchName?.trim()?.takeIf { it.isNotEmpty() },
+            semester?.let { "Sem $it" },
+            section?.trim()?.takeIf { it.isNotEmpty() }?.let { "Sec $it" },
+        ).joinToString("  ·  ").ifEmpty { "Class $classId" }
+}
+
 object PortalRepository {
 
     private const val TAG = "PortalRepository"
@@ -50,23 +71,11 @@ object PortalRepository {
         }
 
         if (fromView.isSuccess && fromView.getOrNull() != null) {
-            var prof = fromView.getOrThrow()!!
-            if (prof.name.isNullOrBlank()) {
-                // The view can serve a row whose `name` is still NULL (student row written before
-                // the name was captured). The `students` table is authoritative, so backfill it
-                // here rather than greeting the user as "Student" for the rest of the session.
-                val tabledName = runCatching {
-                    client.postgrest[SupabaseTableData.Tables.STUDENTS]
-                        .select { filter { eq("uid", uid) } }
-                        .decodeList<StudentRow>()
-                        .firstOrNull()?.name
-                }.getOrNull()
-                if (!tabledName.isNullOrBlank()) {
-                    Log.i(TAG, "Student name backfilled from students table")
-                    prof = prof.copy(name = tabledName)
-                }
-            }
+            val prof = fromView.getOrThrow()!!
             Log.i(TAG, "Student profile loaded from v_student_profiles (classId=${prof.classId})")
+            // The overlay query below already reads the authoritative `students` row, so it is
+            // also the place to backfill a missing name. Querying that row twice (once for the
+            // name, once for the lock state) added a full round trip to every cold start.
             return@query withStudentLockState(prof)
         } else {
             Log.w(TAG, "v_student_profiles query returned null/failed: ${fromView.exceptionOrNull()?.message}")
@@ -157,6 +166,7 @@ object PortalRepository {
         }.getOrNull() ?: return profile
 
         return profile.copy(
+            name = if (profile.name.isNullOrBlank() && !row.name.isNullOrBlank()) row.name else profile.name,
             isLocked = row.isLocked ?: profile.isLocked,
             isPtm = row.isPtm ?: profile.isPtm,
             lockReason = row.lockReason ?: profile.lockReason,
@@ -342,12 +352,19 @@ object PortalRepository {
         val client = SupabaseManager.requireClient()
         val uid = FirebaseAuth.getInstance().currentUser?.uid?.trim().orEmpty()
 
-        val fromView = runCatching {
-            client.postgrest[SupabaseTableData.Views.V_MY_TIMETABLE]
-                .select()
-                .decodeList<MyTimetableEntryView>()
-        }.getOrElse {
-            Log.w(TAG, "v_my_timetable query failed: ${it.message}")
+        val fromView = if (classId == null) {
+            runCatching {
+                client.postgrest[SupabaseTableData.Views.V_MY_TIMETABLE]
+                    .select()
+                    .decodeList<MyTimetableEntryView>()
+            }.getOrElse {
+                Log.w(TAG, "v_my_timetable query failed: ${it.message}")
+                emptyList()
+            }
+        } else {
+            // The shell already resolved the student's class. Going straight to the class-scoped
+            // joined view avoids a round trip to a view whose `auth_uid` helper is not granted
+            // to students in the current deployment.
             emptyList()
         }
         if (fromView.isNotEmpty()) {
@@ -796,6 +813,122 @@ object PortalRepository {
             .decodeList<ClassSubjectView>()
     }
 
+    /**
+     * Resolves class labels for the teacher's assigned subjects. This is deliberately best-effort:
+     * the timetable/attendance RPCs already carry `class_id`, so a class-metadata read failure
+     * should not block the classroom. The UI falls back to "Class <id>".
+     */
+    suspend fun getClassInfo(classIds: List<Int>): Result<Map<Int, TeacherClassInfo>> = query {
+        val ids = classIds.filter { it > 0 }.distinct()
+        if (ids.isEmpty()) return@query emptyMap()
+
+        runCatching {
+            val client = SupabaseManager.requireClient()
+            val classes = client.postgrest[SupabaseTableData.Tables.CLASSES]
+                .select { filter { isIn("id", ids) } }
+                .decodeList<ClassRow>()
+
+            val branchIds = classes.map { it.branchId }.distinct()
+            val branches = if (branchIds.isEmpty()) {
+                emptyList()
+            } else {
+                client.postgrest[SupabaseTableData.Tables.BRANCHES]
+                    .select { filter { isIn("id", branchIds) } }
+                    .decodeList<BranchRow>()
+            }
+
+            val courseIds = branches.map { it.courseId }.distinct()
+            val courses = if (courseIds.isEmpty()) {
+                emptyList()
+            } else {
+                client.postgrest[SupabaseTableData.Tables.COURSES]
+                    .select { filter { isIn("id", courseIds) } }
+                    .decodeList<CourseRow>()
+            }
+
+            val branchById = branches.associateBy { it.id }
+            val courseById = courses.associateBy { it.id }
+            classes.associate { cls ->
+                val branch = branchById[cls.branchId]
+                cls.id to TeacherClassInfo(
+                    classId = cls.id,
+                    courseName = branch?.courseId?.let { courseById[it]?.name },
+                    branchName = branch?.name,
+                    semester = cls.semester,
+                    section = cls.section,
+                    academicYear = cls.academicYear,
+                )
+            }
+        }.getOrElse {
+            Log.w(TAG, "getClassInfo failed for ids=$ids: ${it.message}")
+            emptyMap()
+        }
+    }
+
+    suspend fun getClassGroups(classId: Int): Result<List<ClassGroupRow>> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.CLASS_GROUPS]
+            .select {
+                filter { eq("class_id", classId) }
+                order("name", Order.ASCENDING)
+            }
+            .decodeList<ClassGroupRow>()
+    }
+
+    suspend fun getNotesForSubject(classSubjectId: Int): Result<List<NoteRow>> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.NOTES]
+            .select {
+                filter { eq("class_subject_id", classSubjectId) }
+                order("created_at", Order.DESCENDING)
+            }
+            .decodeList<NoteRow>()
+    }
+
+    suspend fun getNotificationsForSubjects(
+        classSubjectIds: List<Int>,
+        groupIds: List<Int> = emptyList(),
+    ): Result<List<NotificationRow>> = query {
+        val subjectIds = classSubjectIds.filter { it > 0 }.distinct()
+        val groups = groupIds.filter { it > 0 }.distinct()
+        if (subjectIds.isEmpty() && groups.isEmpty()) return@query emptyList()
+
+        val client = SupabaseManager.requireClient()
+        val subjectNotices = if (subjectIds.isEmpty()) {
+            emptyList()
+        } else {
+            client.postgrest["notifications"]
+                .select {
+                    filter { isIn("class_subject_id", subjectIds) }
+                    order("created_at", Order.DESCENDING)
+                }
+                .decodeList<NotificationRow>()
+        }
+
+        val groupNotices = if (groups.isEmpty()) {
+            emptyList()
+        } else {
+            client.postgrest["notifications"]
+                .select {
+                    filter { isIn("group_id", groups) }
+                    order("created_at", Order.DESCENDING)
+                }
+                .decodeList<NotificationRow>()
+        }
+
+        (subjectNotices + groupNotices)
+            .distinctBy { it.id }
+            .sortedByDescending { it.createdAt.orEmpty() }
+    }
+
+    suspend fun createNotification(row: NewNotificationRow): Result<Unit> = query {
+        val inserted = SupabaseManager.requireClient().postgrest["notifications"]
+            .insert(row) { select() }
+            .decodeList<NotificationRow>()
+
+        if (inserted.isEmpty()) {
+            error("The notice was not posted: the database returned no inserted row.")
+        }
+    }
+
     suspend fun getEnrolledStudentsForClass(classId: Int): Result<List<StudentProfileView>> = query {
         val rows = SupabaseManager.requireClient().postgrest[SupabaseTableData.Views.V_STUDENT_PROFILES]
             .select { filter { eq("class_id", classId) } }
@@ -828,7 +961,10 @@ object PortalRepository {
 
     suspend fun getAssessments(classSubjectId: Int): Result<List<AssessmentRow>> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.ASSESSMENTS]
-            .select { filter { eq("class_subject_id", classSubjectId) } }
+            .select {
+                filter { eq("class_subject_id", classSubjectId) }
+                order("id", Order.DESCENDING)
+            }
             .decodeList<AssessmentRow>()
     }
 
@@ -836,6 +972,12 @@ object PortalRepository {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.ASSESSMENTS]
             .insert(assessment) { select() }
             .decodeSingle<AssessmentRow>()
+    }
+
+    suspend fun getMarksForAssessment(assessmentId: Int): Result<List<MarkRow>> = query {
+        SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.MARKS]
+            .select { filter { eq("assessment_id", assessmentId) } }
+            .decodeList<MarkRow>()
     }
 
     suspend fun saveMarks(marksList: List<MarkRow>): Result<Unit> = query {

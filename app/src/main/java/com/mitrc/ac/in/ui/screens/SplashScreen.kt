@@ -2,7 +2,6 @@ package com.mitrc.ac.`in`.ui.screens
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -12,9 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -52,11 +49,10 @@ fun SplashContent(onFinished: () -> Unit) {
     val titleAlpha = remember { Animatable(0f) }
     val subtitleAlpha = remember { Animatable(0f) }
     val footerAlpha = remember { Animatable(0f) }
-    val sweep = remember { Animatable(0f) }
 
     LaunchedEffect(Unit) {
         launch {
-            logoAlpha.animateTo(1f, tween(650, easing = FastOutSlowInEasing))
+            logoAlpha.animateTo(1f, tween(400, easing = FastOutSlowInEasing))
         }
         launch {
             logoScale.animateTo(
@@ -68,21 +64,18 @@ fun SplashContent(onFinished: () -> Unit) {
             )
         }
         launch {
-            ruleScale.animateTo(1f, tween(700, delayMillis = 380, easing = FastOutSlowInEasing))
+            ruleScale.animateTo(1f, tween(450, delayMillis = 180, easing = FastOutSlowInEasing))
         }
         launch {
-            titleAlpha.animateTo(1f, tween(550, delayMillis = 780, easing = FastOutSlowInEasing))
+            titleAlpha.animateTo(1f, tween(400, delayMillis = 450, easing = FastOutSlowInEasing))
         }
         launch {
-            subtitleAlpha.animateTo(1f, tween(550, delayMillis = 1020, easing = FastOutSlowInEasing))
+            subtitleAlpha.animateTo(1f, tween(350, delayMillis = 650, easing = FastOutSlowInEasing))
         }
         launch {
-            footerAlpha.animateTo(1f, tween(550, delayMillis = 1350, easing = FastOutSlowInEasing))
+            footerAlpha.animateTo(1f, tween(350, delayMillis = 800, easing = FastOutSlowInEasing))
         }
-        launch {
-            sweep.animateTo(1f, tween(1600, delayMillis = 900, easing = LinearEasing))
-        }
-        delay(2600)
+        delay(1500)
         onFinished()
     }
 
@@ -170,20 +163,6 @@ fun SplashContent(onFinished: () -> Unit) {
                 .padding(bottom = 36.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(
-                modifier = Modifier
-                    .width(160.dp)
-                    .height(3.dp)
-                    .background(Color.White.copy(alpha = 0.14f), RoundedCornerShape(50))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(fraction = sweep.value)
-                        .fillMaxHeight()
-                        .background(Gold, RoundedCornerShape(50))
-                )
-            }
-            Spacer(Modifier.height(14.dp))
             Text(
                 text = "AICTE Approved  •  Affiliated to BTU Bikaner",
                 modifier = Modifier.graphicsLayer { alpha = footerAlpha.value },
