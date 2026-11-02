@@ -111,7 +111,6 @@ data class FacultyMasterRow(
     @SerialName("department_id") val departmentId: Int? = null,
     @SerialName("is_active") val isActive: Boolean = true,
     @SerialName("gender") val gender: String? = null,
-    @SerialName("qualification") val qualification: String? = null,
     @SerialName("profile_url") val profileUrl: String? = null,
 )
 
@@ -665,7 +664,6 @@ data class VFacultyView(
     @SerialName("email") val email: String? = null,
     @SerialName("phone_no") val phoneNo: String? = null,
     @SerialName("profile_url") val profileUrl: String? = null,
-    @SerialName("qualification") val qualification: String? = null,
     @SerialName("is_active") val isActive: Boolean = true,
     @SerialName("firebase_uid") val firebaseUid: String? = null,
 )
@@ -680,7 +678,6 @@ data class StaffDirectoryView(
     @SerialName("email") val email: String? = null,
     @SerialName("phone_no") val phoneNo: String? = null,
     @SerialName("designation") val designation: String? = null,
-    @SerialName("qualification") val qualification: String? = null,
     @SerialName("profile_url") val profileUrl: String? = null,
     @SerialName("department_id") val departmentId: Int? = null,
     @SerialName("department_code") val departmentCode: String? = null,

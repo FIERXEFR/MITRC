@@ -516,7 +516,7 @@ private fun PortalHeader(
         loading -> ""
 
         tab == StudentTab.HOME ->
-            "$greeting, ${firstNameOf(name)} \ud83d\udc4b"
+            "$greeting, ${firstNameOf(name)}"
 
         tab == StudentTab.ATTENDANCE -> scheduleMode.label
         else -> tab.label

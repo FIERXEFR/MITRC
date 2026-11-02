@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -87,7 +86,6 @@ import com.mitrc.ac.`in`.ui.theme.ErrorRed
 import com.mitrc.ac.`in`.ui.theme.Gold
 import com.mitrc.ac.`in`.ui.theme.Navy
 import com.mitrc.ac.`in`.ui.theme.NavyDeep
-import com.mitrc.ac.`in`.ui.theme.NavySoft
 import com.mitrc.ac.`in`.ui.theme.Slate
 import com.mitrc.ac.`in`.ui.theme.SuccessGreen
 import com.mitrc.ac.`in`.ui.theme.SurfaceWhite
@@ -158,40 +156,46 @@ fun TeacherClassroomView(
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var reloadTick by remember { mutableIntStateOf(0) }
+    var classDataRefreshTick by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(selectedSubject?.classSubjectId, selectedDate, reloadTick) {
+    val loadClassroom: suspend () -> Unit = {
         val subject = selectedSubject
         statusMessage = null
         errorMessage = null
         if (subject == null) {
             students = emptyList()
             attendanceMap.clear()
-            return@LaunchedEffect
+            loadingStudents = false
+            loadError = null
+        } else {
+            loadingStudents = true
+            loadError = null
+            val studentResult = PortalRepository.getEnrolledStudentsForClass(subject.classId)
+            students = studentResult
+                .getOrDefault(emptyList())
+                .sortedBy { it.name?.lowercase() ?: "" }
+            loadError = studentResult.exceptionOrNull()?.message
+
+            val existing = PortalRepository.getExistingAttendance(
+                subject.classSubjectId,
+                selectedDate,
+                period = 1,
+            ).getOrDefault(emptyList())
+
+            attendanceMap.clear()
+            students.forEach { student ->
+                attendanceMap[student.uid] = existing
+                    .firstOrNull { it.studentUid == student.uid }
+                    ?.status
+                    ?: "P"
+            }
+            loadingStudents = false
         }
+    }
 
-        loadingStudents = true
-        loadError = null
-        val studentResult = PortalRepository.getEnrolledStudentsForClass(subject.classId)
-        students = studentResult
-            .getOrDefault(emptyList())
-            .sortedBy { it.name?.lowercase() ?: "" }
-        loadError = studentResult.exceptionOrNull()?.message
-
-        val existing = PortalRepository.getExistingAttendance(
-            subject.classSubjectId,
-            selectedDate,
-            period = 1,
-        ).getOrDefault(emptyList())
-
-        attendanceMap.clear()
-        students.forEach { student ->
-            attendanceMap[student.uid] = existing
-                .firstOrNull { it.studentUid == student.uid }
-                ?.status
-                ?: "P"
-        }
-        loadingStudents = false
+    LaunchedEffect(selectedSubject?.classSubjectId, selectedDate, reloadTick) {
+        loadClassroom()
     }
 
     val filteredStudents = remember(students, searchQuery) {
@@ -212,232 +216,209 @@ fun TeacherClassroomView(
     val leaveCount = students.count { attendanceMap[it.uid] == "L" }
     val onDutyCount = students.count { attendanceMap[it.uid] == "OD" }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Slate),
+    TeacherRefreshBox(
+        onRefresh = {
+            loadClassroom()
+            classDataRefreshTick++
+        },
+        skeleton = { TeacherTabSkeleton(TeacherTabSkeletonKind.Classroom) },
     ) {
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Slate),
         ) {
-            item {
-                TeacherSectionHeader(
-                    eyebrow = "Teacher workspace",
-                    title = "Classroom",
-                    subtitle = "Choose an assigned class, take attendance and keep marks in one place.",
-                )
-            }
-
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "MY CLASSES",
-                            color = TextSecondary,
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.2.sp,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            text = "${subjects.size} assigned",
-                            color = TextSecondary,
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        items(subjects, key = { it.classSubjectId }) { subject ->
-                            TeacherClassSelectorCard(
-                                subject = subject,
-                                info = classInfo[subject.classId],
-                                selected = subject.classSubjectId == selectedSubject?.classSubjectId,
-                                onClick = { onSelectSubject(subject) },
-                            )
-                        }
-                    }
-                }
-            }
-
-            item {
-                TeacherModeSwitch(
-                    activeMode = activeMode,
-                    onModeChange = {
-                        onModeChange(it)
-                        statusMessage = null
-                        errorMessage = null
-                    },
-                )
-            }
-
-            if (activeMode == TeacherWorkMode.ATTENDANCE) {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
                 item {
-                    AttendanceDateCard(
-                        selectedDate = selectedDate,
-                        onDateChange = {
-                            selectedDate = it
+                    TeacherClassPickerCard(
+                        subjects = subjects,
+                        selectedSubject = selectedSubject,
+                        classInfo = classInfo,
+                        label = when (activeMode) {
+                            TeacherWorkMode.ATTENDANCE -> "ATTENDANCE FOR"
+                            TeacherWorkMode.MARKS -> "MARKING FOR"
+                            TeacherWorkMode.MATERIALS -> "MATERIALS FOR"
+                        },
+                        compact = true,
+                        onSelectSubject = onSelectSubject,
+                    )
+                }
+
+                item {
+                    TeacherModeSwitch(
+                        activeMode = activeMode,
+                        onModeChange = {
+                            onModeChange(it)
                             statusMessage = null
                             errorMessage = null
                         },
                     )
                 }
 
-                item {
-                    AttendanceSummaryRow(
-                        present = presentCount,
-                        absent = absentCount,
-                        leave = leaveCount,
-                        onDuty = onDutyCount,
-                    )
-                }
-
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "STUDENTS (${filteredStudents.size})",
-                            color = TextSecondary,
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.2.sp,
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(
-                            onClick = {
-                                students.forEach { attendanceMap[it.uid] = "P" }
-                                statusMessage = "All students marked present. Save to record it."
-                                errorMessage = null
-                            },
-                            enabled = students.isNotEmpty(),
-                        ) {
-                            Text(
-                                text = "Mark all present",
-                                color = Navy,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                    }
-                }
-
-                item {
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        singleLine = true,
-                        placeholder = { Text("Search by name, roll no. or group") },
-                        leadingIcon = {
-                            Icon(Icons.Outlined.Search, contentDescription = null, tint = TextSecondary)
-                        },
-                        trailingIcon = {
-                            if (searchQuery.isNotBlank()) {
-                                IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(
-                                        Icons.Outlined.Close,
-                                        contentDescription = "Clear student search",
-                                        tint = TextSecondary,
-                                    )
-                                }
-                            }
-                        },
-                        shape = RoundedCornerShape(14.dp),
-                        colors = teacherFieldColors(),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-
-                when {
-                    loadingStudents -> item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 28.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                CircularProgressIndicator(
-                                    color = Navy,
-                                    strokeWidth = 2.5.dp,
-                                    modifier = Modifier.size(28.dp),
-                                )
-                                Spacer(Modifier.height(10.dp))
-                                Text(
-                                    text = "Loading the class roster...",
-                                    color = TextSecondary,
-                                    fontSize = 12.sp,
-                                )
-                            }
-                        }
-                    }
-
-                    loadError != null && students.isEmpty() -> item {
-                        TeacherEmptyState(
-                            icon = Icons.Outlined.Groups,
-                            title = "Could not load students",
-                            body = loadError.orEmpty(),
-                            actionLabel = "Try again",
-                            onAction = { reloadTick++ },
-                        )
-                    }
-
-                    students.isEmpty() -> item {
-                        TeacherEmptyState(
-                            icon = Icons.Outlined.Groups,
-                            title = "No students enrolled",
-                            body = "Students will appear here once they are enrolled in this class.",
-                        )
-                    }
-
-                    filteredStudents.isEmpty() -> item {
-                        TeacherEmptyState(
-                            icon = Icons.Outlined.Search,
-                            title = "No matching students",
-                            body = "Try a different name, roll number or group.",
-                            actionLabel = "Clear search",
-                            onAction = { searchQuery = "" },
-                        )
-                    }
-
-                    else -> items(filteredStudents, key = { it.uid }) { student ->
-                        StudentAttendanceCard(
-                            student = student,
-                            currentStatus = attendanceMap[student.uid] ?: "P",
-                            onStatusChange = { status ->
-                                attendanceMap[student.uid] = status
+                if (activeMode == TeacherWorkMode.ATTENDANCE) {
+                    item {
+                        AttendanceDateCard(
+                            selectedDate = selectedDate,
+                            onDateChange = {
+                                selectedDate = it
                                 statusMessage = null
                                 errorMessage = null
                             },
                         )
                     }
-                }
 
-                item { Spacer(Modifier.height(6.dp)) }
-            } else if (activeMode == TeacherWorkMode.MARKS) {
-                item {
-                    TeacherMarksPanel(
-                        subject = selectedSubject,
-                        classInfo = classInfo,
-                    )
-                }
-            } else {
-                item {
-                    TeacherResourcesView(
-                        selectedSubject = selectedSubject,
-                        classInfo = classInfo,
-                    )
+                    item {
+                        AttendanceSummaryRow(
+                            present = presentCount,
+                            absent = absentCount,
+                            leave = leaveCount,
+                            onDuty = onDutyCount,
+                        )
+                    }
+
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "STUDENTS (${filteredStudents.size})",
+                                color = TextSecondary,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.2.sp,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(
+                                onClick = {
+                                    students.forEach { attendanceMap[it.uid] = "P" }
+                                    statusMessage = "All students marked present. Save to record it."
+                                    errorMessage = null
+                                },
+                                enabled = students.isNotEmpty(),
+                            ) {
+                                Text(
+                                    text = "Mark all present",
+                                    color = Navy,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                    }
+
+                    item {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            singleLine = true,
+                            placeholder = { Text("Search by name, roll no. or group") },
+                            leadingIcon = {
+                                Icon(Icons.Outlined.Search, contentDescription = null, tint = TextSecondary)
+                            },
+                            trailingIcon = {
+                                if (searchQuery.isNotBlank()) {
+                                    IconButton(onClick = { searchQuery = "" }) {
+                                        Icon(
+                                            Icons.Outlined.Close,
+                                            contentDescription = "Clear student search",
+                                            tint = TextSecondary,
+                                        )
+                                    }
+                                }
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = teacherFieldColors(),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    when {
+                        loadingStudents -> item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 28.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    CircularProgressIndicator(
+                                        color = Navy,
+                                        strokeWidth = 2.5.dp,
+                                        modifier = Modifier.size(28.dp),
+                                    )
+                                    Spacer(Modifier.height(10.dp))
+                                    Text(
+                                        text = "Loading the class roster...",
+                                        color = TextSecondary,
+                                        fontSize = 12.sp,
+                                    )
+                                }
+                            }
+                        }
+
+                        loadError != null && students.isEmpty() -> item {
+                            TeacherEmptyState(
+                                icon = Icons.Outlined.Groups,
+                                title = "Could not load students",
+                                body = loadError.orEmpty(),
+                                actionLabel = "Try again",
+                                onAction = { reloadTick++ },
+                            )
+                        }
+
+                        students.isEmpty() -> item {
+                            TeacherEmptyState(
+                                icon = Icons.Outlined.Groups,
+                                title = "No students enrolled",
+                                body = "Students will appear here once they are enrolled in this class.",
+                            )
+                        }
+
+                        filteredStudents.isEmpty() -> item {
+                            TeacherEmptyState(
+                                icon = Icons.Outlined.Search,
+                                title = "No matching students",
+                                body = "Try a different name, roll number or group.",
+                                actionLabel = "Clear search",
+                                onAction = { searchQuery = "" },
+                            )
+                        }
+
+                        else -> items(filteredStudents, key = { it.uid }) { student ->
+                            StudentAttendanceCard(
+                                student = student,
+                                currentStatus = attendanceMap[student.uid] ?: "P",
+                                onStatusChange = { status ->
+                                    attendanceMap[student.uid] = status
+                                    statusMessage = null
+                                    errorMessage = null
+                                },
+                            )
+                        }
+                    }
+
+                    item { Spacer(Modifier.height(6.dp)) }
+                } else if (activeMode == TeacherWorkMode.MARKS) {
+                    item {
+                        TeacherMarksPanel(
+                            subject = selectedSubject,
+                            refreshKey = classDataRefreshTick,
+                        )
+                    }
+                } else {
+                    item {
+                        TeacherResourcesView(
+                            selectedSubject = selectedSubject,
+                            refreshKey = classDataRefreshTick,
+                        )
+                    }
                 }
             }
-        }
 
         AnimatedVisibility(
             visible = activeMode == TeacherWorkMode.ATTENDANCE,
@@ -500,6 +481,7 @@ fun TeacherClassroomView(
                 },
             )
         }
+    }
     }
 }
 
@@ -992,7 +974,7 @@ private fun AttendanceSaveBar(
 @Composable
 private fun TeacherMarksPanel(
     subject: ClassSubjectView?,
-    classInfo: Map<Int, TeacherClassInfo>,
+    refreshKey: Int = 0,
 ) {
     if (subject == null) {
         TeacherEmptyState(
@@ -1017,7 +999,7 @@ private fun TeacherMarksPanel(
     var marksMessage by remember(subject.classSubjectId) { mutableStateOf<String?>(null) }
     var marksError by remember(subject.classSubjectId) { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(subject.classSubjectId) {
+    LaunchedEffect(subject.classSubjectId, refreshKey) {
         val assessmentResult = PortalRepository.getAssessments(subject.classSubjectId)
         assessments = assessmentResult.getOrDefault(emptyList())
         selectedAssessment = assessments.firstOrNull()
@@ -1028,7 +1010,7 @@ private fun TeacherMarksPanel(
             .sortedBy { it.name?.lowercase() ?: "" }
     }
 
-    LaunchedEffect(selectedAssessment?.id) {
+    LaunchedEffect(selectedAssessment?.id, refreshKey) {
         marksMap.clear()
         marksError = null
         marksMessage = null
@@ -1049,12 +1031,6 @@ private fun TeacherMarksPanel(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        TeacherClassSummaryCard(
-            subject = subject,
-            info = classInfo[subject.classId],
-            label = "MARKING FOR",
-        )
-
         Surface(
             shape = RoundedCornerShape(18.dp),
             color = SurfaceWhite,

@@ -32,10 +32,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.NotificationsNone
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -112,24 +110,28 @@ fun TeacherNoticesView(
         error = null
     }
 
-    LaunchedEffect(selectedSubject?.classSubjectId, refreshTick) {
+    val loadNotices: suspend () -> Unit = {
         val subject = selectedSubject
         if (subject == null) {
             notices = emptyList()
             groups = emptyList()
-            return@LaunchedEffect
+            loading = false
+        } else {
+            loading = true
+            error = null
+            groups = PortalRepository.getClassGroups(subject.classId).getOrDefault(emptyList())
+            val result = PortalRepository.getNotificationsForSubjects(
+                classSubjectIds = listOf(subject.classSubjectId),
+                groupIds = groups.map { it.id },
+            )
+            notices = result.getOrDefault(emptyList())
+            error = result.exceptionOrNull()?.message
+            loading = false
         }
+    }
 
-        loading = true
-        error = null
-        groups = PortalRepository.getClassGroups(subject.classId).getOrDefault(emptyList())
-        val result = PortalRepository.getNotificationsForSubjects(
-            classSubjectIds = listOf(subject.classSubjectId),
-            groupIds = groups.map { it.id },
-        )
-        notices = result.getOrDefault(emptyList())
-        error = result.exceptionOrNull()?.message
-        loading = false
+    LaunchedEffect(selectedSubject?.classSubjectId, refreshTick) {
+        loadNotices()
     }
 
     LaunchedEffect(successMessage) {
@@ -146,125 +148,104 @@ fun TeacherNoticesView(
             .fillMaxSize()
             .background(Slate),
     ) {
-        LazyColumn(
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 26.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+        TeacherRefreshBox(
+            onRefresh = loadNotices,
+            skeleton = { TeacherTabSkeleton(TeacherTabSkeletonKind.Notices) },
         ) {
-            item {
-                TeacherSectionHeader(
-                    eyebrow = "Teacher workspace",
-                    title = "Notices",
-                    subtitle = "Post a clear update for the class or a specific lab group.",
-                    trailing = {
-                        IconButton(
-                            onClick = {
-                                successMessage = null
-                                refreshTick++
-                            },
-                            enabled = selectedSubject != null && !loading,
-                        ) {
-                            Icon(Icons.Outlined.Refresh, contentDescription = "Refresh notices", tint = Navy)
-                        }
-                    },
-                )
-            }
-
-            if (subjects.size > 1) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 26.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
                 item {
-                    TeacherClassQuickSwitch(
+                    TeacherClassPickerCard(
                         subjects = subjects,
-                        selectedClassSubjectId = selectedSubject?.classSubjectId,
+                        selectedSubject = selectedSubject,
+                        classInfo = classInfo,
+                        label = "POSTING FOR",
                         onSelectSubject = onSelectSubject,
                     )
                 }
-            }
 
-            if (selectedSubject == null) {
-                item {
-                    TeacherEmptyState(
-                        icon = Icons.Outlined.NotificationsNone,
-                        title = "Choose a class first",
-                        body = "Select one of your assigned classes before posting a notice.",
-                    )
-                }
-            } else {
-                item {
-                    TeacherClassSummaryCard(
-                        subject = selectedSubject,
-                        info = classInfo[selectedSubject.classId],
-                        label = "POSTING FOR",
-                    )
-                }
+                if (selectedSubject == null) {
+                    item {
+                        TeacherEmptyState(
+                            icon = Icons.Outlined.NotificationsNone,
+                            title = "Choose a class first",
+                            body = "Select one of your assigned classes before posting a notice.",
+                        )
+                    }
+                } else {
+                    item {
+                        NoticeComposerHero(
+                            count = notices.size,
+                            onCompose = { showComposer = true },
+                        )
+                    }
 
-                item {
-                    NoticeComposerHero(
-                        count = notices.size,
-                        onCompose = { showComposer = true },
-                    )
-                }
+                    item {
+                        TeacherStatusBanner(successMessage, isError = false)
+                    }
 
-                item {
-                    TeacherStatusBanner(successMessage, isError = false)
-                }
+                    item {
+                        Text(
+                            text = "POSTED NOTICES (${notices.size})",
+                            color = TextSecondary,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.2.sp,
+                        )
+                    }
 
-                item {
-                    Text(
-                        text = "POSTED NOTICES (${notices.size})",
-                        color = TextSecondary,
-                        fontSize = 10.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.2.sp,
-                    )
-                }
+                    when {
+                        loading -> item {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 30.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    color = Navy,
+                                    strokeWidth = 2.5.dp,
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Text("Loading notices...", color = TextSecondary, fontSize = 12.sp)
+                            }
+                        }
 
-                when {
-                    loading -> item {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 30.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                color = Navy,
-                                strokeWidth = 2.5.dp,
+                        error != null && notices.isEmpty() -> item {
+                            TeacherEmptyState(
+                                icon = Icons.Outlined.NotificationsNone,
+                                title = "Could not load notices",
+                                body = error.orEmpty(),
+                                actionLabel = "Try again",
+                                onAction = { refreshTick++ },
                             )
-                            Spacer(Modifier.width(10.dp))
-                            Text("Loading notices...", color = TextSecondary, fontSize = 12.sp)
+                        }
+
+                        notices.isEmpty() -> item {
+                            TeacherEmptyState(
+                                icon = Icons.Outlined.Campaign,
+                                title = "No notices yet",
+                                body = "Post the first update for this class.",
+                                actionLabel = "Post a notice",
+                                onAction = { showComposer = true },
+                            )
+                        }
+
+                        else -> items(notices, key = { it.id }) { notice ->
+                            TeacherNoticeCard(
+                                notice = notice,
+                                groupName = notice.groupId?.let { groupNames[it] ?: "Group $it" },
+                            )
                         }
                     }
 
-                    error != null && notices.isEmpty() -> item {
-                        TeacherEmptyState(
-                            icon = Icons.Outlined.NotificationsNone,
-                            title = "Could not load notices",
-                            body = error.orEmpty(),
-                            actionLabel = "Try again",
-                            onAction = { refreshTick++ },
-                        )
-                    }
-
-                    notices.isEmpty() -> item {
-                        TeacherEmptyState(
-                            icon = Icons.Outlined.Campaign,
-                            title = "No notices yet",
-                            body = "Post the first update for this class.",
-                            actionLabel = "Post a notice",
-                            onAction = { showComposer = true },
-                        )
-                    }
-
-                    else -> items(notices, key = { it.id }) { notice ->
-                        TeacherNoticeCard(
-                            notice = notice,
-                            groupName = notice.groupId?.let { groupNames[it] ?: "Group $it" },
-                        )
-                    }
+                    item { Spacer(Modifier.height(4.dp)) }
                 }
-
-                item { Spacer(Modifier.height(4.dp)) }
             }
         }
     }

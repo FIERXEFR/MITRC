@@ -74,7 +74,6 @@ import com.mitrc.ac.`in`.data.GoogleDriveStorage
 import com.mitrc.ac.`in`.data.NoteInsertRow
 import com.mitrc.ac.`in`.data.NoteRow
 import com.mitrc.ac.`in`.data.PortalRepository
-import com.mitrc.ac.`in`.data.TeacherClassInfo
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
 import com.mitrc.ac.`in`.ui.theme.ErrorRed
 import com.mitrc.ac.`in`.ui.theme.Gold
@@ -99,7 +98,7 @@ private val TeacherNoteCategories = listOf(
 @Composable
 fun TeacherResourcesView(
     selectedSubject: ClassSubjectView?,
-    classInfo: Map<Int, TeacherClassInfo>,
+    refreshKey: Int = 0,
 ) {
     var notes by remember { mutableStateOf<List<NoteRow>>(emptyList()) }
     var groups by remember { mutableStateOf<List<ClassGroupRow>>(emptyList()) }
@@ -114,7 +113,7 @@ fun TeacherResourcesView(
         error = null
     }
 
-    LaunchedEffect(selectedSubject?.classSubjectId, refreshTick) {
+    LaunchedEffect(selectedSubject?.classSubjectId, refreshTick, refreshKey) {
         val subject = selectedSubject
         if (subject == null) {
             notes = emptyList()
@@ -174,13 +173,6 @@ fun TeacherResourcesView(
                 body = "Select one of your assigned classes to see and upload material.",
             )
         } else {
-            TeacherClassSummaryCard(
-                subject = selectedSubject,
-                info = classInfo[selectedSubject.classId],
-                label = "MATERIALS FOR",
-                compact = true,
-            )
-
             MaterialUploadHero(
                 count = notes.size,
                 onUpload = { showUpload = true },

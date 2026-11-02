@@ -1,13 +1,19 @@
 package com.mitrc.ac.`in`.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,6 +36,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.Button
@@ -41,20 +48,32 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import kotlinx.coroutines.delay
 import com.mitrc.ac.`in`.data.ClassSubjectView
 import com.mitrc.ac.`in`.data.TeacherClassInfo
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
@@ -162,11 +181,24 @@ internal fun TeacherClassSummaryCard(
     label: String = "CURRENT CLASS",
     compact: Boolean = false,
     onClick: (() -> Unit)? = null,
+    showChevron: Boolean = onClick != null,
+    expanded: Boolean = false,
 ) {
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "classPickerChevron",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (expanded) Gold.copy(alpha = 0.62f) else DividerSoft,
+        animationSpec = tween(180, easing = FastOutSlowInEasing),
+        label = "classPickerBorder",
+    )
+
     Surface(
         shape = RoundedCornerShape(18.dp),
         color = SurfaceWhite,
-        border = BorderStroke(1.dp, DividerSoft),
+        border = BorderStroke(1.dp, borderColor),
         modifier = Modifier
             .fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
@@ -216,16 +248,213 @@ internal fun TeacherClassSummaryCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (onClick != null) {
+            if (showChevron) {
                 Icon(
                     imageVector = Icons.Outlined.ExpandMore,
                     contentDescription = null,
                     tint = TextSecondary,
                     modifier = Modifier
                         .size(20.dp)
-                        .rotate(-90f),
+                        .rotate(chevronRotation),
                 )
             }
+        }
+    }
+}
+
+/**
+ * The single class control used by Overview, Classroom and Notices. The card itself mirrors the
+ * "Marking for" / "Materials for" summary, while the popup keeps the same white surface language
+ * as the rest of the portal instead of inheriting a dark Material menu container.
+ */
+@Composable
+internal fun TeacherClassPickerCard(
+    subjects: List<ClassSubjectView>,
+    selectedSubject: ClassSubjectView?,
+    classInfo: Map<Int, TeacherClassInfo>,
+    label: String,
+    compact: Boolean = false,
+    onSelectSubject: (ClassSubjectView) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var menuMounted by remember { mutableStateOf(false) }
+    var anchorWidthPx by remember { mutableIntStateOf(0) }
+    var anchorHeightPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    val menuTransition = remember { MutableTransitionState(false) }
+    val current = selectedSubject ?: subjects.firstOrNull()
+    val menuWidth = with(density) { anchorWidthPx.toDp() }.coerceAtMost(420.dp)
+
+    LaunchedEffect(expanded) {
+        if (expanded) {
+            menuMounted = true
+            menuTransition.targetState = true
+        } else {
+            menuTransition.targetState = false
+            if (menuMounted) {
+                delay(150)
+                menuMounted = false
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier.onGloballyPositioned { coordinates ->
+            anchorWidthPx = coordinates.size.width
+            anchorHeightPx = coordinates.size.height
+        },
+    ) {
+        if (current == null) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = SurfaceWhite,
+                border = BorderStroke(1.dp, DividerSoft),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = "No class assigned yet",
+                    color = TextSecondary,
+                    fontSize = 12.5.sp,
+                    modifier = Modifier.padding(16.dp),
+                )
+            }
+        } else {
+            TeacherClassSummaryCard(
+                subject = current,
+                info = classInfo[current.classId],
+                label = label,
+                compact = compact,
+                onClick = { expanded = true },
+                expanded = expanded,
+            )
+        }
+
+        if (menuMounted && current != null && anchorWidthPx > 0) {
+            Popup(
+                alignment = Alignment.TopStart,
+                offset = IntOffset(0, anchorHeightPx + with(density) { 6.dp.roundToPx() }),
+                onDismissRequest = { expanded = false },
+                properties = PopupProperties(focusable = true),
+            ) {
+                AnimatedVisibility(
+                    visibleState = menuTransition,
+                    enter = fadeIn(tween(170)) +
+                        scaleIn(
+                            initialScale = 0.94f,
+                            animationSpec = tween(220, easing = FastOutSlowInEasing),
+                            transformOrigin = TransformOrigin(0.5f, 0f),
+                        ) +
+                        slideInVertically(
+                            animationSpec = tween(220, easing = FastOutSlowInEasing),
+                        ) { -it / 20 },
+                    exit = fadeOut(tween(120)) +
+                        scaleOut(
+                            targetScale = 0.97f,
+                            animationSpec = tween(140, easing = FastOutSlowInEasing),
+                            transformOrigin = TransformOrigin(0.5f, 0f),
+                        ) +
+                        slideOutVertically(animationSpec = tween(140)) { -it / 24 },
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = SurfaceWhite,
+                        border = BorderStroke(1.dp, DividerSoft),
+                        shadowElevation = 18.dp,
+                        modifier = Modifier.width(menuWidth),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .heightIn(max = 360.dp)
+                                .verticalScroll(rememberScrollState())
+                                .padding(horizontal = 6.dp, vertical = 6.dp),
+                        ) {
+                            Text(
+                                text = "SWITCH CLASS",
+                                color = TextSecondary,
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.1.sp,
+                                modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 5.dp),
+                            )
+
+                            subjects.forEach { subject ->
+                                TeacherClassPickerRow(
+                                    subject = subject,
+                                    info = classInfo[subject.classId],
+                                    selected = subject.classSubjectId == current?.classSubjectId,
+                                    onClick = {
+                                        expanded = false
+                                        onSelectSubject(subject)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TeacherClassPickerRow(
+    subject: ClassSubjectView,
+    info: TeacherClassInfo?,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) Navy.copy(alpha = 0.055f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (selected) Navy.copy(alpha = 0.1f) else Slate),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = subject.subjectCode.take(3).uppercase(),
+                color = if (selected) Navy else TextSecondary,
+                fontSize = 9.5.sp,
+                fontWeight = FontWeight.ExtraBold,
+            )
+        }
+
+        Spacer(Modifier.width(10.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "${subject.subjectCode}  ·  ${subject.subjectName}",
+                color = TextPrimary,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = teacherClassLabel(subject, info),
+                color = TextSecondary,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        if (selected) {
+            Icon(
+                imageVector = Icons.Outlined.Check,
+                contentDescription = null,
+                tint = GoldDeep,
+                modifier = Modifier.size(18.dp),
+            )
         }
     }
 }

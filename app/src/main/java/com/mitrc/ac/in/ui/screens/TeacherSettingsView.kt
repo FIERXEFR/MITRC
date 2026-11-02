@@ -68,14 +68,6 @@ fun TeacherSettingsView(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            TeacherSectionHeader(
-                eyebrow = "Teacher workspace",
-                title = "Settings",
-                subtitle = "Your account, assigned classes and sign-out controls.",
-            )
-        }
-
-        item {
             TeacherSettingsProfileCard(teacher)
         }
 
@@ -109,6 +101,7 @@ fun TeacherSettingsView(
                 },
                 compact = true,
                 onClick = { onSelectSubject(subject) },
+                showChevron = false,
             )
         }
 

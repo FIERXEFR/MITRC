@@ -1,18 +1,14 @@
 package com.mitrc.ac.`in`.ui.screens
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -44,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,6 +64,7 @@ import com.mitrc.ac.`in`.ui.theme.Gold
 import com.mitrc.ac.`in`.ui.theme.NavyDeep
 import com.mitrc.ac.`in`.ui.theme.Slate
 import com.mitrc.ac.`in`.ui.theme.SurfaceWhite
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 internal enum class TeacherTab(
@@ -87,6 +85,42 @@ fun TeacherPortalShell(
     val scope = rememberCoroutineScope()
     var selectedTabName by rememberSaveable { mutableStateOf(TeacherTab.Overview.name) }
     val selectedTab = TeacherTab.entries.firstOrNull { it.name == selectedTabName } ?: TeacherTab.Overview
+
+    val pagerState = rememberPagerState(
+        initialPage = TeacherTab.entries.indexOf(selectedTab).coerceAtLeast(0),
+        pageCount = { TeacherTab.entries.size },
+    )
+
+    fun goToTab(tab: TeacherTab) {
+        selectedTabName = tab.name
+        scope.launch {
+            pagerState.animateScrollToPage(
+                page = TeacherTab.entries.indexOf(tab),
+                animationSpec = tween(300, easing = FastOutSlowInEasing),
+            )
+        }
+    }
+
+    LaunchedEffect(selectedTab) {
+        val targetIndex = TeacherTab.entries.indexOf(selectedTab)
+        if (pagerState.currentPage != targetIndex && !pagerState.isScrollInProgress) {
+            pagerState.animateScrollToPage(
+                page = targetIndex,
+                animationSpec = tween(300, easing = FastOutSlowInEasing),
+            )
+        }
+    }
+
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.settledPage }
+            .distinctUntilChanged()
+            .collect { page ->
+                val settledTab = TeacherTab.entries.getOrElse(page) { TeacherTab.Overview }
+                if (settledTab.name != selectedTabName) {
+                    selectedTabName = settledTab.name
+                }
+            }
+    }
 
     var classroomModeName by rememberSaveable { mutableStateOf(TeacherWorkMode.ATTENDANCE.name) }
     val classroomMode = TeacherWorkMode.entries
@@ -173,7 +207,7 @@ fun TeacherPortalShell(
         selectedTab == TeacherTab.Overview -> profile?.name
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
-            ?.let { "$greeting, ${firstNameOf(it)} \ud83d\udc4b" }
+            ?.let { "$greeting, ${firstNameOf(it)}" }
             ?: "Teacher portal"
         else -> selectedTab.label
     }
@@ -191,8 +225,8 @@ fun TeacherPortalShell(
                 scrolledPx = { headerOffset.floatValue },
                 showAvatar = selectedTab != TeacherTab.Settings,
                 unreadCount = 0,
-                onBellClick = { selectedTabName = TeacherTab.Notices.name },
-                onAvatarClick = { selectedTabName = TeacherTab.Settings.name },
+                onBellClick = { goToTab(TeacherTab.Notices) },
+                onAvatarClick = { goToTab(TeacherTab.Settings) },
             )
 
             Box(
@@ -202,10 +236,10 @@ fun TeacherPortalShell(
                     .nestedScroll(headerNestedScroll),
             ) {
                 when {
-                    loading -> TeacherPortalSkeleton()
+                    loading -> TeacherTabSkeleton(TeacherTabSkeletonKind.Overview)
 
                     profile == null -> TeacherProfileUnavailable(
-                        message = loadError ?: "Your faculty workspace is not available right now.",
+                        message = loadError ?: "Your teacher portal is not available right now.",
                         onRetry = { reloadTick++ },
                         onSignOut = {
                             scope.launch {
@@ -226,44 +260,26 @@ fun TeacherPortalShell(
                         },
                     )
 
-                    else -> AnimatedContent(
-                        targetState = selectedTab,
-                        transitionSpec = {
-                            val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
-                            (slideInHorizontally(
-                                animationSpec = tween(240, easing = FastOutSlowInEasing),
-                                initialOffsetX = { direction * it / 8 },
-                            ) + fadeIn(tween(210))) togetherWith
-                                (slideOutHorizontally(
-                                    animationSpec = tween(190, easing = FastOutSlowInEasing),
-                                    targetOffsetX = { -direction * it / 10 },
-                                ) + fadeOut(tween(150)))
-                        },
-                        label = "teacherTab",
+                    else -> HorizontalPager(
+                        state = pagerState,
+                        beyondViewportPageCount = 1,
                         modifier = Modifier.fillMaxSize(),
-                    ) { tab ->
-                        when (tab) {
+                    ) { page ->
+                        when (TeacherTab.entries[page]) {
                             TeacherTab.Overview -> TeacherOverviewView(
-                                teacher = profile,
                                 subjects = subjects,
                                 selectedSubject = selectedSubject,
                                 classInfo = classInfo,
                                 onSelectSubject = { selectedClassSubjectId = it.classSubjectId },
                                 onOpenClassroom = {
                                     classroomModeName = TeacherWorkMode.ATTENDANCE.name
-                                    selectedTabName = TeacherTab.Classroom.name
+                                    goToTab(TeacherTab.Classroom)
                                 },
                                 onOpenMaterials = {
                                     classroomModeName = TeacherWorkMode.MATERIALS.name
-                                    selectedTabName = TeacherTab.Classroom.name
+                                    goToTab(TeacherTab.Classroom)
                                 },
-                                onOpenNotices = { selectedTabName = TeacherTab.Notices.name },
-                                onSignOut = {
-                                    scope.launch {
-                                        AuthRepository.signOut()
-                                        onSignedOut()
-                                    }
-                                },
+                                onOpenNotices = { goToTab(TeacherTab.Notices) },
                             )
 
                             TeacherTab.Classroom -> TeacherClassroomView(
@@ -303,7 +319,7 @@ fun TeacherPortalShell(
             PortalBottomBar(
                 items = TeacherTab.entries.map { PortalNavItem(label = it.label, icon = it.icon) },
                 selectedIndex = TeacherTab.entries.indexOf(selectedTab),
-                onSelect = { index -> selectedTabName = TeacherTab.entries[index].name },
+                onSelect = { index -> goToTab(TeacherTab.entries[index]) },
             )
         }
     }
