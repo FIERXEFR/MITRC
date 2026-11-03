@@ -17,9 +17,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -93,6 +95,8 @@ fun TeacherPortalShell(
     val fieldFocusTracker = remember { TeacherFieldFocusTracker() }
     val focusManager = LocalFocusManager.current
     val activity = LocalContext.current.findActivity()
+    val density = LocalDensity.current
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
     var selectedTabName by rememberSaveable { mutableStateOf(TeacherTab.Overview.name) }
     val selectedTab = TeacherTab.entries.firstOrNull { it.name == selectedTabName } ?: TeacherTab.Overview
 
@@ -132,6 +136,16 @@ fun TeacherPortalShell(
             }
             selectedTab != TeacherTab.Overview -> goToTab(TeacherTab.Overview)
             else -> activity?.finish()
+        }
+    }
+
+    // The system consumes the first back press to close the keyboard. When that happens the
+    // field can still own focus, so release it here; the next back press is then free to move
+    // to Overview instead of requiring an extra press just to clear the focus again.
+    LaunchedEffect(imeVisible) {
+        if (!imeVisible && fieldFocusTracker.hasFocusedField) {
+            focusManager.clearFocus(force = true)
+            fieldFocusTracker.clear()
         }
     }
 

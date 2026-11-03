@@ -1,6 +1,5 @@
 package com.mitrc.ac.`in`.ui.screens
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
@@ -53,8 +52,6 @@ import androidx.compose.material.icons.outlined.Today
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -156,7 +153,7 @@ fun TeacherClassroomView(
     var selectedDate by rememberSaveable { mutableStateOf(teacherTodayIst().toString()) }
 
     var students by remember { mutableStateOf<List<StudentProfileView>>(emptyList()) }
-    var loadingStudents by remember { mutableStateOf(false) }
+    var loadingStudents by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     var attendanceFilter by rememberSaveable { mutableStateOf<String?>(null) }
@@ -1162,6 +1159,7 @@ private fun TeacherMarksPanel(
     }
     var assessments by remember(subject.classSubjectId) { mutableStateOf<List<AssessmentRow>>(emptyList()) }
     var selectedAssessment by remember(subject.classSubjectId) { mutableStateOf<AssessmentRow?>(null) }
+    var hasLoadedAssessments by remember(subject.classSubjectId) { mutableStateOf(false) }
     var kind by remember(subject.classSubjectId) { mutableStateOf("UT") }
     var numberStr by remember(subject.classSubjectId) { mutableStateOf("1") }
     var maxMarksStr by remember(subject.classSubjectId) { mutableStateOf("20.0") }
@@ -1172,7 +1170,7 @@ private fun TeacherMarksPanel(
     var editingUid by remember(subject.classSubjectId) { mutableStateOf<String?>(null) }
     var savingMarkUid by remember(subject.classSubjectId) { mutableStateOf<String?>(null) }
     var saving by remember(subject.classSubjectId) { mutableStateOf(false) }
-    var addAssessmentMenuExpanded by remember(subject.classSubjectId) { mutableStateOf(false) }
+    var showAssessmentDialog by remember(subject.classSubjectId) { mutableStateOf(false) }
     var assessmentMessage by remember(subject.classSubjectId) { mutableStateOf<String?>(null) }
     var assessmentError by remember(subject.classSubjectId) { mutableStateOf<String?>(null) }
     var marksMessage by remember(subject.classSubjectId) { mutableStateOf<String?>(null) }
@@ -1202,7 +1200,6 @@ private fun TeacherMarksPanel(
         loadingStudents = true
         students = emptyList()
         savingMarkUid = null
-        addAssessmentMenuExpanded = false
         val loadStartedAt = System.currentTimeMillis()
 
         val previousAssessmentId = selectedAssessment?.id
@@ -1215,13 +1212,16 @@ private fun TeacherMarksPanel(
                     .thenBy { it.id },
             )
         assessments = sortedAssessments
-        val nextSelected = sortedAssessments.firstOrNull { it.id == previousAssessmentId }
-            ?: sortedAssessments.firstOrNull()
-        selectedAssessment = nextSelected
-        if (nextSelected != null && !sameAssessmentKind(nextSelected.kind, kind)) {
-            kind = normalizeAssessmentKind(nextSelected.kind)
+        if (!hasLoadedAssessments) {
+            if (sortedAssessments.none { sameAssessmentKind(it.kind, kind) }) {
+                sortedAssessments.firstOrNull()?.let { kind = normalizeAssessmentKind(it.kind) }
+            }
+            hasLoadedAssessments = true
         }
         if (kind !in assessmentOptions) kind = "UT"
+        selectedAssessment = sortedAssessments.firstOrNull {
+            it.id == previousAssessmentId && sameAssessmentKind(it.kind, kind)
+        } ?: sortedAssessments.firstOrNull { sameAssessmentKind(it.kind, kind) }
         numberStr = nextAssessmentNumber(kind, sortedAssessments).toString()
         editingUid = null
 
@@ -1258,10 +1258,6 @@ private fun TeacherMarksPanel(
         )
     }
 
-    BackHandler(enabled = addAssessmentMenuExpanded) {
-        addAssessmentMenuExpanded = false
-    }
-
     val savedAssessmentsForKind = assessments.filter { assessment ->
         sameAssessmentKind(assessment.kind, kind)
     }
@@ -1292,6 +1288,31 @@ private fun TeacherMarksPanel(
                     letterSpacing = 1.1.sp,
                 )
 
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    assessmentOptions.forEach { option ->
+                        TeacherChoiceChip(
+                            label = assessmentOptionLabel(option),
+                            selected = sameAssessmentKind(kind, option),
+                            onClick = {
+                                kind = option
+                                selectedAssessment = assessments.firstOrNull { assessment ->
+                                    sameAssessmentKind(assessment.kind, option)
+                                }
+                                editingUid = null
+                                savingMarkUid = null
+                                marksSearchQuery = ""
+                                assessmentMessage = null
+                                assessmentError = null
+                            },
+                        )
+                    }
+                }
+
                 if (savedAssessmentsForKind.isNotEmpty()) {
                     Text(
                         text = "SAVED ASSESSMENTS",
@@ -1307,6 +1328,17 @@ private fun TeacherMarksPanel(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
+                    TeacherChoiceChip(
+                        label = "+ Add",
+                        selected = showAssessmentDialog,
+                        onClick = {
+                            numberStr = nextAssessmentNumber(kind, assessments).toString()
+                            maxMarksStr = ""
+                            assessmentError = null
+                            showAssessmentDialog = true
+                        },
+                    )
+
                     savedAssessmentsForKind.forEach { assessment ->
                         TeacherChoiceChip(
                             label = assessmentChipLabel(assessment),
@@ -1317,160 +1349,79 @@ private fun TeacherMarksPanel(
                             },
                         )
                     }
+                }
 
-                    Box {
-                        TeacherChoiceChip(
-                            label = "+ Add",
-                            selected = addAssessmentMenuExpanded,
-                            onClick = { addAssessmentMenuExpanded = true },
-                        )
-                        DropdownMenu(
-                            expanded = addAssessmentMenuExpanded,
-                            onDismissRequest = { addAssessmentMenuExpanded = false },
-                            shape = RoundedCornerShape(16.dp),
-                            containerColor = NavyDeep,
-                            tonalElevation = 0.dp,
-                            shadowElevation = 18.dp,
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                Color.White.copy(alpha = 0.12f),
-                            ),
-                        ) {
-                            Text(
-                                text = "ADD ASSESSMENT",
-                                color = Gold,
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                            )
-                            assessmentOptions.forEach { option ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = assessmentOptionLabel(option),
-                                            color = Color.White,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                        )
-                                    },
-                                    trailingIcon = {
-                                        if (sameAssessmentKind(option, kind)) {
-                                            Icon(
-                                                Icons.Outlined.Check,
-                                                contentDescription = null,
-                                                tint = Gold,
-                                                modifier = Modifier.size(18.dp),
+                TeacherStatusBanner(assessmentMessage, isError = false)
+            }
+        }
+
+        if (showAssessmentDialog) {
+            TeacherAddAssessmentDialog(
+                subject = subject,
+                kind = kind,
+                numberStr = numberStr,
+                maxMarksStr = maxMarksStr,
+                loading = saving,
+                error = assessmentError,
+                onNumberChange = { numberStr = it },
+                onMaxMarksChange = { maxMarksStr = it },
+                onDismiss = {
+                    if (!saving) {
+                        showAssessmentDialog = false
+                        assessmentError = null
+                    }
+                },
+                onConfirm = {
+                    val number = numberStr.toIntOrNull()
+                    val maxMarks = maxMarksStr.toDoubleOrNull()
+                    when {
+                        number == null || number <= 0 -> {
+                            assessmentError = "Enter a valid assessment number."
+                        }
+                        maxMarks == null || maxMarks <= 0 -> {
+                            assessmentError = "Enter valid max marks."
+                        }
+                        else -> {
+                            saving = true
+                            assessmentMessage = null
+                            assessmentError = null
+                            scope.launch {
+                                val result = PortalRepository.createAssessment(
+                                    AssessmentRow(
+                                        classSubjectId = subject.classSubjectId,
+                                        kind = kind,
+                                        number = number,
+                                        maxMarks = maxMarks,
+                                    ),
+                                )
+                                saving = false
+                                result.fold(
+                                    onSuccess = { created ->
+                                        val sorted = PortalRepository
+                                            .getAssessments(subject.classSubjectId)
+                                            .getOrDefault(emptyList())
+                                            .sortedWith(
+                                                compareBy<AssessmentRow> { assessmentKindOrder(it.kind) }
+                                                    .thenBy { it.number }
+                                                    .thenBy { it.id },
                                             )
-                                        }
+                                        assessments = sorted
+                                        selectedAssessment = sorted.firstOrNull { it.id == created.id } ?: created
+                                        numberStr = ""
+                                        maxMarksStr = ""
+                                        showAssessmentDialog = false
+                                        assessmentMessage = "${assessmentHeading(created)} ready."
                                     },
-                                    onClick = {
-                                        kind = option
-                                        numberStr = nextAssessmentNumber(option, assessments).toString()
-                                        selectedAssessment = assessments.firstOrNull { assessment ->
-                                            sameAssessmentKind(assessment.kind, option)
-                                        }
-                                        editingUid = null
-                                        savingMarkUid = null
-                                        marksSearchQuery = ""
-                                        assessmentMessage = null
-                                        assessmentError = null
-                                        addAssessmentMenuExpanded = false
+                                    onFailure = { err ->
+                                        assessmentError = err.message?.ifBlank { "Could not create assessment." }
+                                            ?: "Could not create assessment."
                                     },
                                 )
                             }
                         }
                     }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(9.dp),
-                ) {
-                    OutlinedTextField(
-                        value = numberStr,
-                        onValueChange = { numberStr = it },
-                        label = { Text("Number") },
-                        placeholder = { Text(nextAssessmentNumber(kind, assessments).toString()) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = teacherFieldColors(),
-                        modifier = Modifier
-                            .weight(1f)
-                            .trackTeacherFieldFocus(),
-                    )
-                    OutlinedTextField(
-                        value = maxMarksStr,
-                        onValueChange = { maxMarksStr = it },
-                        label = { Text("Max marks") },
-                        placeholder = { Text("30") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = teacherFieldColors(),
-                        modifier = Modifier
-                            .weight(1f)
-                            .trackTeacherFieldFocus(),
-                    )
-                }
-
-                TeacherPrimaryButton(
-                    label = "Add ${assessmentTypeLabel(kind)}",
-                    icon = Icons.Outlined.EventAvailable,
-                    loading = saving,
-                    onClick = {
-                        val number = numberStr.toIntOrNull()
-                        val maxMarks = maxMarksStr.toDoubleOrNull()
-                        when {
-                            number == null || number <= 0 -> {
-                                assessmentError = "Enter a valid assessment number."
-                            }
-                            maxMarks == null || maxMarks <= 0 -> {
-                                assessmentError = "Enter valid max marks."
-                            }
-                            else -> {
-                                saving = true
-                                assessmentMessage = null
-                                assessmentError = null
-                                scope.launch {
-                                    val result = PortalRepository.createAssessment(
-                                        AssessmentRow(
-                                            classSubjectId = subject.classSubjectId,
-                                            kind = kind,
-                                            number = number,
-                                            maxMarks = maxMarks,
-                                        ),
-                                    )
-                                    saving = false
-                                    result.fold(
-                                        onSuccess = { created ->
-                                            val sorted = PortalRepository
-                                                .getAssessments(subject.classSubjectId)
-                                                .getOrDefault(emptyList())
-                                                .sortedWith(
-                                                    compareBy<AssessmentRow> { assessmentKindOrder(it.kind) }
-                                                        .thenBy { it.number }
-                                                        .thenBy { it.id },
-                                                )
-                                            assessments = sorted
-                                            selectedAssessment = sorted.firstOrNull { it.id == created.id } ?: created
-                                            numberStr = ""
-                                            maxMarksStr = ""
-                                            assessmentMessage = "${assessmentHeading(created)} ready."
-                                        },
-                                        onFailure = { err ->
-                                            assessmentError = err.message?.ifBlank { "Could not create assessment." }
-                                                ?: "Could not create assessment."
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                    },
-                )
-
-                TeacherStatusBanner(assessmentMessage, isError = false)
-                TeacherStatusBanner(assessmentError, isError = true)
-            }
+                },
+            )
         }
 
         val assessment = selectedAssessment
@@ -1486,14 +1437,14 @@ private fun TeacherMarksPanel(
                     verticalArrangement = Arrangement.spacedBy(9.dp),
                 ) {
                     Text(
-                        text = "MARKS · ${assessmentHeading(assessment)}",
+                        text = "Marks · ${assessmentHeading(assessment)}",
                         color = TextSecondary,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.1.sp,
                     )
 
-                    if (!loadingStudents && students.isNotEmpty()) {
+                    if (loadingStudents || students.isNotEmpty()) {
                         OutlinedTextField(
                             value = marksSearchQuery,
                             onValueChange = {
@@ -1703,6 +1654,84 @@ private fun TeacherMarksPanel(
                     body = "Choose a type and create an assessment slot to begin entering marks.",
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun TeacherAddAssessmentDialog(
+    subject: ClassSubjectView,
+    kind: String,
+    numberStr: String,
+    maxMarksStr: String,
+    loading: Boolean,
+    error: String?,
+    onNumberChange: (String) -> Unit,
+    onMaxMarksChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    TeacherDialogShell(
+        title = "Add ${assessmentTypeLabel(kind)}",
+        subtitle = "${subject.subjectCode} · ${subject.subjectName}",
+        icon = Icons.Outlined.EventAvailable,
+        onDismiss = { if (!loading) onDismiss() },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                text = "ASSESSMENT DETAILS",
+                color = TextSecondary,
+                fontSize = 9.5.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp,
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                OutlinedTextField(
+                    value = numberStr,
+                    onValueChange = onNumberChange,
+                    label = { Text("Number") },
+                    placeholder = { Text("1") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = teacherFieldColors(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .trackTeacherFieldFocus(),
+                )
+                OutlinedTextField(
+                    value = maxMarksStr,
+                    onValueChange = onMaxMarksChange,
+                    label = { Text("Max marks") },
+                    placeholder = { Text("30") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = teacherFieldColors(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .trackTeacherFieldFocus(),
+                )
+            }
+
+            Text(
+                text = "The assessment slot is created first. You can then enter or edit each student's marks.",
+                color = TextSecondary,
+                fontSize = 10.5.sp,
+                lineHeight = 14.sp,
+            )
+
+            TeacherStatusBanner(error, isError = true)
+
+            TeacherDialogActions(
+                confirmLabel = "Add ${assessmentTypeLabel(kind)}",
+                confirmEnabled = numberStr.isNotBlank() && maxMarksStr.isNotBlank(),
+                loading = loading,
+                onConfirm = onConfirm,
+                onCancel = { if (!loading) onDismiss() },
+            )
         }
     }
 }
