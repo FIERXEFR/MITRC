@@ -196,15 +196,17 @@ fun TeacherClassroomView(
                 selectedDate,
                 period = 1,
             ).getOrDefault(emptyList())
+            val existingByUid = existing.associate { it.studentUid to it.status }
 
             attendanceMap.clear()
             students.forEach { student ->
-                attendanceMap[student.uid] = existing
-                    .firstOrNull { it.studentUid == student.uid }
-                    ?.status
-                    ?: "P"
+                existingByUid[student.uid]?.let { status ->
+                    attendanceMap[student.uid] = status
+                }
             }
-            savedStatuses = students.associate { it.uid to (attendanceMap[it.uid] ?: "P") }
+            savedStatuses = students.mapNotNull { student ->
+                attendanceMap[student.uid]?.let { status -> student.uid to status }
+            }.toMap()
 
             // Keep the roster skeleton on screen long enough to read as a real loading state.
             val remainingSkeletonMs = 1_000L - (System.currentTimeMillis() - loadStartedAt)
@@ -213,8 +215,10 @@ fun TeacherClassroomView(
         }
     }
 
-    LaunchedEffect(selectedSubject?.classSubjectId, selectedDate, reloadTick) {
-        loadClassroom()
+    LaunchedEffect(selectedSubject?.classSubjectId, selectedDate, reloadTick, activeMode) {
+        if (activeMode == TeacherWorkMode.ATTENDANCE) {
+            loadClassroom()
+        }
     }
 
     val filteredStudents = students.filter { student ->
@@ -224,7 +228,7 @@ fun TeacherClassroomView(
             student.serialNo?.lowercase()?.contains(query) == true ||
             student.groupName?.lowercase()?.contains(query) == true
         val matchesStatus = attendanceFilter == null ||
-            (attendanceMap[student.uid] ?: "P") == attendanceFilter
+            attendanceMap[student.uid] == attendanceFilter
         matchesQuery && matchesStatus
     }
 
@@ -232,8 +236,10 @@ fun TeacherClassroomView(
     val absentCount = students.count { attendanceMap[it.uid] == "A" }
     val leaveCount = students.count { attendanceMap[it.uid] == "L" }
     val onDutyCount = students.count { attendanceMap[it.uid] == "OD" }
+    val markedCount = students.count { attendanceMap[it.uid] != null }
+    val allMarked = students.isNotEmpty() && markedCount == students.size
     val hasUnsavedChanges = students.isNotEmpty() && students.any { student ->
-        (attendanceMap[student.uid] ?: "P") != (savedStatuses[student.uid] ?: "P")
+        attendanceMap[student.uid] != savedStatuses[student.uid]
     }
 
     TeacherRefreshBox(
@@ -301,35 +307,15 @@ fun TeacherClassroomView(
                     }
 
                     item {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                text = "FILTER STUDENTS",
-                                color = TextSecondary,
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp,
-                            )
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(7.dp),
-                            ) {
-                                listOf(
-                                    null to "All (${students.size})",
-                                    "P" to "Present ($presentCount)",
-                                    "A" to "Absent ($absentCount)",
-                                    "L" to "Leave ($leaveCount)",
-                                    "OD" to "On duty ($onDutyCount)",
-                                ).forEach { (code, label) ->
-                                    TeacherChoiceChip(
-                                        label = label,
-                                        selected = attendanceFilter == code,
-                                        onClick = { attendanceFilter = code },
-                                    )
-                                }
-                            }
-                        }
+                        TeacherAttendanceFilterPicker(
+                            selected = attendanceFilter,
+                            total = students.size,
+                            present = presentCount,
+                            absent = absentCount,
+                            leave = leaveCount,
+                            onDuty = onDutyCount,
+                            onSelect = { attendanceFilter = it },
+                        )
                     }
 
                     item {
@@ -430,7 +416,7 @@ fun TeacherClassroomView(
                         else -> items(filteredStudents, key = { it.uid }) { student ->
                             StudentAttendanceCard(
                                 student = student,
-                                currentStatus = attendanceMap[student.uid] ?: "P",
+                                currentStatus = attendanceMap[student.uid],
                                 onStatusChange = { status ->
                                     attendanceMap[student.uid] = status
                                     statusMessage = null
@@ -467,10 +453,11 @@ fun TeacherClassroomView(
                 present = presentCount,
                 absent = absentCount,
                 total = students.size,
+                marked = markedCount,
                 saving = saving,
                 statusMessage = statusMessage,
                 errorMessage = errorMessage,
-                enabled = selectedSubject != null && students.isNotEmpty(),
+                enabled = selectedSubject != null && students.isNotEmpty() && allMarked,
                 showSaveButton = !loadingStudents && hasUnsavedChanges,
                 onSave = {
                     val subject = selectedSubject
@@ -479,12 +466,15 @@ fun TeacherClassroomView(
                         selectedDate > teacherTodayIst().toString() -> {
                             errorMessage = "Attendance cannot be taken for a future date."
                         }
+                        !allMarked -> {
+                            errorMessage = "Select attendance for every student before saving."
+                        }
                         else -> {
                             val dateToSave = selectedDate
                             val records = students.map { student ->
                                 TakeAttendanceRecord(
                                     uid = student.uid,
-                                    status = attendanceMap[student.uid] ?: "P",
+                                    status = attendanceMap.getValue(student.uid),
                                 )
                             }
                             val savedSnapshot = records.associate { it.uid to it.status }
@@ -790,7 +780,7 @@ private fun TeacherStudentAvatar(name: String?) {
 @Composable
 private fun StudentAttendanceCard(
     student: StudentProfileView,
-    currentStatus: String,
+    currentStatus: String?,
     onStatusChange: (String) -> Unit,
 ) {
     Surface(
@@ -859,12 +849,13 @@ private fun StudentAttendanceCard(
 }
 
 @Composable
-private fun OnlineStatusPill(status: String) {
+private fun OnlineStatusPill(status: String?) {
     val (label, color) = when (status) {
         "P" -> "Present" to TeacherPresentGreen
         "A" -> "Absent" to ErrorRed
         "L" -> "Leave" to Gold
-        else -> "On duty" to Navy
+        "OD" -> "On duty" to Navy
+        else -> "Not marked" to TextSecondary
     }
     Box(
         modifier = Modifier
@@ -948,6 +939,7 @@ private fun AttendanceSaveBar(
     present: Int,
     absent: Int,
     total: Int,
+    marked: Int,
     saving: Boolean,
     statusMessage: String?,
     errorMessage: String?,
@@ -983,7 +975,11 @@ private fun AttendanceSaveBar(
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = if (total == 0) "Select an enrolled class first." else "Daily attendance · $total students",
+                        text = when {
+                            total == 0 -> "Select an enrolled class first."
+                            marked < total -> "$marked of $total marked · Select every student"
+                            else -> "Daily attendance · $total students"
+                        },
                         color = TextSecondary,
                         fontSize = 10.sp,
                     )
@@ -1328,17 +1324,6 @@ private fun TeacherMarksPanel(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
-                    TeacherChoiceChip(
-                        label = "+ Add",
-                        selected = showAssessmentDialog,
-                        onClick = {
-                            numberStr = nextAssessmentNumber(kind, assessments).toString()
-                            maxMarksStr = ""
-                            assessmentError = null
-                            showAssessmentDialog = true
-                        },
-                    )
-
                     savedAssessmentsForKind.forEach { assessment ->
                         TeacherChoiceChip(
                             label = assessmentChipLabel(assessment),
@@ -1349,6 +1334,17 @@ private fun TeacherMarksPanel(
                             },
                         )
                     }
+
+                    TeacherChoiceChip(
+                        label = "+ Add",
+                        selected = showAssessmentDialog,
+                        onClick = {
+                            numberStr = nextAssessmentNumber(kind, assessments).toString()
+                            maxMarksStr = ""
+                            assessmentError = null
+                            showAssessmentDialog = true
+                        },
+                    )
                 }
 
                 TeacherStatusBanner(assessmentMessage, isError = false)

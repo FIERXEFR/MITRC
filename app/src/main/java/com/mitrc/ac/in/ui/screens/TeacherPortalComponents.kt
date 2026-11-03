@@ -403,6 +403,23 @@ private fun TeacherClassPickerRow(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    TeacherPickerMenuRow(
+        badge = subject.subjectCode.take(3).uppercase(),
+        title = "${subject.subjectCode}  ·  ${subject.subjectName}",
+        subtitle = teacherClassLabel(subject, info),
+        selected = selected,
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun TeacherPickerMenuRow(
+    badge: String,
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -420,7 +437,7 @@ private fun TeacherClassPickerRow(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = subject.subjectCode.take(3).uppercase(),
+                text = badge,
                 color = if (selected) Navy else TextSecondary,
                 fontSize = 9.5.sp,
                 fontWeight = FontWeight.ExtraBold,
@@ -431,7 +448,7 @@ private fun TeacherClassPickerRow(
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "${subject.subjectCode}  ·  ${subject.subjectName}",
+                text = title,
                 color = TextPrimary,
                 fontSize = 12.5.sp,
                 fontWeight = FontWeight.Bold,
@@ -440,7 +457,7 @@ private fun TeacherClassPickerRow(
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                text = teacherClassLabel(subject, info),
+                text = subtitle,
                 color = TextSecondary,
                 fontSize = 10.sp,
                 maxLines = 1,
@@ -458,6 +475,242 @@ private fun TeacherClassPickerRow(
         }
     }
 }
+
+@Composable
+internal fun TeacherAttendanceFilterPicker(
+    selected: String?,
+    total: Int,
+    present: Int,
+    absent: Int,
+    leave: Int,
+    onDuty: Int,
+    onSelect: (String?) -> Unit,
+) {
+    val options = listOf(
+        TeacherFilterOption(
+            key = null,
+            badge = "ALL",
+            title = "All students",
+            subtitle = teacherStudentCountLabel(total),
+            count = total,
+        ),
+        TeacherFilterOption(
+            key = "P",
+            badge = "P",
+            title = "Present",
+            subtitle = teacherStudentCountLabel(present),
+            count = present,
+        ),
+        TeacherFilterOption(
+            key = "A",
+            badge = "A",
+            title = "Absent",
+            subtitle = teacherStudentCountLabel(absent),
+            count = absent,
+        ),
+        TeacherFilterOption(
+            key = "L",
+            badge = "L",
+            title = "Leave",
+            subtitle = teacherStudentCountLabel(leave),
+            count = leave,
+        ),
+        TeacherFilterOption(
+            key = "OD",
+            badge = "OD",
+            title = "On duty",
+            subtitle = teacherStudentCountLabel(onDuty),
+            count = onDuty,
+        ),
+    )
+    val current = options.firstOrNull { it.key == selected } ?: options.first()
+
+    var expanded by remember { mutableStateOf(false) }
+    var menuMounted by remember { mutableStateOf(false) }
+    var anchorWidthPx by remember { mutableIntStateOf(0) }
+    var anchorHeightPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    val menuTransition = remember { MutableTransitionState(false) }
+    val menuWidth = with(density) { anchorWidthPx.toDp() }.coerceAtMost(420.dp)
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "attendanceFilterChevron",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (expanded) Gold.copy(alpha = 0.62f) else DividerSoft,
+        animationSpec = tween(180, easing = FastOutSlowInEasing),
+        label = "attendanceFilterBorder",
+    )
+
+    LaunchedEffect(expanded) {
+        if (expanded) {
+            menuMounted = true
+            menuTransition.targetState = true
+        } else {
+            menuTransition.targetState = false
+            if (menuMounted) {
+                delay(150)
+                menuMounted = false
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier.onGloballyPositioned { coordinates ->
+            anchorWidthPx = coordinates.size.width
+            anchorHeightPx = coordinates.size.height
+        },
+    ) {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = SurfaceWhite,
+            border = BorderStroke(1.dp, borderColor),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = true },
+        ) {
+            Row(
+                modifier = Modifier.padding(13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(Navy.copy(alpha = 0.08f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = current.badge,
+                        color = Navy,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "FILTER STUDENTS",
+                        color = TextSecondary,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = current.title,
+                        color = TextPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = if (current.key == null) {
+                            teacherStudentCountLabel(total)
+                        } else {
+                            teacherFilterSummary(current.count, total)
+                        },
+                        color = TextSecondary,
+                        fontSize = 10.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Outlined.ExpandMore,
+                    contentDescription = null,
+                    tint = TextSecondary,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .rotate(chevronRotation),
+                )
+            }
+        }
+
+        if (menuMounted && anchorWidthPx > 0) {
+            Popup(
+                alignment = Alignment.TopStart,
+                offset = IntOffset(0, anchorHeightPx + with(density) { 6.dp.roundToPx() }),
+                onDismissRequest = { expanded = false },
+                properties = PopupProperties(focusable = true),
+            ) {
+                AnimatedVisibility(
+                    visibleState = menuTransition,
+                    enter = fadeIn(tween(170)) +
+                        scaleIn(
+                            initialScale = 0.94f,
+                            animationSpec = tween(220, easing = FastOutSlowInEasing),
+                            transformOrigin = TransformOrigin(0.5f, 0f),
+                        ) +
+                        slideInVertically(
+                            animationSpec = tween(220, easing = FastOutSlowInEasing),
+                        ) { -it / 20 },
+                    exit = fadeOut(tween(120)) +
+                        scaleOut(
+                            targetScale = 0.97f,
+                            animationSpec = tween(140, easing = FastOutSlowInEasing),
+                            transformOrigin = TransformOrigin(0.5f, 0f),
+                        ) +
+                        slideOutVertically(animationSpec = tween(140)) { -it / 24 },
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = SurfaceWhite,
+                        border = BorderStroke(1.dp, DividerSoft),
+                        shadowElevation = 18.dp,
+                        modifier = Modifier.width(menuWidth),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .heightIn(max = 360.dp)
+                                .verticalScroll(rememberScrollState())
+                                .padding(horizontal = 6.dp, vertical = 6.dp),
+                        ) {
+                            Text(
+                                text = "FILTER STUDENTS",
+                                color = TextSecondary,
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.1.sp,
+                                modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 5.dp),
+                            )
+
+                            options.forEach { option ->
+                                TeacherPickerMenuRow(
+                                    badge = option.badge,
+                                    title = option.title,
+                                    subtitle = option.subtitle,
+                                    selected = option.key == current.key,
+                                    onClick = {
+                                        expanded = false
+                                        onSelect(option.key)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class TeacherFilterOption(
+    val key: String?,
+    val badge: String,
+    val title: String,
+    val subtitle: String,
+    val count: Int,
+)
+
+private fun teacherStudentCountLabel(count: Int): String =
+    if (count == 1) "1 student" else "$count students"
+
+private fun teacherFilterSummary(count: Int, total: Int): String =
+    if (total == 1) "1 of 1 student" else "$count of $total students"
 
 @Composable
 internal fun TeacherClassSelectorCard(
