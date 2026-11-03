@@ -444,7 +444,9 @@ private fun TeacherComposeNoticeDialog(
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
                 colors = teacherFieldColors(),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .trackTeacherFieldFocus(),
             )
 
             OutlinedTextField(
@@ -456,7 +458,9 @@ private fun TeacherComposeNoticeDialog(
                 maxLines = 5,
                 shape = RoundedCornerShape(12.dp),
                 colors = teacherFieldColors(),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .trackTeacherFieldFocus(),
             )
 
             Text(

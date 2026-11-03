@@ -490,7 +490,9 @@ private fun TeacherUploadMaterialDialog(
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
                 colors = teacherFieldColors(),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .trackTeacherFieldFocus(),
             )
 
             OutlinedTextField(
@@ -502,7 +504,9 @@ private fun TeacherUploadMaterialDialog(
                 maxLines = 4,
                 shape = RoundedCornerShape(12.dp),
                 colors = teacherFieldColors(),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .trackTeacherFieldFocus(),
             )
 
             Text(

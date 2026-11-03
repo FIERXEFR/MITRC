@@ -42,6 +42,11 @@ secrets.properties
 .env.*
 !.env.example
 
+# Firebase Admin service account keys
+*firebase-service-account*.json
+*firebase-adminsdk*.json
+service-account*.json
+
 # Supabase local CLI
 supabase/.temp/
 supabase/.branches/

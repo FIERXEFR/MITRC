@@ -1,15 +1,25 @@
 package com.mitrc.ac.`in`.data
 
+import android.util.Base64
 import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
 import com.mitrc.ac.`in`.utils.NativeUtils
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.annotations.SupabaseInternal
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.storage.Storage
 import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.api.createClientPlugin
+import io.ktor.http.HttpHeaders
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
+import org.json.JSONObject
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
 
 object SupabaseManager {
 
@@ -35,9 +45,29 @@ object SupabaseManager {
     @Volatile
     private var adminClient: SupabaseClient? = null
 
+    /**
+     * Serializes the one-time cold-start user lookup. Several portal queries can start before
+     * Firebase has restored the persisted session; without this lock each one would wait out its
+     * own timeout and then send an anon request.
+     */
+    private val coldStartLock = Mutex()
+
+    @Volatile
+    private var coldStartWaitDone = false
+
+    /**
+     * Firebase users must carry `role: "authenticated"` for Supabase's third-party auth bridge to
+     * map them to the `authenticated` Postgres role. Firebase's client SDK caches ID tokens, so an
+     * older token minted before the claim was configured can keep the app on the `anon` role.
+     * Force one refresh per UID when that happens.
+     */
+    private val roleRefreshAttemptedUids: MutableSet<String> =
+        Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+
     val isConfigured: Boolean
         get() = client != null
 
+    @OptIn(SupabaseInternal::class)
     fun init() {
         if (client != null) return
         synchronized(this) {
@@ -59,6 +89,20 @@ object SupabaseManager {
                 install(Postgrest)
                 install(Storage)
                 httpEngine = OkHttp.create()
+                // supabase-kt 3.1.1 exposes `accessToken` but its Postgrest plugin does not attach
+                // it to outgoing requests. Without this interceptor PostgREST only sees the anon
+                // `apikey`, so Firebase users are treated as `anon` and every RLS-protected
+                // write/RPC fails with "permission denied" or an RLS violation.
+                httpConfig {
+                    install(createClientPlugin("mitrc-firebase-token") {
+                        onRequest { request, _ ->
+                            val token = currentIdToken()
+                            if (!token.isNullOrBlank()) {
+                                request.headers[HttpHeaders.Authorization] = "Bearer $token"
+                            }
+                        }
+                    })
+                }
             }
             Log.i(TAG, "Supabase configured for $url")
         }
@@ -67,31 +111,80 @@ object SupabaseManager {
     /**
      * A live Firebase ID token for Supabase.
      *
-     * Waits out the cold-start window described on [USER_WAIT_ATTEMPTS] and only gives up (and
-     * returns `null`, which makes Supabase fall back to the anon key) once no user appears.
+     * Waits out the cold-start window described on [USER_WAIT_ATTEMPTS] once, and only gives up
+     * (returning `null`, which makes Supabase use the anon key) after no user appears. Later
+     * requests return immediately when the app is signed out instead of paying the timeout again.
      */
     private suspend fun currentIdToken(): String? {
         val auth = FirebaseAuth.getInstance()
-        repeat(USER_WAIT_ATTEMPTS) { attempt ->
-            val user = auth.currentUser
-            if (user != null) {
-                val token = runCatching { user.getIdToken(false).await()?.token }
-                    .onFailure { error ->
-                        Log.w(TAG, "getIdToken failed for uid=${user.uid}: ${error.message}")
-                        if (isAuthFailure(error)) {
-                            Log.w(TAG, "Cached auth credential is invalid or expired. Signing out stale session.")
-                            runCatching { auth.signOut() }
-                        }
-                    }
-                    .getOrNull()
-                if (!token.isNullOrBlank()) return token
-                Log.w(TAG, "getIdToken returned no token for uid=${user.uid}, attempt=$attempt")
+        auth.currentUser?.let { return idTokenFor(it) }
+
+        return coldStartLock.withLock {
+            val userNow = auth.currentUser
+            if (userNow != null) return@withLock idTokenFor(userNow)
+            if (coldStartWaitDone) return@withLock null
+
+            var found: FirebaseUser? = null
+            for (attempt in 0 until USER_WAIT_ATTEMPTS) {
+                found = auth.currentUser
+                if (found != null) break
+                if (attempt < USER_WAIT_ATTEMPTS - 1) delay(USER_WAIT_DELAY_MS)
             }
-            if (attempt < USER_WAIT_ATTEMPTS - 1) delay(USER_WAIT_DELAY_MS)
+            coldStartWaitDone = true
+            found?.let { idTokenFor(it) }
         }
-        Log.w(TAG, "No signed-in user for a Supabase request after $USER_WAIT_ATTEMPTS attempts")
-        return null
     }
+
+    private suspend fun idTokenFor(user: FirebaseUser): String? {
+        var token = runCatching { user.getIdToken(false).await()?.token }
+            .onFailure { error ->
+                Log.w(TAG, "getIdToken failed for uid=${user.uid}: ${error.message}")
+                if (isAuthFailure(error)) {
+                    Log.w(TAG, "Cached auth credential is invalid or expired. Signing out stale session.")
+                    runCatching { FirebaseAuth.getInstance().signOut() }
+                }
+            }
+            .getOrNull()
+
+        if (token.isNullOrBlank()) {
+            Log.w(TAG, "getIdToken returned no token for uid=${user.uid}")
+            return null
+        }
+
+        if (!hasAuthenticatedRole(token) && roleRefreshAttemptedUids.add(user.uid)) {
+            Log.w(
+                TAG,
+                "Firebase ID token for uid=${user.uid} has no role=authenticated claim; " +
+                    "forcing one refresh so Supabase does not fall back to the anon role"
+            )
+            token = runCatching { user.getIdToken(true).await()?.token }
+                .onFailure { Log.w(TAG, "Forced ID-token refresh failed for uid=${user.uid}", it) }
+                .getOrNull()
+            if (!token.isNullOrBlank() && !hasAuthenticatedRole(token)) {
+                Log.e(
+                    TAG,
+                    "Firebase user uid=${user.uid} still has no role=authenticated claim. " +
+                        "Assign it with the Firebase Admin SDK or a blocking auth function."
+                )
+            }
+        }
+
+        return token?.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * Reads the JWT payload without verifying it. This is only used to decide whether Firebase's
+     * cached token predates the `role: authenticated` custom claim; Supabase still verifies the
+     * signature and claim before trusting the token.
+     */
+    private fun hasAuthenticatedRole(token: String): Boolean = runCatching {
+        val payload = token.split('.').getOrNull(1) ?: return@runCatching false
+        val decoded = Base64.decode(
+            payload,
+            Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+        )
+        JSONObject(String(decoded, Charsets.UTF_8)).optString("role") == "authenticated"
+    }.getOrDefault(false)
 
     /**
      * Throws away Firebase's cached ID token so the next [currentIdToken] round-trips a brand new

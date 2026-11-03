@@ -242,7 +242,7 @@ data class AttendanceSessionRow(
     @SerialName("class_subject_id") val classSubjectId: Int,
     @SerialName("class_date") val classDate: String,
     @SerialName("period") val period: Int,
-    @SerialName("taken_by") val takenBy: Int? = null, // Faculty ID
+    @SerialName("taken_by") val takenBy: String? = null, // Firebase UID of the teacher
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
 )

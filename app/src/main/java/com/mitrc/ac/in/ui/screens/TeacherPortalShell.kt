@@ -1,5 +1,9 @@
 package com.mitrc.ac.`in`.ui.screens
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -31,6 +35,7 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -50,7 +55,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import com.google.firebase.auth.FirebaseAuth
 import com.mitrc.ac.`in`.auth.AuthRepository
@@ -83,6 +90,9 @@ fun TeacherPortalShell(
     onSignedOut: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val fieldFocusTracker = remember { TeacherFieldFocusTracker() }
+    val focusManager = LocalFocusManager.current
+    val activity = LocalContext.current.findActivity()
     var selectedTabName by rememberSaveable { mutableStateOf(TeacherTab.Overview.name) }
     val selectedTab = TeacherTab.entries.firstOrNull { it.name == selectedTabName } ?: TeacherTab.Overview
 
@@ -92,22 +102,36 @@ fun TeacherPortalShell(
     )
 
     fun goToTab(tab: TeacherTab) {
+        val targetIndex = TeacherTab.entries.indexOf(tab)
+        if (
+            selectedTabName == tab.name &&
+            pagerState.currentPage == targetIndex &&
+            !pagerState.isScrollInProgress
+        ) {
+            return
+        }
+
+        // Exactly one animation per tap. A second `LaunchedEffect(selectedTab)` used to start the
+        // same pager scroll again before the first one had reported `isScrollInProgress`, which
+        // made the two animations compete and produced a visible hitch when switching tabs.
         selectedTabName = tab.name
         scope.launch {
             pagerState.animateScrollToPage(
-                page = TeacherTab.entries.indexOf(tab),
+                page = targetIndex,
                 animationSpec = tween(300, easing = FastOutSlowInEasing),
             )
         }
     }
 
-    LaunchedEffect(selectedTab) {
-        val targetIndex = TeacherTab.entries.indexOf(selectedTab)
-        if (pagerState.currentPage != targetIndex && !pagerState.isScrollInProgress) {
-            pagerState.animateScrollToPage(
-                page = targetIndex,
-                animationSpec = tween(300, easing = FastOutSlowInEasing),
-            )
+    // Back is staged: dismiss any focused text field first, then return to Overview, then exit.
+    BackHandler {
+        when {
+            fieldFocusTracker.hasFocusedField -> {
+                focusManager.clearFocus(force = true)
+                fieldFocusTracker.clear()
+            }
+            selectedTab != TeacherTab.Overview -> goToTab(TeacherTab.Overview)
+            else -> activity?.finish()
         }
     }
 
@@ -212,12 +236,13 @@ fun TeacherPortalShell(
         else -> selectedTab.label
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Slate),
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+    CompositionLocalProvider(LocalTeacherFieldFocusTracker provides fieldFocusTracker) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Slate),
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
             PortalHeroHeader(
                 overline = "TEACHER PORTAL",
                 title = headerTitle,
@@ -323,6 +348,13 @@ fun TeacherPortalShell(
             )
         }
     }
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @Composable

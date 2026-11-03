@@ -30,7 +30,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.State
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -116,16 +117,19 @@ internal fun formatPtmSchedule(raw: String?): String? {
 }
 
 /**
- * Reusable shimmer modifier for skeleton previews across all cards & screens.
+ * Optional shared shimmer clock.
  *
- * Draws a mid-grey block with a darker slate band travelling across it, left to right. The band
- * is deliberately darker than the base rather than lighter - a light highlight only shows up on a
- * dark surface, which is why the previous near-white pulse was invisible in light theme.
+ * A skeleton screen can provide one [State] here so every block on that screen shares a single
+ * animation instead of starting its own infinite transition. That matters on launch/refresh where
+ * 20+ blocks are on screen at once: separate transitions used to recompose every block on every
+ * frame, which is exactly the kind of work that makes a cold start and a refresh feel janky.
  */
+internal val LocalShimmerProgress = staticCompositionLocalOf<State<Float>?> { null }
+
 @Composable
-fun Modifier.shimmerEffect(): Modifier {
+private fun rememberShimmerProgress(): State<Float> {
     val transition = rememberInfiniteTransition(label = "shimmerTransition")
-    val progress by transition.animateFloat(
+    return transition.animateFloat(
         // -1f .. 2f puts the band fully off one edge at each end, so it never pops into view.
         initialValue = -1f,
         targetValue = 2f,
@@ -135,12 +139,26 @@ fun Modifier.shimmerEffect(): Modifier {
         ),
         label = "shimmerProgress"
     )
-    // Deliberately read here, during composition: the frame that moves the band then rebuilds
-    // this modifier and invalidates the draw pass. Reading it only inside `drawBehind` would
-    // happen after the draw pass was already considered clean, so the band would never move.
-    val sweep = progress
+}
+
+/**
+ * Reusable shimmer modifier for skeleton previews across all cards & screens.
+ *
+ * Draws a mid-grey block with a darker slate band travelling across it, left to right. The band
+ * is deliberately darker than the base rather than lighter - a light highlight only shows up on a
+ * dark surface, which is why the previous near-white pulse was invisible in light theme.
+ *
+ * The animation value is read inside `drawBehind` (the draw phase), not during composition, so a
+ * moving band only invalidates drawing for that block. If a parent provided [LocalShimmerProgress]
+ * all blocks share one clock; otherwise this block falls back to its own transition.
+ */
+@Composable
+fun Modifier.shimmerEffect(): Modifier {
+    val sharedProgress = LocalShimmerProgress.current
+    val progress = sharedProgress ?: rememberShimmerProgress()
 
     return this.drawBehind {
+        val sweep = progress.value
         val width = size.width.coerceAtLeast(1f)
         val band = width * 0.55f
         val centre = width * sweep

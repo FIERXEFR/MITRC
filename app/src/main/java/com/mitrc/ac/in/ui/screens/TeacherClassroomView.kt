@@ -1,5 +1,6 @@
 package com.mitrc.ac.`in`.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
@@ -8,6 +9,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,6 +41,7 @@ import androidx.compose.material.icons.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.EventAvailable
 import androidx.compose.material.icons.outlined.FactCheck
 import androidx.compose.material.icons.outlined.Groups
@@ -49,6 +53,8 @@ import androidx.compose.material.icons.outlined.Today
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -68,6 +74,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -95,6 +103,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 enum class TeacherWorkMode(val label: String) {
@@ -150,7 +159,9 @@ fun TeacherClassroomView(
     var loadingStudents by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
+    var attendanceFilter by rememberSaveable { mutableStateOf<String?>(null) }
     val attendanceMap = remember { mutableStateMapOf<String, String>() }
+    var savedStatuses by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     var saving by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
@@ -166,11 +177,17 @@ fun TeacherClassroomView(
         if (subject == null) {
             students = emptyList()
             attendanceMap.clear()
+            savedStatuses = emptyMap()
             loadingStudents = false
             loadError = null
         } else {
             loadingStudents = true
             loadError = null
+            students = emptyList()
+            attendanceMap.clear()
+            savedStatuses = emptyMap()
+            val loadStartedAt = System.currentTimeMillis()
+
             val studentResult = PortalRepository.getEnrolledStudentsForClass(subject.classId)
             students = studentResult
                 .getOrDefault(emptyList())
@@ -190,6 +207,11 @@ fun TeacherClassroomView(
                     ?.status
                     ?: "P"
             }
+            savedStatuses = students.associate { it.uid to (attendanceMap[it.uid] ?: "P") }
+
+            // Keep the roster skeleton on screen long enough to read as a real loading state.
+            val remainingSkeletonMs = 1_000L - (System.currentTimeMillis() - loadStartedAt)
+            if (remainingSkeletonMs > 0) delay(remainingSkeletonMs)
             loadingStudents = false
         }
     }
@@ -198,23 +220,24 @@ fun TeacherClassroomView(
         loadClassroom()
     }
 
-    val filteredStudents = remember(students, searchQuery) {
+    val filteredStudents = students.filter { student ->
         val query = searchQuery.trim().lowercase()
-        if (query.isEmpty()) {
-            students
-        } else {
-            students.filter { student ->
-                student.name?.lowercase()?.contains(query) == true ||
-                    student.serialNo?.lowercase()?.contains(query) == true ||
-                    student.groupName?.lowercase()?.contains(query) == true
-            }
-        }
+        val matchesQuery = query.isEmpty() ||
+            student.name?.lowercase()?.contains(query) == true ||
+            student.serialNo?.lowercase()?.contains(query) == true ||
+            student.groupName?.lowercase()?.contains(query) == true
+        val matchesStatus = attendanceFilter == null ||
+            (attendanceMap[student.uid] ?: "P") == attendanceFilter
+        matchesQuery && matchesStatus
     }
 
     val presentCount = students.count { attendanceMap[it.uid] == "P" }
     val absentCount = students.count { attendanceMap[it.uid] == "A" }
     val leaveCount = students.count { attendanceMap[it.uid] == "L" }
     val onDutyCount = students.count { attendanceMap[it.uid] == "OD" }
+    val hasUnsavedChanges = students.isNotEmpty() && students.any { student ->
+        (attendanceMap[student.uid] ?: "P") != (savedStatuses[student.uid] ?: "P")
+    }
 
     TeacherRefreshBox(
         onRefresh = {
@@ -281,6 +304,38 @@ fun TeacherClassroomView(
                     }
 
                     item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "FILTER STUDENTS",
+                                color = TextSecondary,
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.sp,
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                            ) {
+                                listOf(
+                                    null to "All (${students.size})",
+                                    "P" to "Present ($presentCount)",
+                                    "A" to "Absent ($absentCount)",
+                                    "L" to "Leave ($leaveCount)",
+                                    "OD" to "On duty ($onDutyCount)",
+                                ).forEach { (code, label) ->
+                                    TeacherChoiceChip(
+                                        label = label,
+                                        selected = attendanceFilter == code,
+                                        onClick = { attendanceFilter = code },
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    item {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -333,32 +388,15 @@ fun TeacherClassroomView(
                             },
                             shape = RoundedCornerShape(14.dp),
                             colors = teacherFieldColors(),
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .trackTeacherFieldFocus(),
                         )
                     }
 
                     when {
                         loadingStudents -> item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 28.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CircularProgressIndicator(
-                                        color = Navy,
-                                        strokeWidth = 2.5.dp,
-                                        modifier = Modifier.size(28.dp),
-                                    )
-                                    Spacer(Modifier.height(10.dp))
-                                    Text(
-                                        text = "Loading the class roster...",
-                                        color = TextSecondary,
-                                        fontSize = 12.sp,
-                                    )
-                                }
-                            }
+                            TeacherAttendanceListSkeleton(count = 3)
                         }
 
                         loadError != null && students.isEmpty() -> item {
@@ -383,9 +421,12 @@ fun TeacherClassroomView(
                             TeacherEmptyState(
                                 icon = Icons.Outlined.Search,
                                 title = "No matching students",
-                                body = "Try a different name, roll number or group.",
-                                actionLabel = "Clear search",
-                                onAction = { searchQuery = "" },
+                                body = "Try a different name, roll number, group or attendance filter.",
+                                actionLabel = "Clear filters",
+                                onAction = {
+                                    searchQuery = ""
+                                    attendanceFilter = null
+                                },
                             )
                         }
 
@@ -433,6 +474,7 @@ fun TeacherClassroomView(
                 statusMessage = statusMessage,
                 errorMessage = errorMessage,
                 enabled = selectedSubject != null && students.isNotEmpty(),
+                showSaveButton = !loadingStudents && hasUnsavedChanges,
                 onSave = {
                     val subject = selectedSubject
                     when {
@@ -448,6 +490,7 @@ fun TeacherClassroomView(
                                     status = attendanceMap[student.uid] ?: "P",
                                 )
                             }
+                            val savedSnapshot = records.associate { it.uid to it.status }
 
                             saving = true
                             statusMessage = null
@@ -462,6 +505,7 @@ fun TeacherClassroomView(
                                 saving = false
                                 result.fold(
                                     onSuccess = {
+                                        savedStatuses = savedSnapshot
                                         statusMessage = "Attendance saved for ${teacherDateLabel(dateToSave)}."
                                     },
                                     onFailure = { error ->
@@ -729,6 +773,24 @@ private fun AttendanceSummaryTile(
 }
 
 @Composable
+private fun TeacherStudentAvatar(name: String?) {
+    Box(
+        modifier = Modifier
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(Navy.copy(alpha = 0.08f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = teacherInitials(name),
+            color = Navy,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.ExtraBold,
+        )
+    }
+}
+
+@Composable
 private fun StudentAttendanceCard(
     student: StudentProfileView,
     currentStatus: String,
@@ -744,20 +806,7 @@ private fun StudentAttendanceCard(
     ) {
         Column(modifier = Modifier.padding(13.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(Navy.copy(alpha = 0.08f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = teacherInitials(student.name),
-                        color = Navy,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                    )
-                }
+                TeacherStudentAvatar(student.name)
                 Spacer(Modifier.width(11.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -906,6 +955,7 @@ private fun AttendanceSaveBar(
     statusMessage: String?,
     errorMessage: String?,
     enabled: Boolean,
+    showSaveButton: Boolean,
     onSave: () -> Unit,
 ) {
     Surface(
@@ -942,32 +992,150 @@ private fun AttendanceSaveBar(
                     )
                 }
 
-                Button(
-                    onClick = onSave,
-                    enabled = enabled && !saving,
-                    shape = RoundedCornerShape(13.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Navy,
-                        contentColor = Color.White,
-                        disabledContainerColor = Navy.copy(alpha = 0.35f),
-                        disabledContentColor = Color.White.copy(alpha = 0.8f),
-                    ),
-                    modifier = Modifier.heightIn(min = 48.dp),
+                AnimatedVisibility(
+                    visible = showSaveButton,
+                    enter = fadeIn(tween(220)) +
+                        scaleIn(
+                            initialScale = 0.82f,
+                            animationSpec = tween(220, easing = FastOutSlowInEasing),
+                        ),
+                    exit = fadeOut(tween(140)) +
+                        scaleOut(
+                            targetScale = 0.82f,
+                            animationSpec = tween(140),
+                        ),
                 ) {
-                    if (saving) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = Color.White,
-                            strokeWidth = 2.dp,
-                        )
-                    } else {
-                        Icon(Icons.Outlined.Save, contentDescription = null, modifier = Modifier.size(17.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Save", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                    Button(
+                        onClick = onSave,
+                        enabled = enabled && !saving,
+                        shape = RoundedCornerShape(13.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Navy,
+                            contentColor = Color.White,
+                            disabledContainerColor = Navy.copy(alpha = 0.35f),
+                            disabledContentColor = Color.White.copy(alpha = 0.8f),
+                        ),
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) {
+                        if (saving) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Icon(Icons.Outlined.Save, contentDescription = null, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Save", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+private fun assessmentTypeLabel(kind: String): String = when (kind.uppercase(Locale.US)) {
+    "UT" -> "Unit Test"
+    "EXP" -> "Experiment"
+    "ASSIGNMENT" -> "Assignment"
+    "MID" -> "Mid Term"
+    "END", "FINAL" -> "Final"
+    else -> kind
+}
+
+private fun assessmentShortLabel(kind: String): String = when (kind.uppercase(Locale.US)) {
+    "END", "FINAL" -> "FINAL"
+    else -> kind.uppercase(Locale.US)
+}
+
+private fun assessmentOptionLabel(kind: String): String = when (kind.uppercase(Locale.US)) {
+    "ASSIGNMENT" -> "Assignment"
+    "MID" -> "MID TERM"
+    "END", "FINAL" -> "FINAL"
+    else -> assessmentShortLabel(kind)
+}
+
+private fun assessmentKindOrder(kind: String): Int = when (kind.uppercase(Locale.US)) {
+    "UT" -> 0
+    "EXP" -> 1
+    "ASSIGNMENT" -> 2
+    "MID" -> 3
+    "END", "FINAL" -> 4
+    else -> 5
+}
+
+private fun assessmentChipLabel(assessment: AssessmentRow): String {
+    val kind = assessment.kind.uppercase(Locale.US)
+    return if (kind == "END" || kind == "FINAL") {
+        "FINAL"
+    } else {
+        "${assessmentOptionLabel(kind)} #${assessment.number}"
+    }
+}
+
+private fun assessmentHeading(assessment: AssessmentRow): String {
+    val kind = assessment.kind.uppercase(Locale.US)
+    return if (kind == "END" || kind == "FINAL") {
+        assessmentTypeLabel(kind)
+    } else {
+        "${assessmentTypeLabel(kind)} #${assessment.number}"
+    }
+}
+
+private fun normalizeAssessmentKind(kind: String): String {
+    val normalized = kind.uppercase(Locale.US)
+    return if (normalized == "FINAL") "END" else normalized
+}
+
+private fun sameAssessmentKind(first: String, second: String): Boolean =
+    normalizeAssessmentKind(first) == normalizeAssessmentKind(second)
+
+private fun nextAssessmentNumber(kind: String, assessments: List<AssessmentRow>): Int =
+    (assessments.filter { sameAssessmentKind(it.kind, kind) }
+        .maxOfOrNull { it.number } ?: 0) + 1
+
+private fun formatMarkNumber(value: Double): String =
+    if (value % 1.0 == 0.0) {
+        value.toInt().toString()
+    } else {
+        String.format(Locale.US, "%.1f", value)
+    }
+
+private fun formatScore(value: Double): String =
+    if (value % 1.0 == 0.0) value.toInt().toString() else value.toString()
+
+@Composable
+private fun MarkProgressCircle(
+    obtained: String,
+    maxMarks: String,
+    fraction: Float,
+    hasScore: Boolean,
+) {
+    val color = when {
+        !hasScore -> TextSecondary
+        fraction >= 0.75f -> SuccessGreen
+        fraction >= 0.4f -> Gold
+        else -> ErrorRed
+    }
+    Box(
+        modifier = Modifier.size(58.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        CircularProgressIndicator(
+            progress = { fraction },
+            modifier = Modifier.size(58.dp),
+            color = color,
+            trackColor = DividerSoft,
+            strokeWidth = 5.dp,
+        )
+        Text(
+            text = "$obtained /$maxMarks",
+            color = if (hasScore) TextPrimary else TextSecondary,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.ExtraBold,
+            maxLines = 1,
+        )
     }
 }
 
@@ -986,32 +1154,92 @@ private fun TeacherMarksPanel(
     }
 
     val scope = rememberCoroutineScope()
+    val isLab = subject.subjectKind.trim().equals("lab", ignoreCase = true)
+    val assessmentOptions = if (isLab) {
+        listOf("UT", "EXP", "ASSIGNMENT", "MID", "END")
+    } else {
+        listOf("UT", "ASSIGNMENT", "MID", "END")
+    }
     var assessments by remember(subject.classSubjectId) { mutableStateOf<List<AssessmentRow>>(emptyList()) }
     var selectedAssessment by remember(subject.classSubjectId) { mutableStateOf<AssessmentRow?>(null) }
     var kind by remember(subject.classSubjectId) { mutableStateOf("UT") }
     var numberStr by remember(subject.classSubjectId) { mutableStateOf("1") }
     var maxMarksStr by remember(subject.classSubjectId) { mutableStateOf("20.0") }
     var students by remember(subject.classSubjectId) { mutableStateOf<List<StudentProfileView>>(emptyList()) }
+    var loadingStudents by remember(subject.classSubjectId) { mutableStateOf(true) }
+    var marksSearchQuery by remember(subject.classSubjectId) { mutableStateOf("") }
     val marksMap = remember(subject.classSubjectId) { mutableStateMapOf<String, String>() }
+    var editingUid by remember(subject.classSubjectId) { mutableStateOf<String?>(null) }
+    var savingMarkUid by remember(subject.classSubjectId) { mutableStateOf<String?>(null) }
     var saving by remember(subject.classSubjectId) { mutableStateOf(false) }
+    var addAssessmentMenuExpanded by remember(subject.classSubjectId) { mutableStateOf(false) }
     var assessmentMessage by remember(subject.classSubjectId) { mutableStateOf<String?>(null) }
     var assessmentError by remember(subject.classSubjectId) { mutableStateOf<String?>(null) }
     var marksMessage by remember(subject.classSubjectId) { mutableStateOf<String?>(null) }
     var marksError by remember(subject.classSubjectId) { mutableStateOf<String?>(null) }
+    val editFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(editingUid) {
+        if (editingUid != null) {
+            delay(80)
+            runCatching { editFocusRequester.requestFocus() }
+        }
+    }
+    LaunchedEffect(assessmentMessage) {
+        if (assessmentMessage != null) {
+            delay(5_000)
+            assessmentMessage = null
+        }
+    }
+    LaunchedEffect(marksMessage) {
+        if (marksMessage != null) {
+            delay(5_000)
+            marksMessage = null
+        }
+    }
 
     LaunchedEffect(subject.classSubjectId, refreshKey) {
+        loadingStudents = true
+        students = emptyList()
+        savingMarkUid = null
+        addAssessmentMenuExpanded = false
+        val loadStartedAt = System.currentTimeMillis()
+
+        val previousAssessmentId = selectedAssessment?.id
         val assessmentResult = PortalRepository.getAssessments(subject.classSubjectId)
-        assessments = assessmentResult.getOrDefault(emptyList())
-        selectedAssessment = assessments.firstOrNull()
+        val sortedAssessments = assessmentResult
+            .getOrDefault(emptyList())
+            .sortedWith(
+                compareBy<AssessmentRow> { assessmentKindOrder(it.kind) }
+                    .thenBy { it.number }
+                    .thenBy { it.id },
+            )
+        assessments = sortedAssessments
+        val nextSelected = sortedAssessments.firstOrNull { it.id == previousAssessmentId }
+            ?: sortedAssessments.firstOrNull()
+        selectedAssessment = nextSelected
+        if (nextSelected != null && !sameAssessmentKind(nextSelected.kind, kind)) {
+            kind = normalizeAssessmentKind(nextSelected.kind)
+        }
+        if (kind !in assessmentOptions) kind = "UT"
+        numberStr = nextAssessmentNumber(kind, sortedAssessments).toString()
+        editingUid = null
 
         val studentResult = PortalRepository.getEnrolledStudentsForClass(subject.classId)
         students = studentResult
             .getOrDefault(emptyList())
             .sortedBy { it.name?.lowercase() ?: "" }
+
+        // Keep the roster skeleton on screen long enough to read as a real loading state.
+        val remainingSkeletonMs = 1_000L - (System.currentTimeMillis() - loadStartedAt)
+        if (remainingSkeletonMs > 0) delay(remainingSkeletonMs)
+        loadingStudents = false
     }
 
     LaunchedEffect(selectedAssessment?.id, refreshKey) {
         marksMap.clear()
+        editingUid = null
+        savingMarkUid = null
         marksError = null
         marksMessage = null
         val assessmentId = selectedAssessment?.id ?: return@LaunchedEffect
@@ -1028,6 +1256,21 @@ private fun TeacherMarksPanel(
                     ?: "Existing marks could not be loaded."
             },
         )
+    }
+
+    BackHandler(enabled = addAssessmentMenuExpanded) {
+        addAssessmentMenuExpanded = false
+    }
+
+    val savedAssessmentsForKind = assessments.filter { assessment ->
+        sameAssessmentKind(assessment.kind, kind)
+    }
+    val filteredMarkStudents = students.filter { student ->
+        val query = marksSearchQuery.trim().lowercase()
+        query.isEmpty() ||
+            student.name?.lowercase()?.contains(query) == true ||
+            student.serialNo?.lowercase()?.contains(query) == true ||
+            student.groupName?.lowercase()?.contains(query) == true
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1049,40 +1292,93 @@ private fun TeacherMarksPanel(
                     letterSpacing = 1.1.sp,
                 )
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
-                    listOf("UT", "EXP", "ASSIGNMENT", "MID", "END").forEach { option ->
-                        TeacherChoiceChip(
-                            label = option,
-                            selected = kind == option,
-                            onClick = { kind = option },
-                        )
-                    }
-                }
-
-                if (assessments.isNotEmpty()) {
+                if (savedAssessmentsForKind.isNotEmpty()) {
                     Text(
                         text = "SAVED ASSESSMENTS",
                         color = TextSecondary,
                         fontSize = 9.5.sp,
                         fontWeight = FontWeight.Bold,
                     )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(7.dp),
-                    ) {
-                        assessments.forEach { assessment ->
-                            TeacherChoiceChip(
-                                label = "${assessment.kind} #${assessment.number}",
-                                selected = selectedAssessment?.id == assessment.id,
-                                onClick = { selectedAssessment = assessment },
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    savedAssessmentsForKind.forEach { assessment ->
+                        TeacherChoiceChip(
+                            label = assessmentChipLabel(assessment),
+                            selected = selectedAssessment?.id == assessment.id,
+                            onClick = {
+                                selectedAssessment = assessment
+                                editingUid = null
+                            },
+                        )
+                    }
+
+                    Box {
+                        TeacherChoiceChip(
+                            label = "+ Add",
+                            selected = addAssessmentMenuExpanded,
+                            onClick = { addAssessmentMenuExpanded = true },
+                        )
+                        DropdownMenu(
+                            expanded = addAssessmentMenuExpanded,
+                            onDismissRequest = { addAssessmentMenuExpanded = false },
+                            shape = RoundedCornerShape(16.dp),
+                            containerColor = NavyDeep,
+                            tonalElevation = 0.dp,
+                            shadowElevation = 18.dp,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                Color.White.copy(alpha = 0.12f),
+                            ),
+                        ) {
+                            Text(
+                                text = "ADD ASSESSMENT",
+                                color = Gold,
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.sp,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                             )
+                            assessmentOptions.forEach { option ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = assessmentOptionLabel(option),
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        if (sameAssessmentKind(option, kind)) {
+                                            Icon(
+                                                Icons.Outlined.Check,
+                                                contentDescription = null,
+                                                tint = Gold,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        kind = option
+                                        numberStr = nextAssessmentNumber(option, assessments).toString()
+                                        selectedAssessment = assessments.firstOrNull { assessment ->
+                                            sameAssessmentKind(assessment.kind, option)
+                                        }
+                                        editingUid = null
+                                        savingMarkUid = null
+                                        marksSearchQuery = ""
+                                        assessmentMessage = null
+                                        assessmentError = null
+                                        addAssessmentMenuExpanded = false
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -1095,55 +1391,79 @@ private fun TeacherMarksPanel(
                         value = numberStr,
                         onValueChange = { numberStr = it },
                         label = { Text("Number") },
+                        placeholder = { Text(nextAssessmentNumber(kind, assessments).toString()) },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         colors = teacherFieldColors(),
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .trackTeacherFieldFocus(),
                     )
                     OutlinedTextField(
                         value = maxMarksStr,
                         onValueChange = { maxMarksStr = it },
                         label = { Text("Max marks") },
+                        placeholder = { Text("30") },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         colors = teacherFieldColors(),
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .trackTeacherFieldFocus(),
                     )
                 }
 
                 TeacherPrimaryButton(
-                    label = "Create assessment",
+                    label = "Add ${assessmentTypeLabel(kind)}",
                     icon = Icons.Outlined.EventAvailable,
                     loading = saving,
                     onClick = {
-                        val number = numberStr.toIntOrNull() ?: 1
-                        val maxMarks = maxMarksStr.toDoubleOrNull() ?: 20.0
-                        saving = true
-                        assessmentMessage = null
-                        assessmentError = null
-                        scope.launch {
-                            val result = PortalRepository.createAssessment(
-                                AssessmentRow(
-                                    classSubjectId = subject.classSubjectId,
-                                    kind = kind,
-                                    number = number,
-                                    maxMarks = maxMarks,
-                                ),
-                            )
-                            saving = false
-                            result.fold(
-                                onSuccess = { created ->
-                                    selectedAssessment = created
-                                    assessmentMessage = "Assessment ready."
-                                    assessments = PortalRepository
-                                        .getAssessments(subject.classSubjectId)
-                                        .getOrDefault(emptyList())
-                                },
-                                onFailure = { err ->
-                                    assessmentError = err.message?.ifBlank { "Could not create assessment." }
-                                        ?: "Could not create assessment."
-                                },
-                            )
+                        val number = numberStr.toIntOrNull()
+                        val maxMarks = maxMarksStr.toDoubleOrNull()
+                        when {
+                            number == null || number <= 0 -> {
+                                assessmentError = "Enter a valid assessment number."
+                            }
+                            maxMarks == null || maxMarks <= 0 -> {
+                                assessmentError = "Enter valid max marks."
+                            }
+                            else -> {
+                                saving = true
+                                assessmentMessage = null
+                                assessmentError = null
+                                scope.launch {
+                                    val result = PortalRepository.createAssessment(
+                                        AssessmentRow(
+                                            classSubjectId = subject.classSubjectId,
+                                            kind = kind,
+                                            number = number,
+                                            maxMarks = maxMarks,
+                                        ),
+                                    )
+                                    saving = false
+                                    result.fold(
+                                        onSuccess = { created ->
+                                            val sorted = PortalRepository
+                                                .getAssessments(subject.classSubjectId)
+                                                .getOrDefault(emptyList())
+                                                .sortedWith(
+                                                    compareBy<AssessmentRow> { assessmentKindOrder(it.kind) }
+                                                        .thenBy { it.number }
+                                                        .thenBy { it.id },
+                                                )
+                                            assessments = sorted
+                                            selectedAssessment = sorted.firstOrNull { it.id == created.id } ?: created
+                                            numberStr = ""
+                                            maxMarksStr = ""
+                                            assessmentMessage = "${assessmentHeading(created)} ready."
+                                        },
+                                        onFailure = { err ->
+                                            assessmentError = err.message?.ifBlank { "Could not create assessment." }
+                                                ?: "Could not create assessment."
+                                        },
+                                    )
+                                }
+                            }
                         }
                     },
                 )
@@ -1154,7 +1474,7 @@ private fun TeacherMarksPanel(
         }
 
         val assessment = selectedAssessment
-        if (assessment != null && students.isNotEmpty()) {
+        if (assessment != null) {
             Surface(
                 shape = RoundedCornerShape(18.dp),
                 color = SurfaceWhite,
@@ -1166,101 +1486,223 @@ private fun TeacherMarksPanel(
                     verticalArrangement = Arrangement.spacedBy(9.dp),
                 ) {
                     Text(
-                        text = "SCORES · ${assessment.kind} #${assessment.number}",
+                        text = "MARKS · ${assessmentHeading(assessment)}",
                         color = TextSecondary,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.1.sp,
                     )
 
-                    students.forEach { student ->
-                        Row(
+                    if (!loadingStudents && students.isNotEmpty()) {
+                        OutlinedTextField(
+                            value = marksSearchQuery,
+                            onValueChange = {
+                                marksSearchQuery = it
+                                editingUid = null
+                            },
+                            placeholder = { Text("Search by name, roll no. or group") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Outlined.Search,
+                                    contentDescription = null,
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(19.dp),
+                                )
+                            },
+                            trailingIcon = {
+                                if (marksSearchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { marksSearchQuery = "" }) {
+                                        Icon(
+                                            Icons.Outlined.Close,
+                                            contentDescription = "Clear search",
+                                            tint = TextSecondary,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
+                            colors = teacherFieldColors(),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Slate)
-                                .padding(horizontal = 11.dp, vertical = 9.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                .trackTeacherFieldFocus(),
+                        )
+                    }
+
+                    when {
+                        loadingStudents -> TeacherMarksListSkeleton(count = 4)
+                        students.isEmpty() -> Text(
+                            text = "No students are enrolled in this class yet.",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(vertical = 12.dp),
+                        )
+                        filteredMarkStudents.isEmpty() -> Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "No students match \"$marksSearchQuery\".",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                            )
+                            TextButton(onClick = { marksSearchQuery = "" }) {
                                 Text(
-                                    text = student.name?.trim()?.takeIf { it.isNotEmpty() } ?: "Student",
-                                    color = TextPrimary,
-                                    fontSize = 12.5.sp,
+                                    text = "Clear search",
+                                    color = Navy,
+                                    fontSize = 11.5.sp,
                                     fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    text = "Roll ${student.serialNo?.trim()?.takeIf { it.isNotEmpty() } ?: "—"}",
-                                    color = TextSecondary,
-                                    fontSize = 10.sp,
                                 )
                             }
-                            OutlinedTextField(
-                                value = marksMap[student.uid] ?: "",
-                                onValueChange = { marksMap[student.uid] = it },
-                                placeholder = { Text("Marks") },
-                                singleLine = true,
-                                shape = RoundedCornerShape(10.dp),
-                                colors = teacherFieldColors(),
-                                modifier = Modifier.width(92.dp),
-                            )
+                        }
+                        else -> filteredMarkStudents.forEach { student ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Slate)
+                                    .padding(horizontal = 11.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                TeacherStudentAvatar(student.name)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = student.name?.trim()?.takeIf { it.isNotEmpty() } ?: "Student",
+                                        color = TextPrimary,
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        text = "Roll ${student.serialNo?.trim()?.takeIf { it.isNotEmpty() } ?: "—"}",
+                                        color = TextSecondary,
+                                        fontSize = 10.sp,
+                                    )
+                                }
+                                val scoreText = marksMap[student.uid]?.trim().orEmpty()
+                                val score = scoreText.toDoubleOrNull()
+                                val maxMarks = assessment.maxMarks ?: 0.0
+                                val obtainedLabel = score?.let { formatScore(it) }
+                                    ?: scoreText.ifBlank { "—" }
+                                val fraction = if (score != null && maxMarks > 0.0) {
+                                    (score / maxMarks).toFloat().coerceIn(0f, 1f)
+                                } else {
+                                    0f
+                                }
+
+                                if (editingUid == student.uid) {
+                                    OutlinedTextField(
+                                        value = marksMap[student.uid] ?: "",
+                                        onValueChange = { marksMap[student.uid] = it },
+                                        placeholder = { Text("Marks") },
+                                        singleLine = true,
+                                        enabled = savingMarkUid != student.uid,
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = teacherFieldColors(),
+                                        modifier = Modifier
+                                            .width(92.dp)
+                                            .focusRequester(editFocusRequester)
+                                            .trackTeacherFieldFocus(),
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            val entered = marksMap[student.uid]?.trim().orEmpty()
+                                            val savedScore = entered.toDoubleOrNull()
+                                            if (savedScore == null || savedScore < 0.0) {
+                                                marksError = "Enter a valid mark for ${student.name ?: "this student"}."
+                                            } else {
+                                                savingMarkUid = student.uid
+                                                marksMessage = null
+                                                marksError = null
+                                                scope.launch {
+                                                    val result = PortalRepository.saveMarks(
+                                                        listOf(
+                                                            MarkRow(
+                                                                assessmentId = assessment.id,
+                                                                studentUid = student.uid,
+                                                                marks = savedScore,
+                                                            ),
+                                                        ),
+                                                    )
+                                                    savingMarkUid = null
+                                                    result.fold(
+                                                        onSuccess = {
+                                                            marksMap[student.uid] = formatScore(savedScore)
+                                                            editingUid = null
+                                                            marksMessage = "Saved ${formatScore(savedScore)} for ${student.name ?: "student"}."
+                                                        },
+                                                        onFailure = { err ->
+                                                            marksError = err.message?.ifBlank { "Marks could not be saved." }
+                                                                ?: "Marks could not be saved."
+                                                        },
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        enabled = savingMarkUid == null,
+                                        modifier = Modifier.size(36.dp),
+                                    ) {
+                                        if (savingMarkUid == student.uid) {
+                                            CircularProgressIndicator(
+                                                color = Navy,
+                                                strokeWidth = 2.dp,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        } else {
+                                            Icon(
+                                                Icons.Outlined.Check,
+                                                contentDescription = "Save marks for ${student.name ?: "student"}",
+                                                tint = SuccessGreen,
+                                                modifier = Modifier.size(19.dp),
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    MarkProgressCircle(
+                                        obtained = obtainedLabel,
+                                        maxMarks = formatMarkNumber(maxMarks),
+                                        fraction = fraction,
+                                        hasScore = score != null,
+                                    )
+                                    IconButton(
+                                        onClick = { editingUid = student.uid },
+                                        modifier = Modifier.size(36.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Outlined.Edit,
+                                            contentDescription = "Edit marks for ${student.name ?: "student"}",
+                                            tint = TextSecondary,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 
                     TeacherStatusBanner(marksMessage, isError = false)
                     TeacherStatusBanner(marksError, isError = true)
-
-                    TeacherPrimaryButton(
-                        label = "Save marks",
-                        icon = Icons.Outlined.Save,
-                        loading = saving,
-                        onClick = {
-                            val markRows = students.mapNotNull { student ->
-                                val score = marksMap[student.uid]?.toDoubleOrNull()
-                                    ?: return@mapNotNull null
-                                MarkRow(
-                                    assessmentId = assessment.id,
-                                    studentUid = student.uid,
-                                    marks = score,
-                                )
-                            }
-                            if (markRows.isEmpty()) {
-                                marksError = "Enter at least one score before saving."
-                            } else {
-                                saving = true
-                                marksMessage = null
-                                marksError = null
-                                scope.launch {
-                                    val result = PortalRepository.saveMarks(markRows)
-                                    saving = false
-                                    result.fold(
-                                        onSuccess = { marksMessage = "Marks saved successfully." },
-                                        onFailure = { err ->
-                                            marksError = err.message?.ifBlank { "Marks could not be saved." }
-                                                ?: "Marks could not be saved."
-                                        },
-                                    )
-                                }
-                            }
-                        },
-                    )
                 }
             }
-        } else if (students.isEmpty()) {
-            TeacherEmptyState(
-                icon = Icons.Outlined.Person,
-                title = "No students enrolled",
-                body = "Marks can be entered once students are enrolled in this class.",
-            )
-        } else {
-            TeacherEmptyState(
-                icon = Icons.Outlined.Analytics,
-                title = "Create an assessment",
-                body = "Choose a type and create an assessment slot to begin entering marks.",
-            )
+        } else if (!loadingStudents) {
+            if (students.isEmpty()) {
+                TeacherEmptyState(
+                    icon = Icons.Outlined.Person,
+                    title = "No students enrolled",
+                    body = "Marks can be entered once students are enrolled in this class.",
+                )
+            } else {
+                TeacherEmptyState(
+                    icon = Icons.Outlined.Analytics,
+                    title = "Create an assessment",
+                    body = "Choose a type and create an assessment slot to begin entering marks.",
+                )
+            }
         }
     }
 }

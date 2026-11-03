@@ -8,6 +8,8 @@ import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.PostgrestUpdate
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.postgrest.rpc
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
@@ -52,7 +54,12 @@ object PortalRepository {
     private val json = Json { ignoreUnknownKeys = true }
 
     private suspend fun <T> query(block: suspend () -> T): Result<T> = runCatching {
-        SupabaseManager.withAuthRetry { block() }
+        // PostgREST decodes response JSON synchronously after the suspend call returns. When the
+        // caller is a composable's LaunchedEffect that decode lands on the main thread and drops
+        // frames on larger payloads, so keep the whole request on the IO dispatcher.
+        withContext(Dispatchers.IO) {
+            SupabaseManager.withAuthRetry { block() }
+        }
     }
 
     // -----------------------------------------------------------------------------------------
