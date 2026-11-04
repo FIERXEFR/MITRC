@@ -1,6 +1,8 @@
 package com.mitrc.ac.`in`.data
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Order
@@ -39,6 +41,30 @@ object AppUpdateRepository {
     fun currentVersionName(context: Context): String = runCatching {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName
     }.getOrNull().orEmpty().ifBlank { "0" }
+
+    /**
+     * Opens the admin-configured download page in the device browser. The app deliberately does
+     * not download or install the APK itself; the page handles the download and Android install.
+     */
+    fun openDownloadPage(context: Context, url: String?): Boolean {
+        val target = url?.trim().orEmpty()
+        if (target.isEmpty()) return false
+        val normalized = if (
+            target.startsWith("https://", ignoreCase = true) ||
+            target.startsWith("http://", ignoreCase = true)
+        ) {
+            target
+        } else {
+            "https://$target"
+        }
+        return runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(normalized))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            true
+        }.getOrDefault(false)
+    }
 
     /**
      * Compares dotted versions numerically, so `1.10` is newer than `1.9`. Text that is not

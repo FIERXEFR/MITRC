@@ -2786,6 +2786,7 @@ private fun EventListCard(event: CollegeEvent) {
 fun StudentSettingsTab(data: StudentPortalData, scroll: ScrollState, onSignedOut: () -> Unit) {
     val profile = data.profile
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     var showProfileSheet by remember { mutableStateOf(false) }
     var showFacultySheet by remember { mutableStateOf(false) }
@@ -2795,6 +2796,41 @@ fun StudentSettingsTab(data: StudentPortalData, scroll: ScrollState, onSignedOut
     var showLogoutDialog by remember { mutableStateOf(false) }
     var signingOut by remember { mutableStateOf(false) }
     var signOutComplete by remember { mutableStateOf(false) }
+
+    fun checkForUpdate() {
+        scope.launch {
+            updateStatusText = "Checking for update…"
+            val currentVersion = AppUpdateRepository.currentVersionName(context)
+            AppUpdateRepository.fetchLatest().fold(
+                onSuccess = { row ->
+                    val status = row?.appStatus?.trim()?.lowercase().orEmpty()
+                    val published = status.isEmpty() ||
+                        status !in setOf("inactive", "disabled", "draft", "off")
+                    val downloadUrl = row?.downloadUrl?.trim().orEmpty()
+                    if (
+                        row != null &&
+                        published &&
+                        row.isBigPacket &&
+                        AppUpdateRepository.isNewer(row.bigVersion, currentVersion)
+                    ) {
+                        if (downloadUrl.isEmpty()) {
+                            updateStatusText = "Update available, but the download link is missing."
+                        } else {
+                            updateStatusText = "Opening download page for v${row.bigVersion.orEmpty()}…"
+                            if (!AppUpdateRepository.openDownloadPage(context, downloadUrl)) {
+                                updateStatusText = "Could not open the download page."
+                            }
+                        }
+                    } else {
+                        updateStatusText = "App is up to date (v$currentVersion)"
+                    }
+                },
+                onFailure = {
+                    updateStatusText = "Could not check for updates."
+                },
+            )
+        }
+    }
 
     PortalTabScaffold(scroll = scroll) {
         // --- 1. PROFILE HEADER CARD (Matching Image 2 in Prompt) ---
@@ -2920,9 +2956,7 @@ fun StudentSettingsTab(data: StudentPortalData, scroll: ScrollState, onSignedOut
                 title = "Check for Update",
                 subtitle = updateStatusText ?: "Check for latest app release",
                 icon = Icons.Outlined.Refresh,
-                onClick = {
-                    updateStatusText = "App is up to date (v2.4.1)"
-                }
+                onClick = { checkForUpdate() }
             )
         }
 

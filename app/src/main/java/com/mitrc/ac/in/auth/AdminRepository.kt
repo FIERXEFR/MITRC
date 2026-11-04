@@ -2,6 +2,7 @@ package com.mitrc.ac.`in`.auth
 
 import android.content.Context
 import android.util.Log
+import com.google.firebase.auth.FirebaseAuth
 import com.mitrc.ac.`in`.R
 import com.mitrc.ac.`in`.data.AdminDbRow
 import com.mitrc.ac.`in`.data.BranchRow
@@ -21,12 +22,15 @@ import io.github.jan.supabase.postgrest.postgrest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.tasks.await
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -41,6 +45,7 @@ object AdminRepository {
     private const val TAG = "AdminRepository"
     private const val SIGN_UP_URL = "https://identitytoolkit.googleapis.com/v1/accounts:signUp"
     private const val DELETE_URL = "https://identitytoolkit.googleapis.com/v1/accounts:delete"
+    private const val ACTIVATION_FUNCTION = "admin-account"
 
     private val json = Json { ignoreUnknownKeys = true }
     @Volatile private var apiKey: String = ""
@@ -328,7 +333,7 @@ object AdminRepository {
     // --- Creation Helpers ---
     suspend fun createStudentAccount(entry: StudentEntry): Result<String> {
         if (!SupabaseManager.isConfigured) return Result.failure(IllegalStateException("Supabase not configured"))
-        val created = createAuthAccount(entry.email, entry.password, entry.name).getOrElse { return Result.failure(it) }
+        val created = createActivatedAccount(entry.email, entry.password, entry.name).getOrElse { return Result.failure(it) }
         val studentRow = StudentRow(
             uid = created.uid,
             name = entry.name.blankToNull(),
@@ -373,13 +378,55 @@ object AdminRepository {
 
     private suspend fun createAccountAndRow(email: String, password: String, name: String, table: String, buildRow: (String) -> Any): Result<String> {
         if (!SupabaseManager.isConfigured) return Result.failure(IllegalStateException("Supabase not configured"))
-        val created = createAuthAccount(email, password, name).getOrElse { return Result.failure(it) }
+        val created = createActivatedAccount(email, password, name).getOrElse { return Result.failure(it) }
         val inserted = runCatching { SupabaseManager.requireClient().postgrest[table].insert(buildRow(created.uid)) }
         if (inserted.isFailure) {
             deleteAuthAccount(created.idToken)
             return Result.failure(IllegalStateException("DB Failure: ${inserted.exceptionOrNull()?.message}"))
         }
         return Result.success(created.uid)
+    }
+
+    /**
+     * `accounts:signUp` reaches Firebase through the public API key, so it cannot set custom
+     * claims. Without `role: "authenticated"` Supabase treats the new user as `anon`, RLS hides
+     * their student/staff row, and login is blocked as "not linked". The Edge Function performs
+     * that one Admin SDK step with a service-account credential kept server-side.
+     */
+    private suspend fun createActivatedAccount(email: String, password: String, name: String): Result<CreatedAccount> {
+        val created = createAuthAccount(email, password, name).getOrElse { return Result.failure(it) }
+        val activated = activateCreatedAccount(created.uid)
+        if (activated.isFailure) {
+            deleteAuthAccount(created.idToken)
+            return Result.failure(
+                IllegalStateException(
+                    "Firebase account created, but activation failed: " +
+                        (activated.exceptionOrNull()?.message ?: "unknown error")
+                )
+            )
+        }
+        return Result.success(created)
+    }
+
+    private suspend fun activateCreatedAccount(uid: String): Result<Unit> = runCatching {
+        val base = SupabaseManager.supabaseUrl().trim().trimEnd('/')
+        if (base.isEmpty()) error("Supabase URL is not configured.")
+        val admin = FirebaseAuth.getInstance().currentUser
+            ?: error("Your admin session expired. Sign in again.")
+        val token = admin.getIdToken(true).await()?.token
+            ?: error("Could not obtain your admin token. Sign in again.")
+
+        val response = http.post("$base/functions/v1/$ACTIVATION_FUNCTION") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            header("apikey", SupabaseManager.supabaseAnonKey())
+            contentType(ContentType.Application.Json)
+            setBody(json.encodeToString(ActivationRequest(uid = uid)))
+        }
+        val text = response.bodyAsText()
+        val parsed = runCatching { json.decodeFromString<ActivationResponse>(text) }.getOrNull()
+        if (!response.status.isSuccess() || parsed?.ok != true) {
+            error(parsed?.error ?: "Account activation failed (${response.status.value})")
+        }
     }
 
     suspend fun getCourses(): List<CourseRow> = runCatching { SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.COURSES].select().decodeList<CourseRow>() }.getOrDefault(emptyList())
@@ -405,6 +452,8 @@ object AdminRepository {
     @Serializable private data class SignUpRequest(val email: String, val password: String, val displayName: String, val returnSecureToken: Boolean = true)
     @Serializable private data class SignUpResponse(@SerialName("localId") val localId: String, @SerialName("idToken") val idToken: String)
     @Serializable private data class DeleteRequest(@SerialName("idToken") val idToken: String)
+    @Serializable private data class ActivationRequest(val action: String = "activate", val uid: String)
+    @Serializable private data class ActivationResponse(val ok: Boolean = false, val error: String? = null)
     @Serializable private data class FirebaseErrorResponse(val error: FirebaseErrorBody)
     @Serializable private data class FirebaseErrorBody(val message: String)
 }

@@ -1,8 +1,6 @@
 package com.mitrc.ac.`in`.ui.components
 
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -167,7 +165,7 @@ fun AppUpdateGate() {
                 AppUpdateStore.markBigDismissed(version)
                 dismissedBigVersion = version
             },
-            onUpdate = { openDownload(context, state.row.downloadUrl) }
+            onUpdate = { AppUpdateRepository.openDownloadPage(context, state.row.downloadUrl) }
         )
 
         is GateState.SmallUpdate -> SmallUpdateDialog(
@@ -890,17 +888,6 @@ private fun PrimaryDialogButton(
         )
         Spacer(Modifier.width(9.dp))
         Text(text = text, fontWeight = FontWeight.Bold)
-    }
-}
-
-private fun openDownload(context: Context, url: String?) {
-    val target = url?.trim().orEmpty()
-    if (target.isEmpty()) return
-    runCatching {
-        context.startActivity(
-            Intent(Intent.ACTION_VIEW, Uri.parse(target))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
     }
 }
 
