@@ -22,10 +22,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.mitrc.ac.`in`.auth.AuthRepository
+import com.mitrc.ac.`in`.notifications.NotificationOpenRequest
 import com.mitrc.ac.`in`.ui.components.AppUpdateGate
 import com.mitrc.ac.`in`.ui.components.OfflineDialog
 import com.mitrc.ac.`in`.ui.components.rememberIsOnline
-import com.mitrc.ac.`in`.notifications.NotificationOpenRequest
 import com.mitrc.ac.`in`.ui.screens.HomeScreen
 import com.mitrc.ac.`in`.ui.screens.LoginScreen
 import com.mitrc.ac.`in`.ui.screens.OnboardingScreen
@@ -37,7 +38,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (savedInstanceState == null &&
-            intent.getBooleanExtra(EXTRA_OPEN_NOTIFICATIONS, false)
+            intent.getBooleanExtra(EXTRA_OPEN_NOTIFICATIONS, false) &&
+            // A stale token can outlive a logout. Never queue a deep-link for a
+            // signed-out user: it would fire after the next login.
+            AuthRepository.isLoggedIn
         ) {
             NotificationOpenRequest.request()
         }
@@ -55,7 +59,9 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.getBooleanExtra(EXTRA_OPEN_NOTIFICATIONS, false)) {
+        if (intent.getBooleanExtra(EXTRA_OPEN_NOTIFICATIONS, false) &&
+            AuthRepository.isLoggedIn
+        ) {
             NotificationOpenRequest.request()
         }
     }

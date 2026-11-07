@@ -73,7 +73,12 @@ class MitrcMessagingService : FirebaseMessagingService() {
         val intent = Intent(this, SplashActivity::class.java).apply {
             putExtra(SplashActivity.EXTRA_OPEN_NOTIFICATIONS, true)
             putExtra(SplashActivity.EXTRA_NOTIFICATION_ID, notificationId)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            // Skip the 2.6s branding animation; SplashActivity still resolves the
+            // correct destination (admin / login / onboarding / portal).
+            putExtra(SplashActivity.EXTRA_SKIP_SPLASH, true)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         val pendingIntent = PendingIntent.getActivity(
             this,

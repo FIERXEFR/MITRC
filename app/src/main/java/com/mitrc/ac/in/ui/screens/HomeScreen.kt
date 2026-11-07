@@ -39,6 +39,7 @@ import androidx.core.content.ContextCompat
 import com.mitrc.ac.`in`.auth.AuthRepository
 import com.mitrc.ac.`in`.data.PortalRepository
 import com.mitrc.ac.`in`.data.PushRepository
+import com.mitrc.ac.`in`.notifications.NotificationOpenRequest
 import com.mitrc.ac.`in`.notifications.PushPermissionStore
 import com.mitrc.ac.`in`.ui.theme.Gold
 import com.mitrc.ac.`in`.ui.theme.TextPrimary
@@ -174,6 +175,19 @@ fun HomeScreen(onSignedOut: () -> Unit) {
 
         Log.w(TAG, "No role matched for uid=$userUid, email=$userEmail. Blocking portal access")
         resolvedRole = StaffRole.NOT_LINKED
+    }
+
+    // Teacher and not-linked screens have no notifications sheet. Drop a pending
+    // push deep-link so it cannot survive until a later student login. Keyed on
+    // the request too, so a tap that arrives while the portal is already open is
+    // still cleared.
+    val openNotificationsRequest = NotificationOpenRequest.pending
+    LaunchedEffect(openNotificationsRequest, resolvedRole) {
+        if (openNotificationsRequest &&
+            (resolvedRole == StaffRole.TEACHER || resolvedRole == StaffRole.NOT_LINKED)
+        ) {
+            NotificationOpenRequest.consume()
+        }
     }
 
     // Register this device once we know the account reaches a real portal. The

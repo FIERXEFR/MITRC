@@ -136,6 +136,7 @@ fun CoordinatorTimetableView(userUid: String) {
     var showNewTTDialog by remember { mutableStateOf(false) }
     var newTTEffectiveFrom by remember { mutableStateOf(getTodayIstDate()) }
     var newTTRoom by remember { mutableStateOf("") }
+    var showNewTTDatePicker by remember { mutableStateOf(false) }
 
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showDuplicateDatePicker by remember { mutableStateOf(false) }
@@ -849,6 +850,41 @@ fun CoordinatorTimetableView(userUid: String) {
                 }
             }
 
+            // New Timetable effective-date picker. Kept separate from the
+            // duplicate picker so each dialog writes to its own date variable.
+            if (showNewTTDatePicker) {
+                val newTTPickerState = rememberDatePickerState(
+                    initialSelectedDateMillis = istDateToEpochMillis(newTTEffectiveFrom)
+                )
+                DatePickerDialog(
+                    onDismissRequest = { showNewTTDatePicker = false },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                newTTPickerState.selectedDateMillis?.let { picked ->
+                                    newTTEffectiveFrom = formatPickerDate(picked)
+                                }
+                                showNewTTDatePicker = false
+                            }
+                        ) {
+                            Text("Use date", color = Navy, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showNewTTDatePicker = false }) {
+                            Text("Cancel", color = TextSecondary)
+                        }
+                    }
+                ) {
+                    DatePicker(
+                        state = newTTPickerState,
+                        title = null,
+                        headline = null,
+                        showModeToggle = false
+                    )
+                }
+            }
+
             // Create New Timetable Dialog
             if (showNewTTDialog && selectedClass != null) {
                 val targetClass = selectedClass!!
@@ -872,10 +908,20 @@ fun CoordinatorTimetableView(userUid: String) {
                             )
                             OutlinedTextField(
                                 value = newTTEffectiveFrom,
-                                onValueChange = { newTTEffectiveFrom = it.trim() },
+                                onValueChange = {},
                                 label = { Text("Effective Date (YYYY-MM-DD)") },
                                 singleLine = true,
+                                readOnly = true,
                                 colors = mitrcFieldColors(),
+                                trailingIcon = {
+                                    IconButton(onClick = { showNewTTDatePicker = true }) {
+                                        Icon(
+                                            Icons.Outlined.CalendarMonth,
+                                            contentDescription = "Pick effective date",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                },
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp)
                             )

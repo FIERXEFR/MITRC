@@ -5,6 +5,7 @@ import android.util.Log
 import com.google.firebase.messaging.FirebaseMessaging
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.tasks.await
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -25,6 +26,9 @@ object PushRepository {
     suspend fun currentToken(): String? = runCatching {
         FirebaseMessaging.getInstance().token.await()
     }.onFailure {
+        // runCatching also catches CancellationException; rethrow it so callers
+        // (e.g. withTimeoutOrNull in signOut) can cancel cleanly.
+        if (it is CancellationException) throw it
         Log.w(TAG, "FCM token unavailable: ${it.message}")
     }.getOrNull()
 
@@ -39,6 +43,7 @@ object PushRepository {
         SupabaseManager.requireClient().postgrest.rpc("register_device_token", params)
         Unit
     }.onFailure {
+        if (it is CancellationException) throw it
         Log.w(TAG, "Device token registration failed: ${it.message}")
     }
 
@@ -53,6 +58,7 @@ object PushRepository {
         SupabaseManager.requireClient().postgrest.rpc("unregister_device_token", params)
         Unit
     }.onFailure {
+        if (it is CancellationException) throw it
         Log.w(TAG, "Device token unregister failed: ${it.message}")
     }
 }

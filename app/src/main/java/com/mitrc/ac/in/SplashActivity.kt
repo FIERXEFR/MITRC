@@ -13,6 +13,7 @@ import com.mitrc.ac.`in`.ui.screens.SplashContent
 import com.mitrc.ac.`in`.ui.theme.MITRCTheme
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 class SplashActivity : ComponentActivity() {
 
@@ -26,15 +27,34 @@ class SplashActivity : ComponentActivity() {
     /** Set when the app was opened by tapping a push notification. */
     private var openNotifications = false
 
+    /**
+     * Guards against a second navigation while the first one is still in flight.
+     * [openApp] can now be reached from three places: the splash animation, a push
+     * tap that skips it, and [onNewIntent] while the animation is still running.
+     */
+    private var isNavigating = false
+
+    /** True when this launch came from a push tap and should skip the animation. */
+    private var skipSplash = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         readNotificationIntent(intent)
+        skipSplash = savedInstanceState == null &&
+            intent.getBooleanExtra(EXTRA_SKIP_SPLASH, false)
 
         lifecycleScope.launch {
             val uid = runCatching { AuthRepository.currentUser?.uid }.getOrNull()
             val email = runCatching { AuthRepository.currentUser?.email }.getOrNull()
             adminCheck.complete(if (uid == null) false else AdminRepository.isAdmin(uid, email))
+        }
+
+        // A push tap skips the branding animation entirely. Routing still goes
+        // through openApp(), so admin/onboarding/login destinations stay correct.
+        if (skipSplash) {
+            openApp()
+            return
         }
 
         setContent {
@@ -48,16 +68,28 @@ class SplashActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         readNotificationIntent(intent)
+        // The user tapped a push while the splash was still animating.
+        if (intent.getBooleanExtra(EXTRA_SKIP_SPLASH, false)) {
+            skipSplash = true
+            openApp()
+        }
     }
 
     private fun readNotificationIntent(source: Intent?) {
-        if (source?.getBooleanExtra(EXTRA_OPEN_NOTIFICATIONS, false) == true) {
+        if (source == null) return
+        if (source.getBooleanExtra(EXTRA_OPEN_NOTIFICATIONS, false) ||
+            // FCM auto-displays a notification payload itself and attaches these
+            // system extras when the launcher activity is opened from the tray.
+            source.hasExtra("google.message_id") ||
+            source.hasExtra(EXTRA_NOTIFICATION_ID)
+        ) {
             openNotifications = true
         }
     }
 
     private fun openApp() {
-        if (isFinishing) return
+        if (isFinishing || isNavigating) return
+        isNavigating = true
 
         val loggedIn = try {
             AuthRepository.isLoggedIn
@@ -67,13 +99,14 @@ class SplashActivity : ComponentActivity() {
 
         lifecycleScope.launch {
             if (loggedIn) {
-                // The splash animation already gave the admin lookup its full 1.5s window.
-                // Never hold the splash open longer for a network call.
-                val isAdmin = if (adminCheck.isCompleted) adminCheck.await() else false
+                // The splash animation already gave the admin lookup its full
+                // window. Never hold the splash open longer than a second for a
+                // slow network; fall back to the normal portal when it misses.
+                val isAdmin = withTimeoutOrNull(1_000) { adminCheck.await() } ?: false
                 if (isFinishing) return@launch
                 if (isAdmin) {
                     startActivity(Intent(this@SplashActivity, AdminPanelActivity::class.java))
-                    overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                    applyTransition()
                     finish()
                     return@launch
                 }
@@ -96,13 +129,23 @@ class SplashActivity : ComponentActivity() {
                     flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 }
             )
-            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+            applyTransition()
             finish()
+        }
+    }
+
+    /** No animation when a push tap skipped the splash, so no branding frame flashes. */
+    private fun applyTransition() {
+        if (skipSplash) {
+            overridePendingTransition(0, 0)
+        } else {
+            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
         }
     }
 
     companion object {
         const val EXTRA_OPEN_NOTIFICATIONS = "extra_open_notifications"
         const val EXTRA_NOTIFICATION_ID = "extra_notification_id"
+        const val EXTRA_SKIP_SPLASH = "extra_skip_splash"
     }
 }
