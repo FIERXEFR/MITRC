@@ -115,6 +115,7 @@ import kotlin.math.roundToInt
 import com.mitrc.ac.`in`.R
 import com.mitrc.ac.`in`.auth.AuthRepository
 import com.mitrc.ac.`in`.data.*
+import com.mitrc.ac.`in`.notifications.NotificationOpenRequest
 import com.mitrc.ac.`in`.ui.theme.Gold
 import com.mitrc.ac.`in`.ui.theme.GoldLight
 import com.mitrc.ac.`in`.ui.theme.Navy
@@ -256,6 +257,16 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
     var data by remember { mutableStateOf<StudentPortalData?>(null) }
     var showNotifications by remember { mutableStateOf(false) }
     var showProfile by remember { mutableStateOf(false) }
+
+    // A push tap that arrives while the portal is already open should land on
+    // the notifications sheet instead of only bringing the app forward.
+    val openNotificationsRequest = NotificationOpenRequest.pending
+    LaunchedEffect(openNotificationsRequest) {
+        if (openNotificationsRequest) {
+            showNotifications = true
+            NotificationOpenRequest.consume()
+        }
+    }
 
     // Session-local notebook for the student's own jottings (the `notes` table is for
     // teacher-published PDFs instead). Hoisted here so switching tabs does not discard them.

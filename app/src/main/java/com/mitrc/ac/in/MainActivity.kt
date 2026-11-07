@@ -25,6 +25,7 @@ import androidx.navigation.compose.rememberNavController
 import com.mitrc.ac.`in`.ui.components.AppUpdateGate
 import com.mitrc.ac.`in`.ui.components.OfflineDialog
 import com.mitrc.ac.`in`.ui.components.rememberIsOnline
+import com.mitrc.ac.`in`.notifications.NotificationOpenRequest
 import com.mitrc.ac.`in`.ui.screens.HomeScreen
 import com.mitrc.ac.`in`.ui.screens.LoginScreen
 import com.mitrc.ac.`in`.ui.screens.OnboardingScreen
@@ -35,6 +36,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (savedInstanceState == null &&
+            intent.getBooleanExtra(EXTRA_OPEN_NOTIFICATIONS, false)
+        ) {
+            NotificationOpenRequest.request()
+        }
         val requestedStart = intent.getStringExtra(EXTRA_START_DESTINATION)
         val startDestination =
             if (requestedStart != null && requestedStart in validRoutes) requestedStart
@@ -46,8 +52,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_OPEN_NOTIFICATIONS, false)) {
+            NotificationOpenRequest.request()
+        }
+    }
+
     companion object {
         const val EXTRA_START_DESTINATION = "extra_start_destination"
+        const val EXTRA_OPEN_NOTIFICATIONS = "extra_open_notifications"
         const val ROUTE_ONBOARDING = "onboarding"
         const val ROUTE_LOGIN = "login"
         const val ROUTE_HOME = "home"

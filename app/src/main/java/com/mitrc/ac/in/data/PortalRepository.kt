@@ -1547,16 +1547,6 @@ object PortalRepository {
             .decodeList<TimetablePeriodRow>()
     }
 
-    suspend fun duplicateTimetable(sourceId: Int, effectiveFrom: String): Result<Int> = query {
-        val client = SupabaseManager.requireClient()
-        val params = buildJsonObject {
-            put("p_source", sourceId)
-            put("p_effective_from", effectiveFrom)
-        }
-        val response = client.postgrest.rpc("duplicate_timetable", params)
-        response.decodeAs<Int>()
-    }
-
     suspend fun updateTimetableHeader(timetable: TimetableRow): Result<Unit> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.TIMETABLES]
             .update(timetable) { filter { eq("id", timetable.id) } }

@@ -2,7 +2,9 @@ package com.mitrc.ac.`in`.auth
 
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
+import com.mitrc.ac.`in`.data.PushRepository
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
 object AuthRepository {
@@ -50,6 +52,11 @@ object AuthRepository {
     }
 
     suspend fun signOut() {
+        // Drop this device's push token while the request still carries the
+        // signed-in JWT. Bounded so an offline logout stays instant.
+        withTimeoutOrNull(3_000) {
+            PushRepository.unregisterCurrentDevice()
+        }
         auth.signOut()
     }
 

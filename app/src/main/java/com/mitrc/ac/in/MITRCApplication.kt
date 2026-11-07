@@ -7,10 +7,12 @@ import com.mitrc.ac.`in`.data.GreetingStore
 import com.mitrc.ac.`in`.data.OnboardingStore
 import com.mitrc.ac.`in`.data.PasswordResetStore
 import com.mitrc.ac.`in`.data.SupabaseManager
+import com.mitrc.ac.`in`.notifications.NotificationChannels
 
 class MITRCApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        NotificationChannels.ensure(this)
         OnboardingStore.init(this)
         GreetingStore.init(this)
         PasswordResetStore.init(this)

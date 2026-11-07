@@ -113,6 +113,7 @@ import com.mitrc.ac.`in`.data.NewEventRow
 import com.mitrc.ac.`in`.data.NewNotificationRow
 import com.mitrc.ac.`in`.data.NoteInsertRow
 import com.mitrc.ac.`in`.data.PortalRepository
+import com.mitrc.ac.`in`.notifications.NotificationOpenRequest
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
 import com.mitrc.ac.`in`.ui.theme.ErrorRed
 import com.mitrc.ac.`in`.ui.theme.Gold
@@ -150,6 +151,16 @@ fun CoordinatorPortalShell(
     var showLogoutDialog by remember { mutableStateOf(false) }
     var signingOut by remember { mutableStateOf(false) }
     var signOutComplete by remember { mutableStateOf(false) }
+
+    // A push tap that arrives while the portal is already open should land on
+    // the notifications sheet instead of only bringing the app forward.
+    val openNotificationsRequest = NotificationOpenRequest.pending
+    LaunchedEffect(openNotificationsRequest) {
+        if (openNotificationsRequest) {
+            showNotifications = true
+            NotificationOpenRequest.consume()
+        }
+    }
 
     // The coordinator's own faculty_master row and the classes they rule. Hoisted into the
     // shell because the hero greeting, the profile sheet and the Settings tab all read it.

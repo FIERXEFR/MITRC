@@ -23,9 +23,13 @@ class SplashActivity : ComponentActivity() {
      */
     private val adminCheck = CompletableDeferred<Boolean>()
 
+    /** Set when the app was opened by tapping a push notification. */
+    private var openNotifications = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        readNotificationIntent(intent)
 
         lifecycleScope.launch {
             val uid = runCatching { AuthRepository.currentUser?.uid }.getOrNull()
@@ -37,6 +41,18 @@ class SplashActivity : ComponentActivity() {
             MITRCTheme(darkTheme = true) {
                 SplashContent(onFinished = ::openApp)
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        readNotificationIntent(intent)
+    }
+
+    private fun readNotificationIntent(source: Intent?) {
+        if (source?.getBooleanExtra(EXTRA_OPEN_NOTIFICATIONS, false) == true) {
+            openNotifications = true
         }
     }
 
@@ -72,10 +88,21 @@ class SplashActivity : ComponentActivity() {
             startActivity(
                 Intent(this@SplashActivity, MainActivity::class.java).apply {
                     putExtra(MainActivity.EXTRA_START_DESTINATION, startDestination)
+                    if (openNotifications) {
+                        putExtra(MainActivity.EXTRA_OPEN_NOTIFICATIONS, true)
+                    }
+                    // If the portal is already running underneath, reuse it and
+                    // deliver the extra through onNewIntent instead of stacking.
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 }
             )
             overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
             finish()
         }
+    }
+
+    companion object {
+        const val EXTRA_OPEN_NOTIFICATIONS = "extra_open_notifications"
+        const val EXTRA_NOTIFICATION_ID = "extra_notification_id"
     }
 }

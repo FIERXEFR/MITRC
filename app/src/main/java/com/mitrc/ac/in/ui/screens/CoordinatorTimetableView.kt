@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
@@ -31,12 +32,17 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -98,6 +104,7 @@ private fun mitrcFieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedPlaceholderColor = TextSecondary.copy(alpha = 0.6f)
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CoordinatorTimetableView(userUid: String) {
     val scope = rememberCoroutineScope()
@@ -131,6 +138,7 @@ fun CoordinatorTimetableView(userUid: String) {
     var newTTRoom by remember { mutableStateOf("") }
 
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showDuplicateDatePicker by remember { mutableStateOf(false) }
 
     // Initial load: fetch classes & coordinator profile
     LaunchedEffect(userUid) {
@@ -550,6 +558,33 @@ fun CoordinatorTimetableView(userUid: String) {
 
                             Spacer(Modifier.height(14.dp))
 
+                            // Duplicate date picker: choose which effective date the new draft gets.
+                            Text(
+                                text = "DUPLICATE AS DRAFT",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextSecondary,
+                                letterSpacing = 1.2.sp
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            OutlinedButton(
+                                onClick = { showDuplicateDatePicker = true },
+                                enabled = !busy,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Navy),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    Icons.Outlined.CalendarMonth,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(text = "New effective date: $newDuplicateDate", fontSize = 12.sp)
+                            }
+
+                            Spacer(Modifier.height(8.dp))
+
                             // Duplicate & Publish Controls
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -777,6 +812,40 @@ fun CoordinatorTimetableView(userUid: String) {
                             containerColor = SurfaceWhite
                         )
                     }
+                }
+            }
+
+            // Duplicate Date Picker
+            if (showDuplicateDatePicker) {
+                val duplicatePickerState = rememberDatePickerState(
+                    initialSelectedDateMillis = istDateToEpochMillis(newDuplicateDate)
+                )
+                DatePickerDialog(
+                    onDismissRequest = { showDuplicateDatePicker = false },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                duplicatePickerState.selectedDateMillis?.let { picked ->
+                                    newDuplicateDate = formatPickerDate(picked)
+                                }
+                                showDuplicateDatePicker = false
+                            }
+                        ) {
+                            Text("Use date", color = Navy, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDuplicateDatePicker = false }) {
+                            Text("Cancel", color = TextSecondary)
+                        }
+                    }
+                ) {
+                    DatePicker(
+                        state = duplicatePickerState,
+                        title = null,
+                        headline = null,
+                        showModeToggle = false
+                    )
                 }
             }
 
@@ -1237,3 +1306,16 @@ private fun getTodayIstDate(): String {
     sdf.timeZone = TimeZone.getTimeZone("Asia/Kolkata")
     return sdf.format(Date())
 }
+
+/** Parses an ISO date for the Material date picker, which works in UTC civil days. */
+private fun istDateToEpochMillis(date: String): Long? = runCatching {
+    SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("UTC")
+    }.parse(date)?.time
+}.getOrNull()
+
+/** Formats a picker selection back to the yyyy-MM-dd string Postgres expects. */
+private fun formatPickerDate(epochMillis: Long): String =
+    SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("UTC")
+    }.format(Date(epochMillis))
