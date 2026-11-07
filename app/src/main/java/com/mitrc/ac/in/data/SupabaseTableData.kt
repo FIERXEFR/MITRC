@@ -112,6 +112,7 @@ data class FacultyMasterRow(
     @SerialName("is_active") val isActive: Boolean = true,
     @SerialName("gender") val gender: String? = null,
     @SerialName("profile_url") val profileUrl: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
 )
 
 @Serializable
@@ -358,9 +359,21 @@ data class NoteInsertRow(
     @SerialName("is_visible") val isVisible: Boolean = true,
 )
 
+/**
+ * One row of the two-row app control document in `public.app_update`.
+ *
+ * The table holds exactly two rows, told apart by [configKey] (and pinned to fixed ids by a
+ * database check constraint):
+ *
+ *  - `id = 1`, `config_key = app_update`      -> APK release + small packet / remote config.
+ *  - `id = 2`, `config_key = app_maintenance` -> maintenance window.
+ *
+ * Fields that belong to the other row are simply unused and stay at their defaults.
+ */
 @Serializable
 data class AppUpdateRow(
-    @SerialName("id") val id: Long = 1,
+    @SerialName("id") val id: Long = AppUpdateRepository.UPDATE_ROW_ID,
+    @SerialName("config_key") val configKey: String = AppUpdateRepository.CONFIG_UPDATE,
     @SerialName("is_bigpacket") val isBigPacket: Boolean = false,
     @SerialName("small_version") val smallVersion: String? = null,
     @SerialName("big_version") val bigVersion: String? = null,
@@ -424,6 +437,8 @@ data class StudentProfileView(
     @SerialName("section") val section: String? = null,
     @SerialName("academic_year") val academicYear: String? = null,
     @SerialName("class_id") val classId: Int? = null,
+    /** Row timestamp from `students.created_at`; the admin console sorts the newest first. */
+    @SerialName("created_at") val createdAt: String? = null,
     @SerialName("explicit_student_uid") private val _explicitStudentUid: String = "",
 ) {
     val studentUid: String
@@ -455,6 +470,7 @@ data class StudentProfileView(
         section: String? = null,
         academicYear: String? = null,
         classId: Int? = null,
+        createdAt: String? = null,
     ) : this(
         _studentUid = studentUid,
         _uid = studentUid,
@@ -476,6 +492,7 @@ data class StudentProfileView(
         section = section,
         academicYear = academicYear,
         classId = classId,
+        createdAt = createdAt,
         _explicitStudentUid = studentUid,
     )
 }
@@ -687,6 +704,9 @@ data class StaffDirectoryView(
     @SerialName("mentor_group_id") val mentorGroupId: Int? = null,
     @SerialName("is_coordinator") val isCoordinator: Boolean = false,
     @SerialName("is_hod") val isHod: Boolean = false,
+    /** Row timestamp from `faculty_master.created_at`; the admin console sorts the newest first. */
+    @SerialName("created_at") val createdAt: String? = null,
+    @kotlinx.serialization.Transient val isAdmin: Boolean = false,
 )
 
 @Serializable
@@ -813,6 +833,12 @@ data class NotificationRow(
     @SerialName("is_cancelled") val isCancelled: Boolean = false,
     @SerialName("expires_at") val expiresAt: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
+    // Delivery bookkeeping written by the `send-push` Edge Function. The admin composer polls
+    // these fields after posting so it can show how many devices actually received the push.
+    @SerialName("push_sent_at") val pushSentAt: String? = null,
+    @SerialName("push_sent_count") val pushSentCount: Int = 0,
+    @SerialName("push_failed_count") val pushFailedCount: Int = 0,
+    @SerialName("push_error") val pushError: String? = null,
 )
 
 @Serializable
@@ -823,7 +849,10 @@ data class NewNotificationRow(
     @SerialName("image_id") val imageId: String? = null,
     @SerialName("category") val category: String = "announcement",
     @SerialName("priority") val priority: String = "normal",
-    @SerialName("audience") val audience: String = "everyone",
+    // No default: `audience` is NOT NULL with no database default, and the client serializes
+    // with `encodeDefaults = false`. A default of "everyone" would be omitted for the most
+    // common case and the insert would fail on the missing column.
+    @SerialName("audience") val audience: String,
     @SerialName("course_id") val courseId: Int? = null,
     @SerialName("class_id") val classId: Int? = null,
     @SerialName("group_id") val groupId: Int? = null,

@@ -71,6 +71,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.mitrc.ac.`in`.R
+import com.mitrc.ac.`in`.data.AppUpdateConfig
 import com.mitrc.ac.`in`.data.AppUpdateRepository
 import com.mitrc.ac.`in`.data.AppUpdateRow
 import com.mitrc.ac.`in`.data.AppUpdateStore
@@ -107,15 +108,15 @@ fun AppUpdateGate() {
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
 
-    var row by remember { mutableStateOf<AppUpdateRow?>(null) }
+    var config by remember { mutableStateOf<AppUpdateConfig?>(null) }
     var loaded by remember { mutableStateOf(false) }
     var smallSeenVersion by remember { mutableStateOf(AppUpdateStore.smallVersion) }
     var dismissedBigVersion by remember { mutableStateOf(AppUpdateStore.dismissedBigVersion) }
 
     suspend fun refresh() {
-        AppUpdateRepository.fetchLatest()
+        AppUpdateRepository.fetchConfig()
             .onSuccess { latest ->
-                row = latest
+                config = latest
                 loaded = true
             }
     }
@@ -135,7 +136,7 @@ fun AppUpdateGate() {
     val state = if (!loaded) {
         GateState.Clear
     } else {
-        resolveGateState(context, row, smallSeenVersion, dismissedBigVersion)
+        resolveGateState(context, config, smallSeenVersion, dismissedBigVersion)
     }
 
     // If maintenance has an end time, poll while it is showing so the app recovers without a
@@ -181,17 +182,26 @@ fun AppUpdateGate() {
 
 private fun resolveGateState(
     context: Context,
-    row: AppUpdateRow?,
+    config: AppUpdateConfig?,
     smallSeenVersion: String,
     dismissedBigVersion: String,
 ): GateState {
-    if (row == null) return GateState.Clear
+    if (config == null) return GateState.Clear
+
+    // Maintenance lives in its own row (id 2). It wins over any pending update so a
+    // half-published release can never be shown on top of a maintenance window.
+    val maintenanceRow = config.maintenance
+    if (maintenanceRow != null &&
+        maintenanceRow.isMaintenance &&
+        !isMaintenanceExpired(maintenanceRow.maintenanceUntil)
+    ) {
+        return GateState.Maintenance(maintenanceRow)
+    }
+
+    // Release lives in its own row (id 1).
+    val row = config.update ?: return GateState.Clear
     val status = row.appStatus?.trim()?.lowercase().orEmpty()
     if (status in setOf("inactive", "disabled", "draft", "off", "false")) return GateState.Clear
-
-    val maintenance = (row.isMaintenance || status == "maintenance") &&
-        !isMaintenanceExpired(row.maintenanceUntil)
-    if (maintenance) return GateState.Maintenance(row)
 
     if (row.isBigPacket) {
         val currentVersion = AppUpdateRepository.currentVersionName(context)

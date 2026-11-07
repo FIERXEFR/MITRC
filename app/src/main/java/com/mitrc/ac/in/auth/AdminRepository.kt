@@ -1,4 +1,4 @@
-package com.mitrc.ac.`in`.auth
+﻿package com.mitrc.ac.`in`.auth
 
 import android.content.Context
 import android.util.Log
@@ -11,14 +11,20 @@ import com.mitrc.ac.`in`.data.ClassRow
 import com.mitrc.ac.`in`.data.CourseRow
 import com.mitrc.ac.`in`.data.EnrollmentRow
 import com.mitrc.ac.`in`.data.FacultyMasterRow
+import com.mitrc.ac.`in`.data.NewNotificationRow
+import com.mitrc.ac.`in`.data.NotificationRow
 import com.mitrc.ac.`in`.data.PortalRepository
 import com.mitrc.ac.`in`.data.StaffDbRow
 import com.mitrc.ac.`in`.data.StaffDirectoryView
+import com.mitrc.ac.`in`.data.StudentProfileView
 import com.mitrc.ac.`in`.data.StudentRow
 import com.mitrc.ac.`in`.data.SupabaseManager
 import com.mitrc.ac.`in`.data.SupabaseTableData
 import com.mitrc.ac.`in`.data.blankToNull
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.postgrest.query.Count
+import io.github.jan.supabase.postgrest.query.Order
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
@@ -30,6 +36,9 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.tasks.await
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -435,6 +444,389 @@ object AdminRepository {
     suspend fun getClassesForBranch(bid: Int): List<ClassRow> = runCatching { SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.CLASSES].select { filter { eq("branch_id", bid) } }.decodeList<ClassRow>() }.getOrDefault(emptyList())
     suspend fun getClassGroups(cid: Int): List<ClassGroupRow> = runCatching { SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.CLASS_GROUPS].select { filter { eq("class_id", cid) } }.decodeList<ClassGroupRow>() }.getOrDefault(emptyList())
 
+    // -----------------------------------------------------------------------------------------
+    // Notifications
+    // -----------------------------------------------------------------------------------------
+
+    /**
+     * Posts a notice through the normal authenticated client. RLS already allows any admin to
+     * insert for every audience, and the `trg_notifications_send_push` trigger asks the
+     * `send-push` Edge Function to fan it out to the registered devices.
+     *
+     * The inserted row is returned so the caller can poll [getNotificationDelivery] for the
+     * delivery counters.
+     */
+    suspend fun sendNotification(row: NewNotificationRow): Result<NotificationRow> = runCatching {
+        SupabaseManager.withAuthRetry {
+            val inserted = SupabaseManager.requireClient().postgrest["notifications"]
+                .insert(row) { select() }
+                .decodeList<NotificationRow>()
+
+            inserted.firstOrNull()
+                ?: error("The notification was not posted: the database returned no inserted row.")
+        }
+    }.onFailure {
+        if (it is CancellationException) throw it
+        Log.w(TAG, "Notification insert failed: ${it.message}")
+    }
+
+    /** Reads the delivery counters the `send-push` function writes back to the row. */
+    suspend fun getNotificationDelivery(id: Long): Result<NotificationRow> = runCatching {
+        SupabaseManager.withAuthRetry {
+            SupabaseManager.requireClient().postgrest["notifications"]
+                .select {
+                    filter { eq("id", id) }
+                    limit(1)
+                }
+                .decodeList<NotificationRow>()
+                .firstOrNull()
+                ?: error("Notification #$id is no longer readable.")
+        }
+    }.onFailure {
+        if (it is CancellationException) throw it
+        Log.w(TAG, "Notification delivery read failed: ${it.message}")
+    }
+
+    /** Newest notices first, for the composer's recent-notices card. */
+    suspend fun getRecentNotifications(max: Long = 8): Result<List<NotificationRow>> = runCatching {
+        SupabaseManager.withAuthRetry {
+            SupabaseManager.requireClient().postgrest["notifications"]
+                .select {
+                    order("created_at", Order.DESCENDING)
+                    limit(max)
+                }
+                .decodeList<NotificationRow>()
+        }
+    }.onFailure {
+        if (it is CancellationException) throw it
+        Log.w(TAG, "Recent notifications failed: ${it.message}")
+    }
+
+    /**
+     * Cancels a notice. The audience columns are pinned by `notifications_before_write`, but
+     * `is_cancelled` is writable and the push function skips cancelled rows.
+     */
+    suspend fun cancelNotification(id: Long): Result<Unit> = runCatching {
+        SupabaseManager.withAuthRetry {
+            SupabaseManager.requireClient().postgrest["notifications"]
+                .update({ set("is_cancelled", true) }) {
+                    filter { eq("id", id) }
+                }
+        }
+        Unit
+    }.onFailure {
+        if (it is CancellationException) throw it
+        Log.w(TAG, "Notification cancel failed: ${it.message}")
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Dashboard
+    // -----------------------------------------------------------------------------------------
+
+    /** Head-counts shown on the admin dashboard. Null means the count could not be read. */
+    suspend fun getDashboardStats(): Result<AdminDashboardStats> = runCatching {
+        SupabaseManager.withAuthRetry {
+            val client = SupabaseManager.requireClient()
+
+            suspend fun countRows(table: String, column: String): Long? = runCatching {
+                client.postgrest[table]
+                    .select(columns = Columns.list(column)) {
+                        count(Count.EXACT)
+                        limit(1)
+                    }
+                    .countOrNull()
+            }.getOrNull()
+
+            coroutineScope {
+                val students = async { countRows(SupabaseTableData.Tables.STUDENTS, "uid") }
+                val staff = async { countRows(SupabaseTableData.Views.V_STAFF_DIRECTORY, "faculty_id") }
+                val classes = async { countRows(SupabaseTableData.Tables.CLASSES, "id") }
+                val courses = async { countRows(SupabaseTableData.Tables.COURSES, "id") }
+                val branches = async { countRows(SupabaseTableData.Tables.BRANCHES, "id") }
+                val admins = async { countRows(SupabaseTableData.Tables.ADMIN_DB, "uid") }
+
+                AdminDashboardStats(
+                    students = students.await(),
+                    staff = staff.await(),
+                    classes = classes.await(),
+                    courses = courses.await(),
+                    branches = branches.await(),
+                    admins = admins.await(),
+                )
+            }
+        }
+    }.onFailure {
+        if (it is CancellationException) throw it
+        Log.w(TAG, "Dashboard stats failed: ${it.message}")
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Directory search
+    // -----------------------------------------------------------------------------------------
+
+    /**
+     * PostgREST's `or=(...)` expression uses commas and parentheses as syntax, so those characters
+     * must never reach the filter from user input.
+     */
+    private fun searchPattern(rawQuery: String): String? {
+        val term = rawQuery.trim()
+            .replace(",", " ")
+            .replace("(", " ")
+            .replace(")", " ")
+            .replace("%", " ")
+            .replace("*", " ")
+            .trim()
+        return term.takeIf { it.isNotEmpty() }?.let { "%$it%" }
+    }
+
+    suspend fun searchStudents(rawQuery: String, max: Long = 30): Result<List<StudentProfileView>> = runCatching {
+        val pattern = searchPattern(rawQuery) ?: return@runCatching emptyList()
+        SupabaseManager.withAuthRetry {
+            val client = SupabaseManager.requireClient()
+
+            val directory = runCatching {
+                client.postgrest[SupabaseTableData.Views.V_STUDENT_DIRECTORY]
+                    .select {
+                        filter {
+                            or {
+                                ilike("name", pattern)
+                                ilike("serial_no", pattern)
+                                ilike("student_email", pattern)
+                            }
+                        }
+                        order("created_at", Order.DESCENDING)
+                        limit(max)
+                    }
+                    .decodeList<StudentProfileView>()
+            }
+
+            directory.getOrElse {
+                // The directory view can be restricted; fall back to the base table. Class
+                // metadata is not joined here, so those fields stay empty in the result card.
+                client.postgrest[SupabaseTableData.Tables.STUDENTS]
+                    .select {
+                        filter {
+                            or {
+                                ilike("name", pattern)
+                                ilike("serial_no", pattern)
+                                ilike("student_email", pattern)
+                            }
+                        }
+                        order("created_at", Order.DESCENDING)
+                        limit(max)
+                    }
+                    .decodeList<StudentRow>()
+                    .map { row ->
+                        StudentProfileView(
+                            studentUid = row.uid,
+                            name = row.name,
+                            serialNo = row.serialNo,
+                            fatherName = row.fatherName,
+                            studentPhoneNo = row.studentPhoneNo,
+                            fatherPhoneNo = row.fatherPhoneNo,
+                            studentEmail = row.studentEmail,
+                            groupName = row.groupName,
+                            isLocked = row.isLocked,
+                            isPtm = row.isPtm,
+                            lockReason = row.lockReason,
+                            ptmSchedule = row.ptmSchedule,
+                            createdAt = row.createdAt,
+                        )
+                    }
+            }
+        }
+    }.onFailure {
+        if (it is CancellationException) throw it
+        Log.w(TAG, "Student search failed: ${it.message}")
+    }
+
+    /**
+     * Newest students first, by `students.created_at`. This backs the Search tab's landing list so
+     * an administrator can see the accounts that were just created without typing a query.
+     */
+    suspend fun getRecentStudents(max: Long = 15): Result<List<StudentProfileView>> = runCatching {
+        SupabaseManager.withAuthRetry {
+            val client = SupabaseManager.requireClient()
+
+            val directory = runCatching {
+                client.postgrest[SupabaseTableData.Views.V_STUDENT_DIRECTORY]
+                    .select {
+                        order("created_at", Order.DESCENDING)
+                        limit(max)
+                    }
+                    .decodeList<StudentProfileView>()
+            }
+
+            directory.getOrElse {
+                client.postgrest[SupabaseTableData.Tables.STUDENTS]
+                    .select {
+                        order("created_at", Order.DESCENDING)
+                        limit(max)
+                    }
+                    .decodeList<StudentRow>()
+                    .map { row ->
+                        StudentProfileView(
+                            studentUid = row.uid,
+                            name = row.name,
+                            serialNo = row.serialNo,
+                            fatherName = row.fatherName,
+                            studentPhoneNo = row.studentPhoneNo,
+                            fatherPhoneNo = row.fatherPhoneNo,
+                            studentEmail = row.studentEmail,
+                            groupName = row.groupName,
+                            isLocked = row.isLocked,
+                            isPtm = row.isPtm,
+                            lockReason = row.lockReason,
+                            ptmSchedule = row.ptmSchedule,
+                            createdAt = row.createdAt,
+                        )
+                    }
+            }
+        }
+    }.onFailure {
+        if (it is CancellationException) throw it
+        Log.w(TAG, "Recent students failed: ${it.message}")
+    }
+
+    suspend fun searchStaff(rawQuery: String, max: Long = 30): Result<List<StaffDirectoryView>> = runCatching {
+        val pattern = searchPattern(rawQuery) ?: return@runCatching emptyList()
+        SupabaseManager.withAuthRetry {
+            val client = SupabaseManager.requireClient()
+
+            val directory = runCatching {
+                client.postgrest[SupabaseTableData.Views.V_STAFF_DIRECTORY]
+                    .select {
+                        filter {
+                            or {
+                                ilike("name", pattern)
+                                ilike("display_name", pattern)
+                                ilike("email", pattern)
+                                ilike("designation", pattern)
+                                ilike("department_name", pattern)
+                            }
+                        }
+                        order("created_at", Order.DESCENDING)
+                        limit(max)
+                    }
+                    .decodeList<StaffDirectoryView>()
+                    // v_staff_directory joins class_mentors, so a mentor of two classes can repeat.
+                    .distinctBy { it.facultyId }
+            }
+
+            val rawStaff = directory.getOrElse {
+                client.postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
+                    .select {
+                        filter {
+                            or {
+                                ilike("name", pattern)
+                                ilike("email", pattern)
+                                ilike("designation", pattern)
+                            }
+                        }
+                        order("created_at", Order.DESCENDING)
+                        limit(max)
+                    }
+                    .decodeList<FacultyMasterRow>()
+                    .map { row ->
+                        StaffDirectoryView(
+                            facultyId = row.id,
+                            firebaseUid = row.firebaseUid,
+                            title = row.title,
+                            name = row.name,
+                            displayName = listOfNotNull(row.title, row.name)
+                                .joinToString(" ")
+                                .trim()
+                                .ifEmpty { null },
+                            email = row.email,
+                            phoneNo = row.phoneNo,
+                            designation = row.designation,
+                            departmentId = row.departmentId,
+                            isActive = row.isActive,
+                            createdAt = row.createdAt,
+                        )
+                    }
+            }
+            val (adminUids, adminEmails) = fetchAdminIdentifiers()
+            markAdmins(rawStaff, adminUids, adminEmails)
+        }
+    }.onFailure {
+        if (it is CancellationException) throw it
+        Log.w(TAG, "Staff search failed: ${it.message}")
+    }
+
+    /**
+     * Newest staff first, by `faculty_master.created_at` - the Staff tab's landing list, the
+     * counterpart of [getRecentStudents].
+     */
+    suspend fun getRecentStaff(max: Long = 15): Result<List<StaffDirectoryView>> = runCatching {
+        SupabaseManager.withAuthRetry {
+            val client = SupabaseManager.requireClient()
+
+            val directory = runCatching {
+                client.postgrest[SupabaseTableData.Views.V_STAFF_DIRECTORY]
+                    .select {
+                        order("created_at", Order.DESCENDING)
+                        limit(max)
+                    }
+                    .decodeList<StaffDirectoryView>()
+                    .distinctBy { it.facultyId }
+            }
+
+            val rawStaff = directory.getOrElse {
+                client.postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
+                    .select {
+                        order("created_at", Order.DESCENDING)
+                        limit(max)
+                    }
+                    .decodeList<FacultyMasterRow>()
+                    .map { row ->
+                        StaffDirectoryView(
+                            facultyId = row.id,
+                            firebaseUid = row.firebaseUid,
+                            title = row.title,
+                            name = row.name,
+                            displayName = listOfNotNull(row.title, row.name)
+                                .joinToString(" ")
+                                .trim()
+                                .ifEmpty { null },
+                            email = row.email,
+                            phoneNo = row.phoneNo,
+                            designation = row.designation,
+                            departmentId = row.departmentId,
+                            isActive = row.isActive,
+                            createdAt = row.createdAt,
+                        )
+                    }
+            }
+            val (adminUids, adminEmails) = fetchAdminIdentifiers()
+            markAdmins(rawStaff, adminUids, adminEmails)
+        }
+    }.onFailure {
+        if (it is CancellationException) throw it
+        Log.w(TAG, "Recent staff failed: ${it.message}")
+    }
+
+    private suspend fun fetchAdminIdentifiers(): Pair<Set<String>, Set<String>> {
+        return runCatching {
+            val client = SupabaseManager.requireClient()
+            val rows = client.postgrest[SupabaseTableData.Tables.ADMIN_DB]
+                .select()
+                .decodeList<AdminDbRow>()
+            val uids = rows.mapNotNull { it.uid.trim().takeIf { s -> s.isNotEmpty() } }.toSet()
+            val emails = rows.mapNotNull { it.email?.trim()?.lowercase()?.takeIf { s -> s.isNotEmpty() } }.toSet()
+            uids to emails
+        }.getOrDefault(emptySet<String>() to emptySet<String>())
+    }
+
+    private fun markAdmins(staffList: List<StaffDirectoryView>, adminUids: Set<String>, adminEmails: Set<String>): List<StaffDirectoryView> {
+        if (adminUids.isEmpty() && adminEmails.isEmpty()) return staffList
+        return staffList.map { staff ->
+            val isAd = (staff.firebaseUid != null && adminUids.contains(staff.firebaseUid.trim())) ||
+                (staff.email != null && adminEmails.contains(staff.email.trim().lowercase()))
+            if (isAd) staff.copy(isAdmin = true) else staff
+        }
+    }
+
     private data class CreatedAccount(val uid: String, val idToken: String)
     private suspend fun createAuthAccount(e: String, p: String, n: String): Result<CreatedAccount> {
         if (apiKey.isBlank()) return Result.failure(IllegalStateException("API key missing"))
@@ -457,6 +849,16 @@ object AdminRepository {
     @Serializable private data class FirebaseErrorResponse(val error: FirebaseErrorBody)
     @Serializable private data class FirebaseErrorBody(val message: String)
 }
+
+/** Head-counts rendered by the admin dashboard. */
+data class AdminDashboardStats(
+    val students: Long? = null,
+    val staff: Long? = null,
+    val classes: Long? = null,
+    val courses: Long? = null,
+    val branches: Long? = null,
+    val admins: Long? = null,
+)
 
 data class StudentEntry(
     val email: String,

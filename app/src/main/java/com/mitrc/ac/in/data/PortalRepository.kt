@@ -8,6 +8,7 @@ import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.PostgrestUpdate
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.postgrest.rpc
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -53,13 +54,21 @@ object PortalRepository {
     private const val TAG = "PortalRepository"
     private val json = Json { ignoreUnknownKeys = true }
 
-    private suspend fun <T> query(block: suspend () -> T): Result<T> = runCatching {
+    private suspend fun <T> query(block: suspend () -> T): Result<T> = try {
         // PostgREST decodes response JSON synchronously after the suspend call returns. When the
         // caller is a composable's LaunchedEffect that decode lands on the main thread and drops
         // frames on larger payloads, so keep the whole request on the IO dispatcher.
-        withContext(Dispatchers.IO) {
-            SupabaseManager.withAuthRetry { block() }
-        }
+        Result.success(
+            withContext(Dispatchers.IO) {
+                SupabaseManager.withAuthRetry { block() }
+            }
+        )
+    } catch (cancellation: CancellationException) {
+        // Never turn a cancelled coroutine into a failure result: the caller (a LaunchedEffect or
+        // a pull-to-refresh scope) has already gone away.
+        throw cancellation
+    } catch (error: Throwable) {
+        Result.failure(error)
     }
 
     // -----------------------------------------------------------------------------------------
@@ -94,9 +103,10 @@ object PortalRepository {
                 .select { filter { eq("uid", uid) } }
                 .decodeList<StudentRow>()
                 .firstOrNull()
-        }.getOrNull()
+        }
 
-        if (fromStudentTable != null) {
+        if (fromStudentTable.isSuccess && fromStudentTable.getOrNull() != null) {
+            val studentRow = fromStudentTable.getOrThrow()!!
             val enrollment = runCatching {
                 client.postgrest[SupabaseTableData.Tables.ENROLLMENTS]
                     .select { filter { eq("student_uid", uid) } }
@@ -106,21 +116,28 @@ object PortalRepository {
 
             Log.i(TAG, "Student profile resolved from students table (classId=${enrollment?.classId})")
             return@query StudentProfileView(
-                studentUid = fromStudentTable.uid,
-                name = fromStudentTable.name,
-                serialNo = fromStudentTable.serialNo,
-                fatherName = fromStudentTable.fatherName,
-                studentPhoneNo = fromStudentTable.studentPhoneNo,
-                fatherPhoneNo = fromStudentTable.fatherPhoneNo,
-                studentEmail = fromStudentTable.studentEmail,
-                groupName = fromStudentTable.groupName,
-                isLocked = fromStudentTable.isLocked,
-                isPtm = fromStudentTable.isPtm,
-                lockReason = fromStudentTable.lockReason,
-                ptmSchedule = fromStudentTable.ptmSchedule,
+                studentUid = studentRow.uid,
+                name = studentRow.name,
+                serialNo = studentRow.serialNo,
+                fatherName = studentRow.fatherName,
+                studentPhoneNo = studentRow.studentPhoneNo,
+                fatherPhoneNo = studentRow.fatherPhoneNo,
+                studentEmail = studentRow.studentEmail,
+                groupName = studentRow.groupName,
+                isLocked = studentRow.isLocked,
+                isPtm = studentRow.isPtm,
+                lockReason = studentRow.lockReason,
+                ptmSchedule = studentRow.ptmSchedule,
                 classId = enrollment?.classId
             )
         }
+
+        // Neither source returned a profile. If both failed outright (offline, timeout, expired
+        // session) the caller must see a failure, not "no profile": swallowing the network error
+        // here is what blanked every tab and showed "No Student Profile Found" while offline.
+        val viewError = fromView.exceptionOrNull()
+        val tableError = fromStudentTable.exceptionOrNull()
+        if (viewError != null && tableError != null) throw viewError
 
         null
     }

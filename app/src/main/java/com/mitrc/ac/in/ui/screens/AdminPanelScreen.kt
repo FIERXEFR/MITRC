@@ -1,12 +1,9 @@
-package com.mitrc.ac.`in`.ui.screens
+﻿package com.mitrc.ac.`in`.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -22,13 +19,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,20 +37,26 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.AssignmentInd
 import androidx.compose.material.icons.outlined.Badge
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContactPhone
+import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.PersonOutline
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SupervisorAccount
-import androidx.compose.material.icons.outlined.SystemUpdate
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.Work
@@ -69,6 +76,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -76,11 +84,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -102,6 +118,8 @@ import com.mitrc.ac.`in`.data.BranchRow
 import com.mitrc.ac.`in`.data.ClassGroupRow
 import com.mitrc.ac.`in`.data.ClassRow
 import com.mitrc.ac.`in`.data.CourseRow
+import com.mitrc.ac.`in`.data.GreetingStore
+import com.mitrc.ac.`in`.data.PushRepository
 import com.mitrc.ac.`in`.data.SupabaseManager
 import com.mitrc.ac.`in`.data.SupabaseTableData
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
@@ -116,33 +134,83 @@ import com.mitrc.ac.`in`.ui.theme.SurfaceWhite
 import com.mitrc.ac.`in`.ui.theme.TextPrimary
 import com.mitrc.ac.`in`.ui.theme.TextSecondary
 import io.github.jan.supabase.postgrest.postgrest
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 enum class AdminEntryTab(val label: String) {
     STUDENT("STUDENT"),
     STAFF("STAFF")
 }
 
+/** Top-level destinations of the admin console, rendered by the shared portal bottom bar. */
+internal enum class AdminTab(
+    val label: String,
+    val title: String,
+    val icon: ImageVector,
+) {
+    DASHBOARD("Dashboard", "DASHBOARD", Icons.Outlined.Dashboard),
+    SEARCH("Search", "SEARCH", Icons.Outlined.Search),
+    APP("Control Panel", "CONTROL PANEL", Icons.Outlined.Tune),
+    SETTINGS("Settings", "SETTINGS", Icons.Outlined.Settings),
+}
+
+/**
+ * Admin console shell: the same bottom navigation treatment as the student and teacher portals,
+ * with four destinations - Dashboard, Search, Control Panel and Settings.
+ *
+ * Account registration lives behind the dashboard's quick actions so the nav bar stays focused on
+ * day-to-day monitoring and management.
+ */
 @Composable
 fun AdminPanelScreen(onSignedOut: () -> Unit) {
-    val scope = rememberCoroutineScope()
-    val focusManager = LocalFocusManager.current
     val user = AuthRepository.currentUser
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
-    var showAppControl by remember { mutableStateOf(false) }
-    if (showAppControl) {
-        AppUpdateAdminScreen(onBack = { showAppControl = false })
-        return
+    var selectedTabName by rememberSaveable { mutableStateOf(AdminTab.DASHBOARD.name) }
+    val selectedTab = AdminTab.entries.firstOrNull { it.name == selectedTabName } ?: AdminTab.DASHBOARD
+
+    val pagerState = rememberPagerState(
+        initialPage = AdminTab.entries.indexOf(selectedTab).coerceAtLeast(0),
+        pageCount = { AdminTab.entries.size },
+    )
+
+    fun goToTab(tab: AdminTab) {
+        val targetIndex = AdminTab.entries.indexOf(tab)
+        if (
+            selectedTabName == tab.name &&
+            pagerState.currentPage == targetIndex &&
+            !pagerState.isScrollInProgress
+        ) {
+            return
+        }
+        selectedTabName = tab.name
+        scope.launch {
+            pagerState.animateScrollToPage(
+                page = targetIndex,
+                animationSpec = tween(300, easing = FastOutSlowInEasing),
+            )
+        }
     }
 
-    var selectedTab by remember { mutableStateOf(AdminEntryTab.STUDENT) }
-    var tabSwitching by remember { mutableStateOf(false) }
+    LaunchedEffect(pagerState.currentPage, pagerState.isScrollInProgress) {
+        if (!pagerState.isScrollInProgress) {
+            val targetTab = AdminTab.entries.getOrNull(pagerState.currentPage)
+            if (targetTab != null && targetTab.name != selectedTabName) {
+                selectedTabName = targetTab.name
+            }
+        }
+    }
+
+    // Registration is a sub-flow opened from the dashboard; it hides the nav bar while open.
+    var registerTabName by rememberSaveable { mutableStateOf<String?>(null) }
+    val registerTab = registerTabName?.let { name ->
+        AdminEntryTab.entries.firstOrNull { it.name == name }
+    }
 
     var initialLoading by remember { mutableStateOf(true) }
     var adminName by remember { mutableStateOf<String?>(null) }
 
-    // First time startup spinner + Fetch Admin's name
     LaunchedEffect(user?.uid) {
         initialLoading = true
         val uid = user?.uid
@@ -155,21 +223,297 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
                     .firstOrNull()
             }.getOrNull()
             adminName = row?.name?.ifBlank { null }
+
+            // The admin panel is a separate activity from HomeScreen, so nothing else registers
+            // this device's FCM token for an admin account. Register best-effort (never prompts
+            // for the notification permission) so notices posted from the Control Panel can
+            // reach this device while testing pushes.
+            PushRepository.registerCurrentDevice(PushRepository.appVersion(context))
         }
-        delay(1000) // Authentic 1-second startup spinner
         initialLoading = false
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val textPulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.85f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseAlpha"
-    )
+    BackHandler(enabled = registerTab != null || selectedTab != AdminTab.DASHBOARD) {
+        if (registerTab != null) {
+            registerTabName = null
+        } else if (selectedTab != AdminTab.DASHBOARD) {
+            goToTab(AdminTab.DASHBOARD)
+        }
+    }
+
+    val greeting = remember { GreetingStore.greeting() }
+    val headerTitle = when {
+        registerTab != null -> "${registerTab.label} REGISTRATION"
+        selectedTab == AdminTab.DASHBOARD -> "$greeting, ${firstNameOf(adminName)}"
+        else -> selectedTab.label
+    }
+
+    val foldDistancePx = with(LocalDensity.current) { 96.dp.toPx() }
+    val headerOffset = remember { mutableFloatStateOf(0f) }
+    val nestedScroll = remember(foldDistancePx) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val delta = available.y
+                if (delta == 0f) return Offset.Zero
+                val next = (headerOffset.floatValue - delta).coerceIn(0f, foldDistancePx)
+                val used = next - headerOffset.floatValue
+                if (used == 0f) return Offset.Zero
+                headerOffset.floatValue = next
+                return Offset(0f, -used)
+            }
+        }
+    }
+
+    LaunchedEffect(selectedTabName, registerTabName) { headerOffset.floatValue = 0f }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Slate)
+    ) {
+        AdminHeader(
+            title = headerTitle,
+            adminName = adminName,
+            scrolledPx = { headerOffset.floatValue },
+            showBack = registerTab != null,
+            onBack = { registerTabName = null }
+        )
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .nestedScroll(nestedScroll)
+        ) {
+            when {
+                initialLoading -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = Navy, modifier = Modifier.size(44.dp))
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                text = "Loading...",
+                                color = TextSecondary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+
+                else -> HorizontalPager(
+                    state = pagerState,
+                    beyondViewportPageCount = 1,
+                    modifier = Modifier.fillMaxSize(),
+                ) { page ->
+                    when (AdminTab.entries[page]) {
+                        AdminTab.DASHBOARD -> AdminDashboardTab(
+                            adminName = adminName,
+                            onOpenAppManagement = { goToTab(AdminTab.APP) },
+                            onOpenSearch = { goToTab(AdminTab.SEARCH) },
+                            onRegister = { tab ->
+                                goToTab(AdminTab.SEARCH)
+                                registerTabName = tab.name
+                            }
+                        )
+
+                        AdminTab.APP -> AdminAppManagementTab()
+
+                        AdminTab.SEARCH -> AdminSearchTab(onRegister = { registerTabName = it.name })
+
+                        AdminTab.SETTINGS -> AdminSettingsTab(
+                            adminName = adminName,
+                            email = user?.email,
+                            onSignedOut = onSignedOut
+                        )
+                    }
+                }
+            }
+
+            if (registerTab != null) {
+                AdminRegistrationDialog(
+                    initialTab = registerTab,
+                    onDismiss = { registerTabName = null }
+                )
+            }
+        }
+
+        if (registerTab == null) {
+            PortalBottomBar(
+                items = AdminTab.entries.map { PortalNavItem(label = it.label, icon = it.icon) },
+                selectedIndex = AdminTab.entries.indexOf(selectedTab),
+                onSelect = { index ->
+                    AdminTab.entries.getOrNull(index)?.let { goToTab(it) }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun AdminHeader(
+    title: String,
+    adminName: String?,
+    scrolledPx: () -> Float,
+    showBack: Boolean,
+    onBack: () -> Unit,
+) {
+    val headerShape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
+    val verticalPad = 6.dp
+    val heroContentHeight = 74.dp
+    val fullHeaderHeight = heroContentHeight + verticalPad * 2
+
+    val density = LocalDensity.current
+    val foldDistancePx = with(density) { 96.dp.toPx() }
+    val fullHeaderHeightPx = with(density) { fullHeaderHeight.toPx() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(headerShape)
+            .background(
+                brush = Brush.verticalGradient(listOf(NavyDeep, Navy)),
+                shape = headerShape
+            )
+            .statusBarsPadding()
+            .layout { measurable, constraints ->
+                val collapse = (scrolledPx() / foldDistancePx).coerceIn(0f, 1f)
+                val heightPx = (fullHeaderHeightPx * (1f - collapse))
+                    .roundToInt()
+                    .coerceIn(0, constraints.maxHeight)
+                val placeable = measurable.measure(
+                    constraints.copy(minHeight = heightPx, maxHeight = heightPx)
+                )
+                layout(constraints.maxWidth, heightPx) { placeable.place(0, 0) }
+            }
+            .padding(start = 22.dp, end = 22.dp, top = verticalPad, bottom = verticalPad)
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .size(150.dp)
+                .offset(x = 56.dp, y = (-58).dp)
+                .background(Gold.copy(alpha = 0.09f), CircleShape)
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    val collapse = (scrolledPx() / foldDistancePx).coerceIn(0f, 1f)
+                    translationY = -fullHeaderHeightPx * collapse
+                    alpha = 1f - collapse
+                },
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (showBack) {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier
+                                .padding(end = 6.dp)
+                                .size(22.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                                contentDescription = "Back",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                    Image(
+                        painter = painterResource(R.drawable.logo_mitrc_white),
+                        contentDescription = "MITRC logo",
+                        contentScale = ContentScale.Fit,
+                        alignment = Alignment.CenterStart,
+                        modifier = Modifier
+                            .width(74.dp)
+                            .height(16.dp)
+                    )
+                }
+
+                Spacer(Modifier.height(4.dp))
+
+                Text(
+                    text = "ADMIN PORTAL",
+                    color = GoldLight,
+                    fontSize = 10.sp,
+                    lineHeight = 12.sp,
+                    letterSpacing = 1.8.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Spacer(Modifier.height(3.dp))
+
+                AnimatedContent(
+                    targetState = title,
+                    transitionSpec = {
+                        (fadeIn(tween(340, delayMillis = 150)) +
+                            slideInVertically(tween(400, delayMillis = 150)) { -it / 4 })
+                            .togetherWith(
+                                fadeOut(tween(150)) +
+                                    slideOutVertically(tween(200)) { it / 4 }
+                            )
+                    },
+                    label = "adminHeaderTitle"
+                ) { text ->
+                    Text(
+                        text = text,
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        lineHeight = 24.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = (-0.4).sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Spacer(Modifier.height(2.dp))
+
+                Text(
+                    text = todayLabel(),
+                    color = Color.White.copy(alpha = 0.75f),
+                    fontSize = 11.5.sp,
+                    lineHeight = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            Spacer(Modifier.width(8.dp))
+
+            Surface(
+                shape = CircleShape,
+                color = Gold.copy(alpha = 0.18f),
+                border = BorderStroke(1.5.dp, Gold),
+                modifier = Modifier
+                    .padding(top = 18.dp)
+                    .size(38.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Outlined.AdminPanelSettings,
+                        contentDescription = "Admin Panel",
+                        tint = Gold,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminRegistrationDialog(
+    initialTab: AdminEntryTab,
+    onDismiss: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
 
     val studentForm = remember { StudentFormState() }
     val staffForm = remember { StaffFormState() }
@@ -177,18 +521,6 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
-
-    fun switchTab(tab: AdminEntryTab) {
-        if (tab == selectedTab || tabSwitching) return
-        tabSwitching = true
-        error = null
-        notice = null
-        scope.launch {
-            delay(1000)
-            selectedTab = tab
-            tabSwitching = false
-        }
-    }
 
     fun submit() {
         error = null
@@ -199,7 +531,7 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
             return
         }
 
-        if (selectedTab == AdminEntryTab.STUDENT) {
+        if (initialTab == AdminEntryTab.STUDENT) {
             val email = studentForm.email.trim()
             val password = studentForm.password
             val name = studentForm.name.trim()
@@ -303,333 +635,138 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Slate)
+    Dialog(
+        onDismissRequest = { if (!loading) onDismiss() },
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize()
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.55f))
+                .padding(horizontal = 20.dp, vertical = 24.dp),
+            contentAlignment = Alignment.Center
         ) {
-            // Header with Roll-Up Typography Animation
-            Box(
+            Surface(
+                shape = RoundedCornerShape(26.dp),
+                color = SurfaceWhite,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(
-                        brush = Brush.verticalGradient(listOf(NavyDeep, Navy)),
-                        shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp)
-                    )
-                    .padding(top = 48.dp, bottom = 28.dp, start = 20.dp, end = 20.dp)
+                    .fillMaxHeight(0.88f)
             ) {
-                Box(
+                Column(
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .size(140.dp)
-                        .offset(x = 35.dp, y = (-40).dp)
-                        .background(Gold.copy(alpha = 0.07f), CircleShape)
-                )
-
-                Column {
+                        .fillMaxSize()
+                        .padding(20.dp)
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Image(
-                                painter = painterResource(R.drawable.logo_mitrc_white),
-                                contentDescription = "MITRC Alwar Logo",
-                                modifier = Modifier.width(170.dp)
-                            )
-                            Spacer(Modifier.height(6.dp))
-
-                            // Vertical Roll-Up Typography Animation
-                            AnimatedContent(
-                                targetState = selectedTab,
-                                transitionSpec = {
-                                    (fadeIn(animationSpec = tween(350)) + slideInVertically(animationSpec = tween(350)) { -it })
-                                        .togetherWith(fadeOut(animationSpec = tween(350)) + slideOutVertically(animationSpec = tween(350)) { it })
-                                },
-                                label = "rollUpTitleAnimation"
-                            ) { tab ->
-                                Text(
-                                    text = "${tab.label} REGISTRATION",
-                                    color = Color.White,
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    letterSpacing = (-0.5).sp,
-                                    modifier = Modifier.alpha(textPulseAlpha)
-                                )
-                            }
-                        }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Surface(
-                                shape = CircleShape,
-                                color = Gold.copy(alpha = 0.15f),
-                                border = BorderStroke(1.5.dp, GoldLight),
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
                                 modifier = Modifier
-                                    .size(42.dp)
-                                    .clickable { showAppControl = true }
+                                    .size(36.dp)
+                                    .background(Navy, CircleShape),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Outlined.SystemUpdate,
-                                        contentDescription = "App updates and maintenance",
-                                        tint = GoldLight,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                            }
-
-                            Surface(
-                                shape = CircleShape,
-                                color = Gold.copy(alpha = 0.15f),
-                                border = BorderStroke(1.5.dp, GoldLight),
-                                modifier = Modifier.size(42.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Outlined.AdminPanelSettings,
-                                        contentDescription = "Admin",
-                                        tint = GoldLight,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.height(10.dp))
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .background(
-                                    color = Gold.copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(6.dp)
+                                Icon(
+                                    Icons.Outlined.PersonAdd,
+                                    contentDescription = null,
+                                    tint = GoldLight,
+                                    modifier = Modifier.size(18.dp)
                                 )
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
-                        ) {
+                            }
+                            Spacer(Modifier.width(10.dp))
                             Text(
-                                text = "ADMIN",
-                                color = GoldLight,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.2.sp
+                                text = if (initialTab == AdminEntryTab.STUDENT) "Register Student Account" else "Register Staff Account",
+                                color = TextPrimary,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
-                        Spacer(Modifier.width(10.dp))
-
-                        val displayName = adminName ?: "Administrator"
-                        val censoredMail = censorEmail(user?.email ?: "ukgankit@gmail.com")
-                        Text(
-                            text = "$displayName ($censoredMail)",
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        IconButton(onClick = onDismiss, enabled = !loading) {
+                            Icon(Icons.Outlined.Close, contentDescription = "Close", tint = TextSecondary)
+                        }
                     }
-                }
-            }
 
-            if (initialLoading) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = Navy, modifier = Modifier.size(44.dp))
-                        Spacer(Modifier.height(16.dp))
-                        Text(
-                            text = "Loading...",
-                            color = TextSecondary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            } else {
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
-                ) {
-                    // Card View
-                    Surface(
-                        shape = RoundedCornerShape(24.dp),
-                        color = SurfaceWhite,
-                        shadowElevation = 10.dp,
+                    Spacer(Modifier.height(14.dp))
+
+                    Column(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 18.dp, vertical = 18.dp)
-                        ) {
-                            AdminEntryTabs(
-                                selected = selectedTab,
-                                onSelected = ::switchTab
+                        when (initialTab) {
+                            AdminEntryTab.STUDENT -> StudentEntryForm(studentForm)
+                            AdminEntryTab.STAFF -> StaffEntryForm(staffForm)
+                        }
+
+                        if (error != null) {
+                            Text(
+                                text = error.orEmpty(),
+                                color = ErrorRed,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(top = 8.dp)
                             )
+                        }
 
-                            Spacer(Modifier.height(14.dp))
-
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxWidth()
-                                    .verticalScroll(rememberScrollState())
-                            ) {
-                                if (tabSwitching) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(220.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            CircularProgressIndicator(color = Navy, modifier = Modifier.size(36.dp))
-                                            Spacer(Modifier.height(14.dp))
-                                            Text(
-                                                text = "Fetching...",
-                                                color = TextSecondary,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    AnimatedContent(
-                                        targetState = selectedTab,
-                                        transitionSpec = {
-                                            (fadeIn(animationSpec = tween(350)) + slideInVertically(animationSpec = tween(350)) { -it })
-                                                .togetherWith(fadeOut(animationSpec = tween(350)) + slideOutVertically(animationSpec = tween(350)) { it })
-                                        },
-                                        label = "rollUpCategoryFormAnimation"
-                                    ) { tab ->
-                                        when (tab) {
-                                            AdminEntryTab.STUDENT -> StudentEntryForm(studentForm)
-                                            AdminEntryTab.STAFF -> StaffEntryForm(staffForm)
-                                        }
-                                    }
-                                }
-
-                                AnimatedVisibility(visible = error != null) {
-                                    Text(
-                                        text = error.orEmpty(),
-                                        color = ErrorRed,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        modifier = Modifier.padding(top = 10.dp)
-                                    )
-                                }
-
-                                AnimatedVisibility(visible = notice != null) {
-                                    Text(
-                                        text = notice.orEmpty(),
-                                        color = SuccessGreen,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        modifier = Modifier.padding(top = 10.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(Modifier.height(12.dp))
-
-                            Button(
-                                onClick = ::submit,
-                                enabled = !loading && !tabSwitching,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(50.dp),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Navy,
-                                    contentColor = Color.White,
-                                    disabledContainerColor = Navy.copy(alpha = 0.55f),
-                                    disabledContentColor = Color.White.copy(alpha = 0.7f)
-                                )
-                            ) {
-                                if (loading) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(20.dp),
-                                        color = GoldLight,
-                                        strokeWidth = 2.dp
-                                    )
-                                } else {
-                                    Icon(
-                                        Icons.Outlined.PersonAdd,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        text = if (selectedTab == AdminEntryTab.STUDENT) "Register Student Account" else "Register Staff Account",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
+                        if (notice != null) {
+                            Text(
+                                text = notice.orEmpty(),
+                                color = SuccessGreen,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
                         }
                     }
 
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(14.dp))
 
-                    // Fixed Footer
                     Button(
-                        onClick = {
-                            scope.launch {
-                                AuthRepository.signOut()
-                                onSignedOut()
-                            }
-                        },
+                        onClick = ::submit,
+                        enabled = !loading,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(48.dp),
+                            .height(50.dp),
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFFEE2E2),
-                            contentColor = Color(0xFFDC2626)
+                            containerColor = Navy,
+                            contentColor = Color.White
                         )
                     ) {
-                        Icon(
-                            Icons.Outlined.Logout,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = "Sign Out from Portal",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        if (loading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = GoldLight,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                Icons.Outlined.PersonAdd,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = if (initialTab == AdminEntryTab.STUDENT) "Register Student" else "Register Staff",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
-
-                    Spacer(Modifier.height(6.dp))
-
-                    Text(
-                        text = "© 2026 MITRC, Alwar. All Rights Reserved.",
-                        color = TextSecondary,
-                        fontSize = 10.sp,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
-                    )
                 }
             }
         }
     }
 }
 
-private fun censorEmail(email: String?): String {
+
+internal fun censorEmail(email: String?): String {
     val mail = email?.trim().orEmpty()
     if (!mail.contains('@')) return mail
     val parts = mail.split("@")
@@ -641,53 +778,6 @@ private fun censorEmail(email: String?): String {
     val visible = local.take(2)
     val hidden = "*".repeat(local.length - 2)
     return "$visible$hidden@$domain"
-}
-
-@Composable
-private fun AdminEntryTabs(
-    selected: AdminEntryTab,
-    onSelected: (AdminEntryTab) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Slate, RoundedCornerShape(12.dp))
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        AdminEntryTab.entries.forEach { tab ->
-            AdminEntryTabPill(
-                label = tab.label,
-                selected = selected == tab,
-                onClick = { onSelected(tab) },
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-@Composable
-private fun AdminEntryTabPill(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) Navy else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold,
-            color = if (selected) Color.White else TextSecondary
-        )
-    }
 }
 
 // ---------------------------------------------------------------------------------------------

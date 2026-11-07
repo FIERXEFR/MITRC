@@ -151,9 +151,13 @@ fun MitrcRoot(
             }
         }
 
-        // Maintenance and release checks run above the normal navigation. The admin activity
-        // does not include this gate so an admin can still turn maintenance off.
-        AppUpdateGate()
+        // Maintenance and release checks only apply inside the signed-in portal. Keeping the
+        // login/onboarding screens clear means a maintenance window can never lock an
+        // administrator out: Splash and Login route admins straight to AdminPanelActivity,
+        // which deliberately has no gate, so they can always turn maintenance off.
+        if (currentRoute == MainActivity.ROUTE_HOME) {
+            AppUpdateGate()
+        }
 
         // Splash and onboarding are branding/education screens with no server calls, so they
         // stay usable offline. Everything else needs a live connection.

@@ -9,6 +9,7 @@ import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.annotations.SupabaseInternal
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.serializer.KotlinXSerializer
 import io.github.jan.supabase.storage.Storage
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.api.createClientPlugin
@@ -17,6 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
+import kotlinx.serialization.json.Json
 import org.json.JSONObject
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
@@ -24,6 +26,20 @@ import java.util.concurrent.ConcurrentHashMap
 object SupabaseManager {
 
     private const val TAG = "SupabaseManager"
+
+    /**
+     * PostgREST decodes rows straight into `@Serializable` models. Several database columns are
+     * nullable while the Kotlin field is non-null with a default (for example
+     * `app_update.is_bigpacket`). Without `coerceInputValues`, a JSON `null` aborts the whole
+     * decode and callers see a failure with no visible cause, so map null/invalid values to the
+     * declared defaults instead.
+     */
+    private fun serializer(): KotlinXSerializer = KotlinXSerializer(
+        Json {
+            ignoreUnknownKeys = true
+            coerceInputValues = true
+        }
+    )
 
     /**
      * FirebaseAuth restores the persisted user asynchronously after a cold start, so the first
@@ -85,6 +101,7 @@ object SupabaseManager {
             }
 
             client = createSupabaseClient(supabaseUrl = url, supabaseKey = anonKey) {
+                defaultSerializer = serializer()
                 accessToken = { currentIdToken() }
                 install(Postgrest)
                 install(Storage)
@@ -290,6 +307,7 @@ object SupabaseManager {
             }
 
             val created = createSupabaseClient(supabaseUrl = url, supabaseKey = serviceKey) {
+                defaultSerializer = serializer()
                 install(Postgrest)
                 httpEngine = OkHttp.create()
             }

@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,12 +30,55 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mitrc.ac.`in`.ui.theme.Slate
 
 /** One item in the shared portal bottom navigation. */
 internal data class PortalNavItem(
     val label: String,
     val icon: ImageVector,
 )
+
+/**
+ * The Student | Staff style segmented control used on the login screen. Shared so the admin
+ * panel's sub-sections (Control Panel, Search) look identical to the rest of the app.
+ */
+@Composable
+internal fun PortalSegmentedTabs(
+    labels: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Slate)
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        labels.forEachIndexed { index, label ->
+            val selected = index == selectedIndex
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (selected) PortalBlue else Color.Transparent)
+                    .clickable { onSelect(index) }
+                    .padding(vertical = 11.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    fontSize = 13.sp,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                    color = if (selected) Color.White else PortalTextSecondary,
+                )
+            }
+        }
+    }
+}
+
 
 /**
  * The light track / navy pill navigation used by both the student and teacher portals.

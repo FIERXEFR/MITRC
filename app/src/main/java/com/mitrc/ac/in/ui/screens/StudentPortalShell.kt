@@ -326,8 +326,18 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
 
     // Silent re-fetch used by the pull-to-refresh gestures: the current data stays on screen
     // instead of blanking out to the full-screen loading skeleton.
+    //
+    // A failed re-fetch (typically offline) must not replace a working portal with an empty
+    // one. Keep the last good snapshot and let the global offline gate explain the problem;
+    // the next successful refresh updates it as usual.
     val refreshData: suspend () -> Unit = {
-        data = loadPortalData(userUid)
+        val latest = loadPortalData(userUid)
+        val current = data
+        data = if (latest.profile == null && current?.profile != null) {
+            current.copy(error = latest.error)
+        } else {
+            latest
+        }
     }
 
     // A locked profile, or a scheduled PTM, takes over the whole portal: no header, no tabs and
@@ -1075,8 +1085,24 @@ internal fun PortalErrorState(message: String, onRetry: (() -> Unit)? = null) {
     val raw = message.lowercase()
     val isAuthProblem = listOf("jwt", "token", "unauthorized", "expired", "pgrst301")
         .any { marker -> raw.contains(marker) }
+    // PostgREST/Ktor surface connectivity failures as host/socket/timeout text. Map them to a
+    // readable offline message instead of showing the raw exception to the user.
+    val isNetworkProblem = !isAuthProblem && listOf(
+        "unable to resolve host",
+        "unknownhost",
+        "network is unreachable",
+        "failed to connect",
+        "connectexception",
+        "connect timeout",
+        "connection reset",
+        "timeout",
+        "timed out",
+        "socket",
+        "offline",
+    ).any { marker -> raw.contains(marker) }
     val detail = when {
         isAuthProblem -> "Your session expired. Tap retry to sign you back in."
+        isNetworkProblem -> "Check your internet connection and tap retry."
         message.isBlank() -> "Check your internet connection and try again."
         else -> message
     }
@@ -1096,7 +1122,7 @@ internal fun PortalErrorState(message: String, onRetry: (() -> Unit)? = null) {
             )
             Spacer(Modifier.height(14.dp))
             Text(
-                text = "Something went wrong",
+                text = if (isNetworkProblem) "No internet connection" else "Something went wrong",
                 color = PortalTextPrimary,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold

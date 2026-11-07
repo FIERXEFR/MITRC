@@ -174,18 +174,34 @@ fun TeacherPortalShell(
     var selectedClassSubjectId by rememberSaveable { mutableIntStateOf(0) }
 
     LaunchedEffect(userUid, reloadTick) {
-        loading = true
+        // The skeleton is only for the first load. A refresh that fails (typically while offline)
+        // must keep the last good portal on screen instead of blanking every tab.
+        if (teacher == null) loading = true
         loadError = null
 
         val email = FirebaseAuth.getInstance().currentUser?.email.orEmpty()
-        val profile = PortalRepository.getTeacherProfile(userUid).getOrNull()
-            ?: PortalRepository.getFacultyByUidOrEmail(userUid, email).getOrNull()
+        val primaryResult = PortalRepository.getTeacherProfile(userUid)
+        val fallbackResult = if (primaryResult.getOrNull() == null) {
+            PortalRepository.getFacultyByUidOrEmail(userUid, email)
+        } else {
+            null
+        }
+        val profile = primaryResult.getOrNull() ?: fallbackResult?.getOrNull()
 
         if (profile == null) {
+            val failure = primaryResult.exceptionOrNull() ?: fallbackResult?.exceptionOrNull()
+            val keptTeacher = teacher
+            if (keptTeacher != null && failure != null) {
+                // Offline or server error: the previous profile and tabs stay visible.
+                loadError = failure.message
+                loading = false
+                return@LaunchedEffect
+            }
             teacher = null
             subjects = emptyList()
             classInfo = emptyMap()
-            loadError = "No faculty profile is linked to this account. Ask the admin to link your login to your faculty record."
+            loadError = failure?.message?.takeIf { it.isNotBlank() }
+                ?: "No faculty profile is linked to this account. Ask the admin to link your login to your faculty record."
             loading = false
             return@LaunchedEffect
         }

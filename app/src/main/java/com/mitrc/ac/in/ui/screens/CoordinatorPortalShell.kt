@@ -169,8 +169,12 @@ fun CoordinatorPortalShell(
 
     val refreshProfile: suspend () -> Unit = {
         val email = AuthRepository.currentUser?.email.orEmpty()
-        faculty = PortalRepository.getFacultyByUidOrEmail(userUid, email).getOrNull()
-        coordinatorClasses = PortalRepository.getMyCoordinatorClasses().getOrDefault(emptyList())
+        val facultyResult = PortalRepository.getFacultyByUidOrEmail(userUid, email)
+        val classesResult = PortalRepository.getMyCoordinatorClasses()
+        // A refresh that fails (typically while offline) keeps the last good profile and class
+        // list, so the tabs never blank out. The global offline gate explains the interruption.
+        if (facultyResult.isSuccess) faculty = facultyResult.getOrNull()
+        if (classesResult.isSuccess) coordinatorClasses = classesResult.getOrDefault(emptyList())
     }
 
     LaunchedEffect(userUid) { refreshProfile() }

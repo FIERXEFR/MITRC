@@ -90,16 +90,15 @@ fun rememberIsOnline(): Boolean {
         onDispose { runCatching { manager?.unregisterNetworkCallback(callback) } }
     }
 
-    // Safety net: some OEMs kill or delay connectivity broadcasts while the app is backgrounded.
-    // While offline, re-probe once a second so the gate always lifts on its own - no button.
-    LaunchedEffect(online) {
-        if (online) return@LaunchedEffect
+    // Safety net: some OEMs delay or drop connectivity callbacks (especially after the app has
+    // been backgrounded), which used to leave `online` stuck at true and let the portal refresh
+    // into an empty state without ever showing the offline gate. Probe once a second for the
+    // whole lifetime of the composition so turning the network off is noticed within ~1s.
+    LaunchedEffect(context) {
         while (true) {
+            val probe = context.hasInternet()
+            if (probe != online) online = probe
             delay(1_000)
-            if (context.hasInternet()) {
-                online = true
-                return@LaunchedEffect
-            }
         }
     }
 
