@@ -118,7 +118,14 @@ object CoordinatorAdminRepository {
             .insert(newRow) { select() }
             .decodeList<TimetableRow>()
 
-        inserted.firstOrNull() ?: error("Database created no timetable row.")
+        val created = inserted.firstOrNull() ?: error("Database created no timetable row.")
+
+        runCatching {
+            client.postgrest[SupabaseTableData.Tables.TIMETABLE_PERIODS]
+                .insert(defaultPeriodsFor(created.id))
+        }
+
+        created
     }
 
     suspend fun updateEffectiveFrom(timetableId: Int, effectiveFrom: String): Result<Unit> = admin { client ->
@@ -343,6 +350,15 @@ object CoordinatorAdminRepository {
         }
     }
 
+
+    private fun defaultPeriodsFor(timetableId: Int): List<TimetablePeriodRow> = listOf(
+        TimetablePeriodRow(timetableId, 1, "09:15:00", "10:15:00"),
+        TimetablePeriodRow(timetableId, 2, "10:15:00", "11:15:00"),
+        TimetablePeriodRow(timetableId, 3, "11:15:00", "12:15:00"),
+        TimetablePeriodRow(timetableId, 4, "12:15:00", "13:15:00"),
+        TimetablePeriodRow(timetableId, 5, "13:45:00", "14:45:00"),
+        TimetablePeriodRow(timetableId, 6, "14:45:00", "15:45:00"),
+    )
 
     private suspend fun <T> admin(block: suspend (SupabaseClient) -> T): Result<T> =
         runCatching { block(SupabaseManager.requireAdminClient()) }

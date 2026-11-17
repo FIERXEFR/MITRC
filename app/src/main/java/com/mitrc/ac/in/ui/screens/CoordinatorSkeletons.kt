@@ -229,22 +229,27 @@ internal fun CoordinatorTimetableSkeleton() {
 
                 SkeletonBlock(Modifier.width(150.dp).height(12.dp))
 
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    repeat(4) {
+                        SkeletonBlock(Modifier.weight(1f).height(22.dp), RoundedCornerShape(5.dp))
+                    }
+                }
+
                 repeat(5) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            SkeletonBlock(Modifier.width(120.dp).height(11.dp))
-                            SkeletonBlock(Modifier.width(180.dp).height(12.dp))
-                            SkeletonBlock(Modifier.width(110.dp).height(11.dp))
+                        repeat(4) {
+                            SkeletonBlock(Modifier.weight(1f).height(46.dp), RoundedCornerShape(6.dp))
                         }
-                        SkeletonBlock(Modifier.size(20.dp), CircleShape)
                     }
                 }
+
+                SkeletonBlock(Modifier.fillMaxWidth().height(24.dp), RoundedCornerShape(6.dp))
             }
         }
     }

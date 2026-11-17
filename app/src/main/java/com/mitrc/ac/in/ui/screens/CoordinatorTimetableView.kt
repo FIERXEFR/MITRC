@@ -1,7 +1,9 @@
 package com.mitrc.ac.`in`.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -25,7 +27,6 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Publish
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -35,11 +36,13 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
@@ -56,6 +59,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mitrc.ac.`in`.data.ClassGroupRow
@@ -67,10 +72,12 @@ import com.mitrc.ac.`in`.data.NewTimetableEntryRow
 import com.mitrc.ac.`in`.data.PortalRepository
 import com.mitrc.ac.`in`.data.TimetableEntryRow
 import com.mitrc.ac.`in`.data.TimetableEntryView
+import com.mitrc.ac.`in`.data.TimetablePeriodRow
 import com.mitrc.ac.`in`.data.TimetableRow
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
 import com.mitrc.ac.`in`.ui.theme.ErrorRed
 import com.mitrc.ac.`in`.ui.theme.Gold
+import com.mitrc.ac.`in`.ui.theme.GoldLight
 import com.mitrc.ac.`in`.ui.theme.Navy
 import com.mitrc.ac.`in`.ui.theme.NavySoft
 import com.mitrc.ac.`in`.ui.theme.Slate
@@ -80,6 +87,9 @@ import com.mitrc.ac.`in`.ui.theme.TextPrimary
 import com.mitrc.ac.`in`.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
@@ -118,6 +128,7 @@ fun CoordinatorTimetableView(userUid: String) {
     var selectedTimetable by remember { mutableStateOf<TimetableRow?>(null) }
 
     var entries by remember { mutableStateOf<List<TimetableEntryView>>(emptyList()) }
+    var periods by remember { mutableStateOf<List<TimetablePeriodRow>>(emptyList()) }
     var subjects by remember { mutableStateOf<List<ClassSubjectView>>(emptyList()) }
     var groups by remember { mutableStateOf<List<ClassGroupRow>>(emptyList()) }
 
@@ -131,6 +142,8 @@ fun CoordinatorTimetableView(userUid: String) {
 
     var showSlotDialog by remember { mutableStateOf(false) }
     var editingEntry by remember { mutableStateOf<TimetableEntryView?>(null) }
+    var pendingDay by remember { mutableStateOf<Int?>(null) }
+    var pendingPeriod by remember { mutableStateOf<Int?>(null) }
 
     var showNewTTDialog by remember { mutableStateOf(false) }
     var newTTEffectiveFrom by remember { mutableStateOf(getTodayIstDate()) }
@@ -186,6 +199,8 @@ fun CoordinatorTimetableView(userUid: String) {
             val entriesRes = CoordinatorAdminRepository.getEntries(tt.id)
             entries = entriesRes.getOrDefault(emptyList())
 
+            periods = CoordinatorAdminRepository.getPeriods(tt.id).getOrDefault(emptyList())
+
             val subjectsRes = CoordinatorAdminRepository.getSubjects(tt.classId)
             subjects = subjectsRes.getOrDefault(emptyList())
 
@@ -193,6 +208,7 @@ fun CoordinatorTimetableView(userUid: String) {
             groups = groupsRes.getOrDefault(emptyList())
         } else {
             entries = emptyList()
+            periods = emptyList()
             subjects = emptyList()
             groups = emptyList()
         }
@@ -214,6 +230,7 @@ fun CoordinatorTimetableView(userUid: String) {
                     roomDraft = curr.room.orEmpty()
                     effectiveDateDraft = curr.effectiveFrom
                     entries = CoordinatorAdminRepository.getEntries(curr.id).getOrDefault(emptyList())
+                    periods = CoordinatorAdminRepository.getPeriods(curr.id).getOrDefault(emptyList())
                     subjects = CoordinatorAdminRepository.getSubjects(curr.classId).getOrDefault(emptyList())
                     groups = CoordinatorAdminRepository.getGroups(curr.classId).getOrDefault(emptyList())
                 }
@@ -673,16 +690,26 @@ fun CoordinatorTimetableView(userUid: String) {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "TIMETABLE SLOTS (${entries.size})",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextSecondary,
-                                    letterSpacing = 1.2.sp
-                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "WEEKLY TIMETABLE",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextSecondary,
+                                        letterSpacing = 1.2.sp
+                                    )
+                                    Spacer(Modifier.height(3.dp))
+                                    Text(
+                                        text = "${entries.size} slots · swipe sideways for all days",
+                                        fontSize = 10.5.sp,
+                                        color = TextSecondary
+                                    )
+                                }
                                 TextButton(
                                     onClick = {
                                         editingEntry = null
+                                        pendingDay = null
+                                        pendingPeriod = null
                                         showSlotDialog = true
                                     }
                                 ) {
@@ -696,36 +723,51 @@ fun CoordinatorTimetableView(userUid: String) {
                                     Text(text = "Add slot", color = Navy, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                                 }
                             }
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(10.dp))
 
-                            if (entries.isEmpty()) {
-                                Text(text = "No slot entries in this draft yet.", fontSize = 12.sp, color = TextSecondary)
-                            } else {
-                                entries.forEach { entry ->
-                                    SlotEntryRow(
-                                        entry = entry,
-                                        onEdit = {
-                                            editingEntry = entry
-                                            showSlotDialog = true
-                                        },
-                                        onDelete = {
-                                            errorMsg = null
-                                            scope.launch {
-                                                CoordinatorAdminRepository.deleteEntry(entry.entryId).fold(
-                                                    onSuccess = {
-                                                        actionMsg = "Slot deleted."
-                                                        entries = CoordinatorAdminRepository
-                                                            .getEntries(currentTT.id)
-                                                            .getOrDefault(entries)
-                                                    },
-                                                    onFailure = { err ->
-                                                        errorMsg = err.message ?: "Failed to delete the slot"
-                                                    }
-                                                )
-                                            }
-                                        }
+                            TimetableGridTable(
+                                entries = entries,
+                                periods = periods,
+                                lunchAfterPeriod = currentTT.lunchAfterPeriod ?: DEFAULT_LUNCH_AFTER_PERIOD,
+                                lunchStart = currentTT.lunchStart ?: DEFAULT_LUNCH_START,
+                                lunchEnd = currentTT.lunchEnd ?: DEFAULT_LUNCH_END,
+                                onSlotClick = { entry ->
+                                    editingEntry = entry
+                                    pendingDay = null
+                                    pendingPeriod = null
+                                    showSlotDialog = true
+                                },
+                                onEmptyClick = { day, period ->
+                                    editingEntry = null
+                                    pendingDay = day
+                                    pendingPeriod = period
+                                    showSlotDialog = true
+                                }
+                            )
+
+                            Spacer(Modifier.height(16.dp))
+                            HorizontalDivider(color = DividerSoft, thickness = 0.6.dp)
+                            Spacer(Modifier.height(12.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "LUNCH BREAK",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextSecondary,
+                                        letterSpacing = 1.2.sp
                                     )
-                                    Spacer(Modifier.height(6.dp))
+                                    Spacer(Modifier.height(3.dp))
+                                    Text(
+                                        text = lunchSummary(currentTT),
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = TextPrimary
+                                    )
                                 }
                             }
                         }
@@ -735,6 +777,8 @@ fun CoordinatorTimetableView(userUid: String) {
                         TimetableSlotDialog(
                             timetableId = currentTT.id,
                             entry = editingEntry,
+                            initialDay = pendingDay,
+                            initialPeriod = pendingPeriod,
                             subjects = subjects,
                             groups = groups,
                             onDismiss = { showSlotDialog = false },
@@ -746,6 +790,29 @@ fun CoordinatorTimetableView(userUid: String) {
                                     entries = CoordinatorAdminRepository
                                         .getEntries(currentTT.id)
                                         .getOrDefault(entries)
+                                }
+                            },
+                            onDelete = editingEntry?.let { target ->
+                                {
+                                    busy = true
+                                    errorMsg = null
+                                    scope.launch {
+                                        CoordinatorAdminRepository.deleteEntry(target.entryId).fold(
+                                            onSuccess = {
+                                                busy = false
+                                                showSlotDialog = false
+                                                editingEntry = null
+                                                actionMsg = "Slot deleted."
+                                                entries = CoordinatorAdminRepository
+                                                    .getEntries(currentTT.id)
+                                                    .getOrDefault(entries)
+                                            },
+                                            onFailure = { err ->
+                                                busy = false
+                                                errorMsg = err.message ?: "Failed to delete the slot"
+                                            }
+                                        )
+                                    }
                                 }
                             },
                             onError = { message ->
@@ -997,67 +1064,383 @@ fun CoordinatorTimetableView(userUid: String) {
 }
 
 @Composable
-private fun SlotEntryRow(
-    entry: TimetableEntryView,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit
+private fun TimetableGridTable(
+    entries: List<TimetableEntryView>,
+    periods: List<TimetablePeriodRow>,
+    lunchAfterPeriod: Int,
+    lunchStart: String,
+    lunchEnd: String,
+    onSlotClick: (TimetableEntryView) -> Unit,
+    onEmptyClick: (Int, Int) -> Unit
 ) {
-    val daysMap = mapOf(1 to "Mon", 2 to "Tue", 3 to "Wed", 4 to "Thu", 5 to "Fri", 6 to "Sat")
-    val isBlank = entry.subjectCode.isNullOrBlank() && entry.subjectName.isNullOrBlank()
+    val periodRows = remember(periods) { periods.associateBy { it.period } }
+    val allPeriods = remember(entries, periods) {
+        val lastEntry = entries.maxOfOrNull { it.endPeriod } ?: 0
+        val lastDefined = periods.maxOfOrNull { it.period } ?: 0
+        (1..maxOf(lastEntry, lastDefined, 6)).toList()
+    }
+    val lunchAfter = lunchAfterPeriod.coerceIn(1, allPeriods.last())
+    val beforeLunch = allPeriods.filter { it <= lunchAfter }
+    val afterLunch = allPeriods.filter { it > lunchAfter }
+    val entriesByDay = remember(entries) { entries.groupBy { it.dayOfWeek } }
+    val today = remember { LocalDate.now().dayOfWeek.value }
+    val tableWidth = GridTimeWidth + GridDayWidth * gridDays.size + GridGap * gridDays.size
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(Slate)
-            .padding(10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
+    if (entries.isEmpty() && periods.isEmpty()) {
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = Slate,
+            modifier = Modifier.fillMaxWidth()
+        ) {
             Text(
-                text = "${daysMap[entry.dayOfWeek]} | Period ${entry.startPeriod}${if (entry.endPeriod > entry.startPeriod) "-${entry.endPeriod}" else ""}",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = Navy
+                text = "No slots in this draft yet. Use Add slot to create the first class.",
+                fontSize = 12.sp,
+                color = TextSecondary,
+                modifier = Modifier.padding(14.dp)
             )
-            Spacer(Modifier.height(2.dp))
-            if (isBlank) {
-                Text(
-                    text = "⚡ Blank / Free Period (Neutral)",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TextSecondary
+        }
+        return
+    }
+
+    Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+        Row(horizontalArrangement = Arrangement.spacedBy(GridGap)) {
+            GridHeaderCell(label = "TIME", width = GridTimeWidth)
+            gridDays.forEach { (day, label) ->
+                GridHeaderCell(
+                    label = label,
+                    width = GridDayWidth,
+                    highlighted = day == today
                 )
-            } else {
-                Text(
-                    text = "${entry.subjectName} (${entry.subjectCode})",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TextPrimary
-                )
-                if (!entry.teacherName.isNullOrBlank()) {
-                    Text(text = "Teacher: ${entry.teacherName}", fontSize = 11.sp, color = TextSecondary)
-                }
-            }
-            val place = entry.room?.takeIf { it.isNotBlank() } ?: entry.classRoom?.takeIf { it.isNotBlank() }
-            if (place != null) {
-                Text(text = "Room: $place", fontSize = 11.sp, color = TextSecondary)
             }
         }
 
-        IconButton(onClick = onEdit) {
-            Icon(
-                Icons.Outlined.Edit,
-                contentDescription = "Edit Entry",
-                tint = Navy,
-                modifier = Modifier.size(18.dp)
-            )
+        Spacer(Modifier.height(GridGap))
+
+        GridPeriodSection(
+            sectionPeriods = beforeLunch,
+            periodRows = periodRows,
+            entriesByDay = entriesByDay,
+            onSlotClick = onSlotClick,
+            onEmptyClick = onEmptyClick
+        )
+
+        LunchBreakBand(
+            width = tableWidth,
+            start = lunchStart,
+            end = lunchEnd,
+            afterPeriod = lunchAfter
+        )
+
+        GridPeriodSection(
+            sectionPeriods = afterLunch,
+            periodRows = periodRows,
+            entriesByDay = entriesByDay,
+            onSlotClick = onSlotClick,
+            onEmptyClick = onEmptyClick
+        )
+    }
+}
+
+@Composable
+private fun GridPeriodSection(
+    sectionPeriods: List<Int>,
+    periodRows: Map<Int, TimetablePeriodRow>,
+    entriesByDay: Map<Int, List<TimetableEntryView>>,
+    onSlotClick: (TimetableEntryView) -> Unit,
+    onEmptyClick: (Int, Int) -> Unit
+) {
+    if (sectionPeriods.isEmpty()) return
+
+    Row(horizontalArrangement = Arrangement.spacedBy(GridGap)) {
+        Column(verticalArrangement = Arrangement.spacedBy(GridGap)) {
+            sectionPeriods.forEach { period ->
+                GridTimeCell(period = period, row = periodRows[period])
+            }
         }
-        IconButton(onClick = onDelete) {
-            Icon(Icons.Outlined.Delete, contentDescription = "Delete Entry", tint = ErrorRed, modifier = Modifier.size(18.dp))
+        gridDays.forEach { (day, _) ->
+            GridDayColumn(
+                day = day,
+                sectionPeriods = sectionPeriods,
+                dayEntries = entriesByDay[day].orEmpty(),
+                onSlotClick = onSlotClick,
+                onEmptyClick = onEmptyClick
+            )
         }
     }
+}
+
+@Composable
+private fun GridDayColumn(
+    day: Int,
+    sectionPeriods: List<Int>,
+    dayEntries: List<TimetableEntryView>,
+    onSlotClick: (TimetableEntryView) -> Unit,
+    onEmptyClick: (Int, Int) -> Unit
+) {
+    val byStart = remember(dayEntries) { dayEntries.groupBy { it.startPeriod } }
+    val sectionStart = sectionPeriods.first()
+    val sectionEnd = sectionPeriods.last()
+    val carryOver = dayEntries.filter { it.startPeriod < sectionStart && it.endPeriod >= sectionStart }
+    val carrySpan = carryOver.maxOfOrNull {
+        (minOf(it.endPeriod, sectionEnd) - sectionStart + 1).coerceAtLeast(1)
+    } ?: 0
+
+    Column(verticalArrangement = Arrangement.spacedBy(GridGap)) {
+        var index = 0
+        if (carryOver.isNotEmpty() && carrySpan > 0) {
+            GridSlotCell(
+                entries = carryOver,
+                span = carrySpan.coerceAtMost(sectionPeriods.size),
+                onClick = { onSlotClick(carryOver.first()) }
+            )
+            index = carrySpan.coerceAtMost(sectionPeriods.size)
+        }
+        while (index < sectionPeriods.size) {
+            val period = sectionPeriods[index]
+            val cellEntries = byStart[period].orEmpty()
+            if (cellEntries.isEmpty()) {
+                GridEmptyCell(onClick = { onEmptyClick(day, period) })
+                index += 1
+            } else {
+                val lastPeriod = cellEntries.maxOf { it.endPeriod }
+                val span = (lastPeriod - period + 1).coerceIn(1, sectionPeriods.size - index)
+                GridSlotCell(
+                    entries = cellEntries,
+                    span = span,
+                    onClick = { onSlotClick(cellEntries.first()) }
+                )
+                index += span
+            }
+        }
+    }
+}
+
+@Composable
+private fun GridHeaderCell(label: String, width: Dp, highlighted: Boolean = false) {
+    Box(
+        modifier = Modifier
+            .width(width)
+            .height(28.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (highlighted) NavySoft else Navy),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            color = if (highlighted) GoldLight else Color.White,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp
+        )
+    }
+}
+
+@Composable
+private fun GridTimeCell(period: Int, row: TimetablePeriodRow?) {
+    Surface(
+        shape = RoundedCornerShape(7.dp),
+        color = Slate,
+        border = BorderStroke(1.dp, DividerSoft),
+        modifier = Modifier
+            .width(GridTimeWidth)
+            .height(GridRowHeight)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(text = "P$period", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Navy)
+            if (row != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(text = formatClock(row.startTime, "h:mm"), fontSize = 9.sp, color = TextSecondary)
+                Text(text = formatClock(row.endTime, "h:mm"), fontSize = 9.sp, color = TextSecondary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun GridEmptyCell(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .width(GridDayWidth)
+            .height(GridRowHeight)
+            .clip(RoundedCornerShape(7.dp))
+            .background(Slate)
+            .border(1.dp, DividerSoft.copy(alpha = 0.7f), RoundedCornerShape(7.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "+",
+            color = TextSecondary.copy(alpha = 0.4f),
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+private fun GridSlotCell(
+    entries: List<TimetableEntryView>,
+    span: Int,
+    onClick: () -> Unit
+) {
+    val height = GridRowHeight * span + GridGap * (span - 1)
+    val primary = entries.first()
+    val isLab = entries.any { it.groupId != null } || primary.subjectKind.equals("lab", true)
+    val accent = if (isLab) Gold else Navy
+
+    Surface(
+        shape = RoundedCornerShape(7.dp),
+        color = accent.copy(alpha = 0.07f),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.3f)),
+        modifier = Modifier
+            .width(GridDayWidth)
+            .height(height)
+            .clip(RoundedCornerShape(7.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 5.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            entries.forEachIndexed { index, entry ->
+                if (index > 0) {
+                    HorizontalDivider(color = accent.copy(alpha = 0.2f), thickness = 0.5.dp)
+                    Spacer(Modifier.height(3.dp))
+                }
+
+                val code = entry.subjectCode?.takeIf { it.isNotBlank() }
+                val free = code == null && entry.subjectName.isNullOrBlank()
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = code ?: "FREE",
+                        color = if (free) TextSecondary else Navy,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    val group = entry.groupName?.takeIf { it.isNotBlank() }
+                    if (group != null) {
+                        Spacer(Modifier.width(3.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(Gold.copy(alpha = 0.22f))
+                                .padding(horizontal = 3.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = group,
+                                color = Navy,
+                                fontSize = 7.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+
+                if (!free) {
+                    val teacher = entry.teacherName?.takeIf { it.isNotBlank() }
+                    if (teacher != null) {
+                        Text(
+                            text = teacher,
+                            color = TextSecondary,
+                            fontSize = 8.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (entries.size == 1) {
+                        val place = entry.room?.takeIf { it.isNotBlank() }
+                            ?: entry.classRoom?.takeIf { it.isNotBlank() }
+                        if (place != null) {
+                            Text(
+                                text = place,
+                                color = TextSecondary,
+                                fontSize = 8.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LunchBreakBand(width: Dp, start: String, end: String, afterPeriod: Int) {
+    Column(modifier = Modifier.width(width)) {
+        Spacer(Modifier.height(GridGap))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(GridLunchHeight)
+                .clip(RoundedCornerShape(7.dp))
+                .background(Gold.copy(alpha = 0.14f)),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "LUNCH BREAK",
+                color = Navy,
+                fontSize = 9.5.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.2.sp
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "${formatClock(start, "h:mm a")} – ${formatClock(end, "h:mm a")}",
+                color = TextPrimary,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(text = "after P$afterPeriod", color = TextSecondary, fontSize = 9.sp)
+        }
+        Spacer(Modifier.height(GridGap))
+    }
+}
+
+private const val DEFAULT_LUNCH_AFTER_PERIOD = 4
+private const val DEFAULT_LUNCH_START = "13:15:00"
+private const val DEFAULT_LUNCH_END = "13:45:00"
+
+private val gridDays = listOf(
+    1 to "MON",
+    2 to "TUE",
+    3 to "WED",
+    4 to "THU",
+    5 to "FRI",
+    6 to "SAT"
+)
+
+private val GridTimeWidth = 58.dp
+private val GridDayWidth = 98.dp
+private val GridGap = 3.dp
+private val GridRowHeight = 72.dp
+private val GridLunchHeight = 28.dp
+
+private fun formatClock(raw: String?, pattern: String): String {
+    val text = raw.orEmpty().trim()
+    val time = runCatching { LocalTime.parse(text) }.getOrNull() ?: return text
+    return time.format(DateTimeFormatter.ofPattern(pattern, Locale.US))
+}
+
+private fun lunchSummary(timetable: TimetableRow): String {
+    val after = timetable.lunchAfterPeriod ?: DEFAULT_LUNCH_AFTER_PERIOD
+    val start = formatClock(timetable.lunchStart ?: DEFAULT_LUNCH_START, "h:mm a")
+    val end = formatClock(timetable.lunchEnd ?: DEFAULT_LUNCH_END, "h:mm a")
+    return "$start – $end · after period $after"
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -1065,10 +1448,13 @@ private fun SlotEntryRow(
 private fun TimetableSlotDialog(
     timetableId: Int,
     entry: TimetableEntryView?,
+    initialDay: Int?,
+    initialPeriod: Int?,
     subjects: List<ClassSubjectView>,
     groups: List<ClassGroupRow>,
     onDismiss: () -> Unit,
     onSaved: () -> Unit,
+    onDelete: (() -> Unit)?,
     onError: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -1081,10 +1467,14 @@ private fun TimetableSlotDialog(
         } ?: subjects.firstOrNull()?.classSubjectId ?: 0
     }
 
-    var day by remember(entry) { mutableIntStateOf(entry?.dayOfWeek ?: 1) }
-    var startPeriod by remember(entry) { mutableIntStateOf(entry?.startPeriod ?: 1) }
-    var endPeriod by remember(entry) {
-        mutableIntStateOf(entry?.endPeriod ?: entry?.startPeriod ?: 1)
+    var day by remember(entry, initialDay) {
+        mutableIntStateOf(entry?.dayOfWeek ?: initialDay ?: 1)
+    }
+    var startPeriod by remember(entry, initialPeriod) {
+        mutableIntStateOf(entry?.startPeriod ?: initialPeriod ?: 1)
+    }
+    var endPeriod by remember(entry, initialPeriod) {
+        mutableIntStateOf(entry?.endPeriod ?: entry?.startPeriod ?: initialPeriod ?: 1)
     }
     var subjectId by remember(entry, initialSubjectId) { mutableIntStateOf(initialSubjectId) }
     var groupId by remember(entry) { mutableStateOf(entry?.groupId) }
@@ -1283,8 +1673,15 @@ private fun TimetableSlotDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !saving) {
-                Text("Cancel", color = TextSecondary, fontSize = 13.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (onDelete != null) {
+                    TextButton(onClick = onDelete, enabled = !saving) {
+                        Text("Delete", color = ErrorRed, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                TextButton(onClick = onDismiss, enabled = !saving) {
+                    Text("Cancel", color = TextSecondary, fontSize = 13.sp)
+                }
             }
         },
         containerColor = SurfaceWhite

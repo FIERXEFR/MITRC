@@ -276,6 +276,9 @@ data class NewTimetableRow(
     @SerialName("effective_from") val effectiveFrom: String,
     @SerialName("room") val room: String? = null,
     @SerialName("is_published") val isPublished: Boolean = false,
+    @SerialName("lunch_after_period") val lunchAfterPeriod: Int? = 4,
+    @SerialName("lunch_start") val lunchStart: String? = "13:15:00",
+    @SerialName("lunch_end") val lunchEnd: String? = "13:45:00",
 )
 
 @Serializable
