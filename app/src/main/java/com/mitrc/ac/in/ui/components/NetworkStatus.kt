@@ -60,11 +60,6 @@ private fun Context.hasInternet(): Boolean {
         capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
 }
 
-/**
- * Tracks validated internet connectivity for the lifetime of the composition.
- * NET_CAPABILITY_VALIDATED matters: Wi-Fi without a captive-portal login is "connected"
- * but cannot reach Supabase, so it must count as offline.
- */
 @Composable
 fun rememberIsOnline(): Boolean {
     val context = LocalContext.current
@@ -90,10 +85,6 @@ fun rememberIsOnline(): Boolean {
         onDispose { runCatching { manager?.unregisterNetworkCallback(callback) } }
     }
 
-    // Safety net: some OEMs delay or drop connectivity callbacks (especially after the app has
-    // been backgrounded), which used to leave `online` stuck at true and let the portal refresh
-    // into an empty state without ever showing the offline gate. Probe once a second for the
-    // whole lifetime of the composition so turning the network off is noticed within ~1s.
     LaunchedEffect(context) {
         while (true) {
             val probe = context.hasInternet()
@@ -105,13 +96,8 @@ fun rememberIsOnline(): Boolean {
     return online
 }
 
-/**
- * Non-dismissible offline gate. It has no buttons and cannot be closed by back press or
- * outside tap; it disappears on its own the moment connectivity returns.
- */
 @Composable
 fun OfflineDialog() {
-    // Swallow system back and the predictive-back gesture while the gate is up.
     BackHandler(enabled = true) { }
     Dialog(
         onDismissRequest = { },

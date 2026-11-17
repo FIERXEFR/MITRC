@@ -84,10 +84,6 @@ enum class StaffRole {
 
 private const val TAG = "HomeScreen"
 
-/**
- * Smart Router for the MITRC App.
- * Detects role from Supabase schema and delegates to the appropriate Portal Shell.
- */
 @Composable
 fun HomeScreen(onSignedOut: () -> Unit) {
     val user = AuthRepository.currentUser
@@ -113,8 +109,6 @@ fun HomeScreen(onSignedOut: () -> Unit) {
         }
     }
 
-    // Returning from the system Settings screen does not re-run the launcher
-    // callback, so re-read the permission whenever the app comes back.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -144,11 +138,6 @@ fun HomeScreen(onSignedOut: () -> Unit) {
         val portals = PortalRepository.getMyPortals().getOrNull()
         Log.d(TAG, "my_portals: $portals")
 
-        // `my_portals` is the single authoritative role RPC. When it succeeds, trust its flags
-        // and return immediately; the old fallback probes (coordinator classes, staff directory,
-        // faculty lookup, student profile) were only needed when that RPC was broken or a row had
-        // not been linked yet. Running them for every student added four or five serial requests
-        // before the skeleton could even start.
         if (portals != null) {
             if (portals.isCoordinator) {
                 Log.i(TAG, "Role resolved as COORDINATOR via my_portals")
@@ -167,8 +156,6 @@ fun HomeScreen(onSignedOut: () -> Unit) {
             }
         }
 
-        // Fallbacks for a failed `my_portals` call or an older deployment whose RPC does not
-        // expose a role yet.
         val myClassesRes = PortalRepository.getMyCoordinatorClasses()
         val myClasses = myClassesRes.getOrNull()
         Log.d(TAG, "v_my_coordinator_classes rows=${myClasses?.size}")
@@ -214,7 +201,6 @@ fun HomeScreen(onSignedOut: () -> Unit) {
             return@LaunchedEffect
         }
 
-        // 3. Check Student Profile
         val student = PortalRepository.getStudentProfile(userUid).getOrNull()
         if (student != null) {
             Log.i(TAG, "Role resolved as STUDENT via student profile")
@@ -226,10 +212,6 @@ fun HomeScreen(onSignedOut: () -> Unit) {
         resolvedRole = StaffRole.NOT_LINKED
     }
 
-    // Teacher and not-linked screens have no notifications sheet. Drop a pending
-    // push deep-link so it cannot survive until a later student login. Keyed on
-    // the request too, so a tap that arrives while the portal is already open is
-    // still cleared.
     val openNotificationsRequest = NotificationOpenRequest.pending
     LaunchedEffect(openNotificationsRequest, resolvedRole) {
         if (openNotificationsRequest &&
@@ -239,8 +221,6 @@ fun HomeScreen(onSignedOut: () -> Unit) {
         }
     }
 
-    // Verify permission once the account reaches a real portal. The mandatory
-    // dialog below drives the actual request, so this only keeps state in sync.
     LaunchedEffect(resolvedRole) {
         if (resolvedRole == StaffRole.LOADING || resolvedRole == StaffRole.NOT_LINKED) {
             return@LaunchedEffect
@@ -248,8 +228,6 @@ fun HomeScreen(onSignedOut: () -> Unit) {
         isNotificationPermissionGranted = hasNotificationPermission(context)
     }
 
-    // Register whenever the portal is ready and permission is granted, including
-    // after the user enables notifications from system Settings.
     LaunchedEffect(resolvedRole, isNotificationPermissionGranted) {
         if (resolvedRole == StaffRole.LOADING || resolvedRole == StaffRole.NOT_LINKED) {
             return@LaunchedEffect
@@ -261,8 +239,6 @@ fun HomeScreen(onSignedOut: () -> Unit) {
 
     when (resolvedRole) {
         StaffRole.LOADING -> {
-            // The splash has already branded the launch. Keep the same portal background
-            // instead of flashing a progress spinner while the role RPC settles.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -291,8 +267,6 @@ fun HomeScreen(onSignedOut: () -> Unit) {
         RequiredNotificationPermissionDialog(
             onAllow = {
                 if (hasNotificationPermission(context)) {
-                    // Granted while the dialog was up (e.g. from system Settings);
-                    // just let the state change dismiss it.
                     isNotificationPermissionGranted = true
                 } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     val shouldShowRationale = context.findHostActivity()
@@ -301,7 +275,6 @@ fun HomeScreen(onSignedOut: () -> Unit) {
                         ) ?: false
 
                     if (!shouldShowRationale && PushPermissionStore.wasPrompted(context)) {
-                        // Permanently denied: the system prompt will not re-appear.
                         openNotificationSettings(context)
                     } else {
                         PushPermissionStore.markPrompted(context)
@@ -318,9 +291,6 @@ fun HomeScreen(onSignedOut: () -> Unit) {
     }
 }
 
-/**
- * Non-cancelable custom notification permission dialog styled as per the app theme.
- */
 @Composable
 private fun RequiredNotificationPermissionDialog(
     onAllow: () -> Unit,
@@ -424,7 +394,6 @@ private fun RequiredNotificationPermissionDialog(
     }
 }
 
-/** True when the app can actually post notifications on this OS version. */
 internal fun hasNotificationPermission(context: Context): Boolean =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         ContextCompat.checkSelfPermission(
@@ -436,7 +405,6 @@ internal fun hasNotificationPermission(context: Context): Boolean =
         NotificationManagerCompat.from(context).areNotificationsEnabled()
     }
 
-/** Unwraps the Activity hosting this context (Compose may hand us a ContextWrapper). */
 private fun Context.findHostActivity(): Activity? {
     var current: Context? = this
     while (current is ContextWrapper) {
@@ -446,7 +414,6 @@ private fun Context.findHostActivity(): Activity? {
     return current as? Activity
 }
 
-/** Opens per-app notification settings, falling back to the app details page. */
 internal fun openNotificationSettings(context: Context) {
     val notificationSettings = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
         putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
@@ -466,7 +433,6 @@ private fun NotLinkedScreen(onSignedOut: () -> Unit) {
     val scope = rememberCoroutineScope()
     var signingOut by remember { mutableStateOf(false) }
 
-    // Unlinked accounts never reach a portal: sign them out automatically within 3 seconds.
     LaunchedEffect(Unit) {
         delay(2500)
         if (!signingOut) {

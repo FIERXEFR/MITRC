@@ -153,12 +153,10 @@ fun StudentPortalView(userUid: String) {
     }
 
     Column {
-        // Profile Card
         StudentProfileCard(p)
 
         Spacer(Modifier.height(20.dp))
 
-        // Enrolled Subjects
         SectionHeader("MY ACADEMIC SUBJECTS")
         Spacer(Modifier.height(10.dp))
         if (subjects.isEmpty()) {
@@ -172,7 +170,6 @@ fun StudentPortalView(userUid: String) {
 
         Spacer(Modifier.height(20.dp))
 
-        // Attendance Percentage
         SectionHeader("ATTENDANCE SUMMARY")
         Spacer(Modifier.height(10.dp))
         if (attendance.isEmpty()) {
@@ -186,7 +183,6 @@ fun StudentPortalView(userUid: String) {
 
         Spacer(Modifier.height(20.dp))
 
-        // Marks Summary
         SectionHeader("MARKS & EVALUATIONS")
         Spacer(Modifier.height(10.dp))
         if (marks.isEmpty()) {
@@ -201,7 +197,6 @@ fun StudentPortalView(userUid: String) {
 
         Spacer(Modifier.height(20.dp))
 
-        // Timetable
         SectionHeader("LIVE TIMETABLE")
         Spacer(Modifier.height(10.dp))
         StudentTimetableGrid(timetable, hasGroupAssigned = !p.groupName.isNull_or_blank())

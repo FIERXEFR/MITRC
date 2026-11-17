@@ -63,15 +63,6 @@ import com.mitrc.ac.`in`.ui.theme.TextPrimary
 import com.mitrc.ac.`in`.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 
-/**
- * Full-screen, non-dismissable state shown when a coordinator locked the profile or scheduled a
- * PTM. It is rendered by [StudentPortalShell] instead of the portal itself, so the tabs, header
- * and sign-out flow are unreachable while it is visible.
- *
- * Two things can dismiss it: the coordinator unlocking the profile (the screen re-checks
- * [onRefresh] in the background, and the shell recomposes out of this state) or the student
- * leaving the app with "Exit".
- */
 @Composable
 internal fun StudentLockScreen(
     profile: StudentProfileView,
@@ -96,10 +87,8 @@ internal fun StudentLockScreen(
         }
     }
 
-    // The only back gesture on this screen is swallowed: there is nothing behind it to return to.
     BackHandler { }
 
-    // Quiet poll so the screen closes on its own the moment the coordinator restores access.
     LaunchedEffect(profile.studentUid, profile.isLocked, profile.isPtm) {
         while (true) {
             delay(20_000)
@@ -112,8 +101,6 @@ internal fun StudentLockScreen(
             .fillMaxSize()
             .background(Brush.verticalGradient(listOf(NavyDeep, Navy)))
     ) {
-        // The same gold orbs as the login and portal headers, at a lower opacity so the content
-        // stays the only focal point.
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -287,7 +274,6 @@ internal fun StudentLockScreen(
 
             Button(
                 onClick = {
-                    // Leaves the app; reopening re-runs the lock check, so nothing is bypassed.
                     (context as? Activity)?.finish()
                 },
                 shape = RoundedCornerShape(16.dp),

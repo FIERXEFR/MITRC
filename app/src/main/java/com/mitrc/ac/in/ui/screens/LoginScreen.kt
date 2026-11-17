@@ -97,11 +97,6 @@ import kotlinx.coroutines.tasks.await
 
 private const val TAG = "LoginScreen"
 
-/**
- * @param onLoggedIn routed to the normal student/co-ordinator portal.
- * @param onAdminLoggedIn routed to [com.mitrc.ac.in.AdminPanelActivity] when the signed-in UID
- * has a row in the `admin_db` table.
- */
 @Composable
 fun LoginScreen(onLoggedIn: () -> Unit, onAdminLoggedIn: () -> Unit) {
     val scope = rememberCoroutineScope()
@@ -139,9 +134,6 @@ fun LoginScreen(onLoggedIn: () -> Unit, onAdminLoggedIn: () -> Unit) {
             result.fold(
                 onSuccess = { user ->
                     OnboardingStore.markCompleted()
-                    // Mint a fresh ID token before the portal's first Supabase queries. Without
-                    // this the student path can fire requests with a token Firebase has not
-                    // finished issuing yet, which surfaces as a JWT error on first login.
                     runCatching { user.getIdToken(true).await() }
 
                     when (resolveAccountLink(user.uid, user.email, isStaff)) {
@@ -156,9 +148,6 @@ fun LoginScreen(onLoggedIn: () -> Unit, onAdminLoggedIn: () -> Unit) {
                         }
 
                         AccountLink.UNKNOWN -> {
-                            // Transient auth/RLS/network failure while checking. Don't block a
-                            // possibly valid account here; HomeScreen re-resolves it and enforces
-                            // the linked-account rule with an automatic sign-out.
                             Log.w(TAG, "Account link check failed for uid=${user.uid}; deferring to HomeScreen")
                             loading = false
                             onLoggedIn()
@@ -686,11 +675,6 @@ private fun mitrcFieldColors() = OutlinedTextFieldDefaults.colors(
 
 private enum class AccountLink { ADMIN, STAFF, STUDENT, NOT_LINKED, UNKNOWN }
 
-/**
- * Decides whether a Firebase account may enter the app. Student-chip logins check the student
- * record first (one query); staff-chip logins run the staff probes first. A definitive "no row
- * anywhere" blocks the login; a transient failure is left to HomeScreen to resolve.
- */
 private suspend fun resolveAccountLink(uid: String, email: String?, staffFirst: Boolean): AccountLink {
     suspend fun staffGate(): AccountLink = when (val gate = AdminRepository.resolveStaffGate(uid, email)) {
         AdminRepository.StaffGate.Admin -> AccountLink.ADMIN

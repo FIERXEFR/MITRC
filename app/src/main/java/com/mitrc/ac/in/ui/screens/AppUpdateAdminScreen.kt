@@ -24,9 +24,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Send
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -72,6 +74,7 @@ import com.mitrc.ac.`in`.data.ClassRow
 import com.mitrc.ac.`in`.data.CourseRow
 import com.mitrc.ac.`in`.data.NewNotificationRow
 import com.mitrc.ac.`in`.data.NotificationRow
+import com.mitrc.ac.`in`.data.StudentProfileView
 import com.mitrc.ac.`in`.auth.AdminRepository
 import com.mitrc.ac.`in`.ui.theme.DividerSoft
 import com.mitrc.ac.`in`.ui.theme.ErrorRed
@@ -93,23 +96,12 @@ import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-/** The three independent tools of the Control Panel, edited as sub-sections. */
 enum class AppManagementSection(val label: String) {
     UPDATE("Update"),
     MAINTENANCE("Maintenance"),
     NOTIFICATIONS("Notifications"),
 }
 
-/**
- * "Control Panel" tab of the admin console.
- *
- * Row 1 (`app_update`) and row 2 (`app_maintenance`) are edited in separate sub-sections, each
- * with its own save button. A save writes only its own row, so toggling maintenance can never
- * overwrite release settings (and vice versa). The Notifications sub-section posts a row into
- * `public.notifications`, which the existing database trigger fans out through `send-push`.
- *
- * The normal app reads both app rows through [com.mitrc.ac.in.ui.components.AppUpdateGate].
- */
 @Composable
 fun AdminAppManagementTab() {
     val context = LocalContext.current
@@ -122,7 +114,6 @@ fun AdminAppManagementTab() {
     var savingMaintenance by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
 
-    // Row 1 - release / update.
     var published by remember { mutableStateOf(true) }
     var bigPacket by remember { mutableStateOf(false) }
     var force by remember { mutableStateOf(true) }
@@ -136,7 +127,6 @@ fun AdminAppManagementTab() {
     var updateError by remember { mutableStateOf<String?>(null) }
     var updateNotice by remember { mutableStateOf<String?>(null) }
 
-    // Row 2 - maintenance.
     var maintenance by remember { mutableStateOf(false) }
     var maintenanceTitle by remember { mutableStateOf("Under Maintenance") }
     var maintenanceMessage by remember { mutableStateOf("") }
@@ -220,7 +210,6 @@ fun AdminAppManagementTab() {
             AppUpdateRepository.saveUpdate(row).fold(
                 onSuccess = {
                     updateNotice = "Release settings saved to row 1."
-                    // A new release must be evaluated again even if a previous one was dismissed.
                     AppUpdateStore.markBigDismissed("")
                 },
                 onFailure = { updateError = it.message ?: "Could not save release settings" }
@@ -494,13 +483,11 @@ fun AdminAppManagementTab() {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Notifications
-// ---------------------------------------------------------------------------------------------
 
 private enum class NotificationAudience(val value: String, val label: String) {
     EVERYONE("everyone", "Everyone"),
-    STUDENTS("all_students", "Students"),
+    STUDENTS("all_students", "All students"),
+    STUDENT("student", "One student"),
     STAFF("all_staff", "Staff"),
     COURSE("course", "Course"),
     CLASS("class", "Class"),
@@ -526,22 +513,11 @@ private val NotificationPriorities = listOf(
     "urgent" to "Urgent",
 )
 
-/**
- * Compose-and-post form for `public.notifications`.
- *
- * An insert is all that is needed: `trg_notifications_send_push` calls the `send-push` Edge
- * Function, which resolves the audience to Firebase UIDs, looks up their device tokens and
- * writes the delivery counters back onto the row. The form polls those counters so the admin
- * can see the result of a real on-device push test without leaving the panel.
- */
 @Composable
 private fun NotificationComposerSection() {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    // The admin panel never prompts for POST_NOTIFICATIONS (that prompt belongs to the student /
-    // teacher / coordinator portal), so this device may have notifications blocked. The push would
-    // still be sent but never appear, which makes an on-device test look broken.
     var notificationsEnabled by remember { mutableStateOf(hasNotificationPermission(context)) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -562,6 +538,12 @@ private fun NotificationComposerSection() {
     var category by rememberSaveable { mutableStateOf("announcement") }
     var priority by rememberSaveable { mutableStateOf("normal") }
     var expiresAt by rememberSaveable { mutableStateOf("") }
+
+    var studentQuery by rememberSaveable { mutableStateOf("") }
+    var selectedStudent by remember { mutableStateOf<StudentProfileView?>(null) }
+    var studentResults by remember { mutableStateOf<List<StudentProfileView>>(emptyList()) }
+    var searchingStudents by remember { mutableStateOf(false) }
+    var studentSearchError by remember { mutableStateOf<String?>(null) }
 
     var courses by remember { mutableStateOf<List<CourseRow>>(emptyList()) }
     var selectedCourse by remember { mutableStateOf<CourseRow?>(null) }
@@ -590,7 +572,6 @@ private fun NotificationComposerSection() {
         )
     }
 
-    // Only load the pickers the current audience needs.
     LaunchedEffect(audience) {
         if (audience == NotificationAudience.COURSE ||
             audience == NotificationAudience.CLASS ||
@@ -654,6 +635,33 @@ private fun NotificationComposerSection() {
                 loadingTargets = false
             }
         }
+    }
+
+    LaunchedEffect(studentQuery, audience) {
+        if (audience != NotificationAudience.STUDENT) {
+            searchingStudents = false
+            studentResults = emptyList()
+            studentSearchError = null
+            return@LaunchedEffect
+        }
+        val term = studentQuery.trim()
+        if (term.length < 2) {
+            searchingStudents = false
+            studentResults = emptyList()
+            studentSearchError = null
+            return@LaunchedEffect
+        }
+        searchingStudents = true
+        studentSearchError = null
+        delay(350)
+        AdminRepository.searchStudents(term, max = 12).fold(
+            onSuccess = { studentResults = it },
+            onFailure = {
+                studentResults = emptyList()
+                studentSearchError = it.message ?: "Student search failed."
+            },
+        )
+        searchingStudents = false
     }
 
     suspend fun pollDelivery(id: Long) {
@@ -727,6 +735,11 @@ private fun NotificationComposerSection() {
         }
 
         when (audience) {
+            NotificationAudience.STUDENT -> if (selectedStudent == null) {
+                error = "Pick the student who should receive this notice."
+                return
+            }
+
             NotificationAudience.COURSE -> if (selectedCourse == null) {
                 error = "Pick the course that should receive this notice."
                 return
@@ -754,6 +767,7 @@ private fun NotificationComposerSection() {
             courseId = if (audience == NotificationAudience.COURSE) selectedCourse?.id else null,
             classId = if (audience == NotificationAudience.CLASS) selectedClass?.id else null,
             groupId = if (audience == NotificationAudience.GROUP) selectedGroup?.id else null,
+            studentUid = if (audience == NotificationAudience.STUDENT) selectedStudent?.studentUid else null,
             expiresAt = expiry,
         )
 
@@ -768,6 +782,9 @@ private fun NotificationComposerSection() {
                     title = ""
                     body = ""
                     expiresAt = ""
+                    studentQuery = ""
+                    selectedStudent = null
+                    studentResults = emptyList()
                 },
                 onFailure = {
                     error = it.message?.ifBlank { "Could not post the notice." }
@@ -867,6 +884,120 @@ private fun NotificationComposerSection() {
                     selected = audience == option,
                     onClick = { audienceName = option.name },
                 )
+            }
+        }
+
+        if (audience == NotificationAudience.STUDENT) {
+            Text(
+                text = "STUDENT",
+                color = TextSecondary,
+                fontSize = 9.5.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp,
+            )
+
+            val student = selectedStudent
+            if (student == null) {
+                OutlinedTextField(
+                    value = studentQuery,
+                    onValueChange = { studentQuery = it },
+                    label = { Text("Search by name or roll number") },
+                    placeholder = { Text("e.g. Manan or 2610042") },
+                    singleLine = true,
+                    leadingIcon = {
+                        Icon(Icons.Outlined.Search, contentDescription = null, tint = Navy)
+                    },
+                    trailingIcon = {
+                        if (searchingStudents) {
+                            CircularProgressIndicator(
+                                color = Navy,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    },
+                    colors = mitrcAdminFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                when {
+                    studentSearchError != null -> Text(
+                        text = studentSearchError.orEmpty(),
+                        color = ErrorRed,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                    )
+
+                    studentQuery.trim().length < 2 -> Text(
+                        text = "Type at least 2 characters of the student's name or roll number.",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                    )
+
+                    !searchingStudents && studentResults.isEmpty() -> Text(
+                        text = "No student matches that name or roll number.",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                    )
+
+                    else -> studentResults.forEach { result ->
+                        StudentPickRow(
+                            student = result,
+                            onPick = {
+                                selectedStudent = result
+                                studentQuery = ""
+                                studentResults = emptyList()
+                            },
+                        )
+                    }
+                }
+            } else {
+                Surface(
+                    color = Navy.copy(alpha = 0.06f),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Outlined.Person,
+                            contentDescription = null,
+                            tint = Navy,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = student.name?.trim()?.takeIf { it.isNotEmpty() }
+                                    ?: "Unnamed student",
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = studentSubtitle(student),
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp,
+                            )
+                        }
+                        TextButton(
+                            onClick = { selectedStudent = null },
+                            contentPadding = PaddingValues(0.dp),
+                        ) {
+                            Text(
+                                text = "Change",
+                                color = Navy,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -1224,12 +1355,56 @@ private fun AdminPickerField(
     }
 }
 
+@Composable
+private fun StudentPickRow(
+    student: StudentProfileView,
+    onPick: () -> Unit,
+) {
+    Surface(
+        color = Slate,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onPick),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Text(
+                text = student.name?.trim()?.takeIf { it.isNotEmpty() } ?: "Unnamed student",
+                color = TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = studentSubtitle(student),
+                color = TextSecondary,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
+    }
+}
+
+private fun studentSubtitle(student: StudentProfileView): String {
+    val parts = buildList {
+        student.serialNo?.trim()?.takeIf { it.isNotEmpty() }?.let { add("Roll $it") }
+        student.course?.trim()?.takeIf { it.isNotEmpty() }?.let { add(it) }
+        student.branch?.trim()?.takeIf { it.isNotEmpty() }?.let { add(it) }
+        val semester = student.semester
+        val section = student.section?.trim().orEmpty()
+        if (semester != null) {
+            add(if (section.isEmpty()) "Sem $semester" else "Sem $semester Sec $section")
+        }
+    }
+    return parts.joinToString(" • ").ifEmpty { "Student" }
+}
+
 private fun classLabel(cls: ClassRow): String =
     "Sem ${cls.semester} - Section ${cls.section} (${cls.academicYear})"
 
 private fun notificationAudienceLabel(audience: String): String = when (audience) {
     "everyone" -> "Everyone"
-    "all_students" -> "Students"
+    "all_students" -> "All students"
+    "student" -> "Student"
     "all_staff" -> "Staff"
     "course" -> "Course"
     "class" -> "Class"
@@ -1250,8 +1425,6 @@ private fun notificationDeliveryLabel(item: NotificationRow): String = when {
     item.pushSentAt != null && item.pushFailedCount > 0 -> "${item.pushFailedCount} FAILED"
     item.pushSentAt != null -> "NO DEVICES"
     isPushInFlight(item.createdAt) -> "SENDING"
-    // Notices posted before the push pipeline existed have no delivery stamp; calling them
-    // "SENDING" forever would look like a stuck push.
     else -> "NOT SENT"
 }
 
@@ -1263,7 +1436,6 @@ private fun notificationDeliveryColor(item: NotificationRow): Color = when {
     else -> TextSecondary
 }
 
-/** True when [raw] is a recent timestamp, i.e. the push may still be in flight. */
 private fun isPushInFlight(raw: String?): Boolean {
     val created = raw?.trim().orEmpty()
     if (created.isEmpty()) return false
@@ -1274,7 +1446,6 @@ private fun isPushInFlight(raw: String?): Boolean {
 
 private val noticeTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM, HH:mm")
 
-/** `2026-11-04T10:24:22.095229+00:00` -> `04 Nov, 15:54` in the device's time zone. */
 private fun formatNoticeTime(raw: String?): String? {
     val text = raw?.trim().orEmpty()
     if (text.isEmpty()) return null
@@ -1300,8 +1471,6 @@ private fun mitrcAdminFieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedTrailingIconColor = TextSecondary,
     focusedPlaceholderColor = TextSecondary.copy(alpha = 0.6f),
     unfocusedPlaceholderColor = TextSecondary.copy(alpha = 0.6f),
-    // The audience/class pickers are read-only fields disabled to block the keyboard; keep them
-    // looking like normal inputs instead of fading the chosen value out.
     disabledTextColor = TextPrimary,
     disabledBorderColor = DividerSoft,
     disabledContainerColor = SurfaceWhite,

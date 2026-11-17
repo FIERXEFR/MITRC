@@ -7,14 +7,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 
-/**
- * Local state for the update/maintenance gate.
- *
- * The big packet is the APK itself. The small packet is a server-driven payload: the app stores
- * the last small version it accepted and the JSON payload that came with it. Nothing here can
- * replace compiled code; it exists so copy, feature flags, links and other wired-in behavior can
- * change without shipping a new APK.
- */
 object AppUpdateStore {
 
     private const val FILE_NAME = "mitrc_prefs"
@@ -56,7 +48,6 @@ object AppUpdateStore {
     }
 }
 
-/** Convenience readers for values inside the accepted small-packet JSON payload. */
 object AppRemoteConfig {
 
     private val json = Json { ignoreUnknownKeys = true }

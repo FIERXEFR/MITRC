@@ -16,11 +16,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
 
-/**
- * The coordinator a locked/PTM student should contact. Resolved from `v_coordinators` for the
- * student's course (see [PortalRepository.getStudentCoordinator]) since `students` only stores the
- * lock flags, not who flipped them.
- */
 data class StudentCoordinatorContact(
     val name: String? = null,
     val designation: String? = null,
@@ -28,10 +23,6 @@ data class StudentCoordinatorContact(
     val phoneNo: String? = null,
 )
 
-/**
- * The human-readable class context for a teacher assignment. `v_subject_teachers` is keyed by
- * subject, so the class label is resolved separately from `classes -> branches -> courses`.
- */
 data class TeacherClassInfo(
     val classId: Int,
     val courseName: String? = null,
@@ -55,25 +46,17 @@ object PortalRepository {
     private val json = Json { ignoreUnknownKeys = true }
 
     private suspend fun <T> query(block: suspend () -> T): Result<T> = try {
-        // PostgREST decodes response JSON synchronously after the suspend call returns. When the
-        // caller is a composable's LaunchedEffect that decode lands on the main thread and drops
-        // frames on larger payloads, so keep the whole request on the IO dispatcher.
         Result.success(
             withContext(Dispatchers.IO) {
                 SupabaseManager.withAuthRetry { block() }
             }
         )
     } catch (cancellation: CancellationException) {
-        // Never turn a cancelled coroutine into a failure result: the caller (a LaunchedEffect or
-        // a pull-to-refresh scope) has already gone away.
         throw cancellation
     } catch (error: Throwable) {
         Result.failure(error)
     }
 
-    // -----------------------------------------------------------------------------------------
-    // Student Queries
-    // -----------------------------------------------------------------------------------------
 
     suspend fun getStudentProfile(uid: String): Result<StudentProfileView?> = query {
         val client = SupabaseManager.requireClient()
@@ -89,15 +72,11 @@ object PortalRepository {
         if (fromView.isSuccess && fromView.getOrNull() != null) {
             val prof = fromView.getOrThrow()!!
             Log.i(TAG, "Student profile loaded from v_student_profiles (classId=${prof.classId})")
-            // The overlay query below already reads the authoritative `students` row, so it is
-            // also the place to backfill a missing name. Querying that row twice (once for the
-            // name, once for the lock state) added a full round trip to every cold start.
             return@query withStudentLockState(prof)
         } else {
             Log.w(TAG, "v_student_profiles query returned null/failed: ${fromView.exceptionOrNull()?.message}")
         }
 
-        // Fallback: Query students table & enrollments
         val fromStudentTable = runCatching {
             client.postgrest[SupabaseTableData.Tables.STUDENTS]
                 .select { filter { eq("uid", uid) } }
@@ -132,9 +111,6 @@ object PortalRepository {
             )
         }
 
-        // Neither source returned a profile. If both failed outright (offline, timeout, expired
-        // session) the caller must see a failure, not "no profile": swallowing the network error
-        // here is what blanked every tab and showed "No Student Profile Found" while offline.
         val viewError = fromView.exceptionOrNull()
         val tableError = fromStudentTable.exceptionOrNull()
         if (viewError != null && tableError != null) throw viewError
@@ -142,12 +118,6 @@ object PortalRepository {
         null
     }
 
-    /**
-     * Resolves the student's real name from the `students` row. The profile view can omit the
-     * name and Firebase's display name is usually unset, so the header must not settle for the
-     * email's local part. Falls back to matching `student_email` for rows not yet linked to a
-     * Firebase uid.
-     */
     suspend fun getStudentName(uid: String, email: String?): Result<String?> = query {
         val client = SupabaseManager.requireClient()
 
@@ -174,12 +144,6 @@ object PortalRepository {
         }.getOrNull()
     }
 
-    /**
-     * `v_student_profiles` predates `lock_reason` / `ptm_schedule`, and a view is not rebuilt in
-     * lockstep with its table, so the authoritative `students` row is overlaid here. Without this
-     * the lock screen could keep showing a stale state (or no reason and no PTM time at all).
-     * A blocked/failed read keeps whatever the view already returned.
-     */
     private suspend fun withStudentLockState(profile: StudentProfileView): StudentProfileView {
         if (profile.studentUid.isBlank()) return profile
         val row = runCatching {
@@ -206,7 +170,6 @@ object PortalRepository {
 
         val client = SupabaseManager.requireClient()
 
-        // Fast path: the joined view already carries subject + faculty names.
         val fromView = runCatching {
             client.postgrest[SupabaseTableData.Views.V_CLASS_SUBJECTS]
                 .select { filter { eq("class_id", classId) } }
@@ -218,18 +181,11 @@ object PortalRepository {
             return@query fromView
         }
 
-        // On deployments where the view runs as security_invoker it returns nothing for a
-        // student, so build the same cards from the base tables the student can read.
         val fromTables = subjectsFromBaseTables(classId)
         Log.i(TAG, "getStudentSubjects: ${fromTables.size} subjects from base tables (class $classId)")
         fromTables
     }
 
-    /**
-     * `class_subjects` -> `subjects` -> `class_subject_teachers` -> `faculty_master`, i.e. the
-     * actual faculty assigned to this class, not a placeholder. A subject whose teacher row is
-     * missing is still returned with "Faculty Not Assigned" rather than dropped.
-     */
     private suspend fun subjectsFromBaseTables(classId: Int): List<ClassSubjectView> {
         val client = SupabaseManager.requireClient()
 
@@ -285,7 +241,6 @@ object PortalRepository {
         }
     }
 
-    /** "Dr." + "Amit Kumar Yadav" -> "Dr. Amit Kumar Yadav". */
     private fun FacultyMasterRow.displayName(): String? =
         listOfNotNull(
             title?.trim()?.takeIf { it.isNotEmpty() },
@@ -304,16 +259,6 @@ object PortalRepository {
             .decodeList<MarkView>()
     }
 
-    /**
-     * Per-day attendance behind the student calendar.
-     *
-     * One request: `attendance_records` embedded with its session so each mark carries the
-     * `class_date` it belongs to. Filtering on the embedded date keeps the payload to the window
-     * shown by the calendar instead of every record the student has ever had.
-     *
-     * The recorded sessions are optional for a student deployment. If the embed is not readable,
-     * this logs and returns an empty list so the calendar falls back to its holiday-only view.
-     */
     suspend fun getStudentDailyAttendance(
         uid: String,
         fromIsoDate: String,
@@ -355,23 +300,6 @@ object PortalRepository {
             .sortedBy { it.date }
     }
 
-    /**
-     * The student's live timetable, synced from the timetable data itself.
-     *
-     * Three read paths are tried in order, because the raw timetable tables are RLS-protected in
-     * most deployments and only the views are granted to a student:
-     *
-     * 1. `v_my_timetable` - the server-side student view (fast path).
-     * 2. `v_timetable_entries` filtered by the student's class - the joined view the timetable
-     *    editor reads, so it also works when `timetables` / `timetable_entries` are not readable.
-     * 3. The base tables: class -> newest published/effective `timetables` row ->
-     *    `timetable_periods` -> `timetable_entries` joined with `class_subjects`, `subjects`,
-     *    `faculty_master` and `class_groups`.
-     *
-     * The student's class is the exact class of their course/branch/semester/section, so the
-     * result is scoped to that course rather than to every class of the course. Lab slots are
-     * filtered to the student's own lab group.
-     */
     suspend fun getMyTimetable(classId: Int? = null): Result<List<MyTimetableEntryView>> = query {
         val client = SupabaseManager.requireClient()
         val uid = FirebaseAuth.getInstance().currentUser?.uid?.trim().orEmpty()
@@ -386,9 +314,6 @@ object PortalRepository {
                 emptyList()
             }
         } else {
-            // The shell already resolved the student's class. Going straight to the class-scoped
-            // joined view avoids a round trip to a view whose `auth_uid` helper is not granted
-            // to students in the current deployment.
             emptyList()
         }
         if (fromView.isNotEmpty()) {
@@ -403,7 +328,6 @@ object PortalRepository {
         }
         Log.i(TAG, "getMyTimetable: class_id=${context.classId}, group_id=${context.groupId}")
 
-        // The joined view carries subject, teacher and clock times in one row.
         suspend fun viewEntriesFor(classIds: List<Int>): List<TimetableEntryView> = runCatching {
             client.postgrest[SupabaseTableData.Views.V_TIMETABLE_ENTRIES]
                 .select { filter { isIn("class_id", classIds) } }
@@ -415,8 +339,6 @@ object PortalRepository {
 
         var viewEntries = viewEntriesFor(listOf(context.classId))
         if (viewEntries.isEmpty()) {
-            // No rows for the student's own class: check the other sections of the same course +
-            // semester, so a timetable keyed by course still resolves instead of coming up empty.
             val siblings = siblingClassIds(context.classId)
             if (siblings.isNotEmpty()) {
                 viewEntries = viewEntriesFor(siblings)
@@ -440,7 +362,6 @@ object PortalRepository {
         derived
     }
 
-    /** Same rule on the joined view: effective + published first, then newest, then any. */
     private fun effectiveTimetableEntries(entries: List<TimetableEntryView>): List<TimetableEntryView> {
         if (entries.isEmpty()) return emptyList()
         val today = java.time.LocalDate.now().toString()
@@ -480,7 +401,6 @@ object PortalRepository {
         room = room
     )
 
-    /** Student's class + lab group. The class from the loaded profile wins when available. */
     private data class StudentClassContext(val classId: Int, val groupId: Int?)
 
     private suspend fun resolveStudentClassContext(
@@ -510,11 +430,6 @@ object PortalRepository {
         return StudentClassContext(classId, enrollment?.groupId)
     }
 
-    /**
-     * Builds [MyTimetableEntryView] rows from `timetables` / `timetable_periods` /
-     * `timetable_entries`. Returns empty (never throws) when the student has no readable
-     * timetable, which lets the UI keep its empty state instead of failing the whole portal.
-     */
     private suspend fun deriveMyTimetable(context: StudentClassContext): List<MyTimetableEntryView> {
         val client = SupabaseManager.requireClient()
         Log.i(TAG, "getMyTimetable: deriving for class_id=${context.classId}, group_id=${context.groupId}")
@@ -531,9 +446,6 @@ object PortalRepository {
             emptyList()
         }
 
-        // The student's own class wins. Only when it has no timetable at all do we look at the
-        // other sections of the same course + semester, so a timetable keyed by the course still
-        // reaches the student instead of an empty screen.
         var forClass = timetablesFor(listOf(context.classId))
         if (forClass.isEmpty()) {
             val siblings = siblingClassIds(context.classId)
@@ -547,7 +459,6 @@ object PortalRepository {
         val pool = ownClass.ifEmpty { forClass }
         if (pool.isEmpty()) return emptyList()
 
-        // Effective + published first, then newest published, then whatever exists (a draft).
         val today = java.time.LocalDate.now().toString()
         val published = pool.filter { it.isPublished }
         val timetable = published.firstOrNull { it.effectiveFrom <= today }
@@ -555,7 +466,6 @@ object PortalRepository {
             ?: pool.firstOrNull()
             ?: return emptyList()
 
-        // The joined view already carries subject, teacher and clock times for this timetable.
         val joined = runCatching {
             client.postgrest[SupabaseTableData.Views.V_TIMETABLE_ENTRIES]
                 .select { filter { eq("timetable_id", timetable.id) } }
@@ -587,7 +497,6 @@ object PortalRepository {
             emptyList()
         }
 
-        // A lab slot is scheduled per group; only the student's group (or shared slots) applies.
         val scopedEntries = entries.filter { entry ->
             entry.groupId == null || context.groupId == null || entry.groupId == context.groupId
         }
@@ -669,10 +578,6 @@ object PortalRepository {
         }
     }
 
-    /**
-     * Other classes of the same course + semester as [classId] (class -> branch -> course).
-     * Best-effort: an unreadable `classes`/`branches` yields an empty list.
-     */
     private suspend fun siblingClassIds(classId: Int): List<Int> {
         val client = SupabaseManager.requireClient()
 
@@ -711,14 +616,6 @@ object PortalRepository {
         }.getOrDefault(emptyList())
     }
 
-    /**
-     * Notes this student is allowed to open: visible rows for a subject of their own class, and
-     * either shared with the whole class (`group_id` null) or scoped to their lab group.
-     *
-     * Reads the base `notes` table rather than `v_notes`, because the view is security_invoker in
-     * this deployment and returns nothing for a student. The class-scoped subject ids double as
-     * the access check on the client, on top of the table's RLS policy.
-     */
     suspend fun getPublishedNotes(
         uid: String,
         classId: Int? = null
@@ -760,9 +657,6 @@ object PortalRepository {
             .insert(note)
     }
 
-    // -----------------------------------------------------------------------------------------
-    // Auth & Portals RPCs
-    // -----------------------------------------------------------------------------------------
 
     suspend fun linkMyFacultyAccount(): Result<Unit> = query {
         Log.d(TAG, "Calling link_my_faculty_account RPC...")
@@ -772,7 +666,6 @@ object PortalRepository {
     suspend fun getMyPortals(): Result<MyPortalsResponse> = query {
         Log.d(TAG, "Calling my_portals RPC...")
         val response = SupabaseManager.requireClient().postgrest.rpc("my_portals")
-        // my_portals returns a single row or a list of one row depending on PostgREST version
         runCatching {
             response.decodeAs<MyPortalsResponse>()
         }.getOrElse {
@@ -780,9 +673,6 @@ object PortalRepository {
         }
     }.onFailure { Log.w(TAG, "my_portals RPC failed: ${it::class.simpleName}: ${it.message}") }
 
-    // -----------------------------------------------------------------------------------------
-    // Teacher / Faculty Queries
-    // -----------------------------------------------------------------------------------------
 
     suspend fun getTeacherProfile(uid: String): Result<FacultyMasterRow?> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
@@ -791,12 +681,6 @@ object PortalRepository {
             .firstOrNull()
     }
 
-    /**
-     * Resolves the signed-in user's faculty_master row by firebase_uid first, then by verified
-     * email. A staff account whose firebase_uid link hasn't landed yet (the link write is
-     * blocked unless an UPDATE policy or SECURITY DEFINER RPC exists) is only reachable by
-     * email - without this every role probe downstream silently resolves to "student".
-     */
     suspend fun getFacultyByUidOrEmail(uid: String, email: String): Result<FacultyMasterRow?> = query {
         val table = SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
         val byUid = if (uid.isNotBlank()) {
@@ -815,17 +699,11 @@ object PortalRepository {
         } else null
     }
 
-    /**
-     * Best-effort backlink of [uid] onto the faculty_master row for [email], only when the row
-     * has no firebase_uid yet (never clobbers an existing link). Silently no-ops under RLS when
-     * no UPDATE policy exists - the RPC or a policy is the durable fix.
-     */
     suspend fun linkFacultyUidByEmail(uid: String, email: String): Result<Unit> = query {
         SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
             .update({ set("firebase_uid", uid) }) {
                 filter {
                     ilike("email", email.trim())
-                    // PostgREST `is.null`; supabase-kt 3.1.1 has no isNull() helper.
                     filter("firebase_uid", FilterOperator.IS, null)
                 }
             }
@@ -837,11 +715,6 @@ object PortalRepository {
             .decodeList<ClassSubjectView>()
     }
 
-    /**
-     * Resolves class labels for the teacher's assigned subjects. This is deliberately best-effort:
-     * the timetable/attendance RPCs already carry `class_id`, so a class-metadata read failure
-     * should not block the classroom. The UI falls back to "Class <id>".
-     */
     suspend fun getClassInfo(classIds: List<Int>): Result<Map<Int, TeacherClassInfo>> = query {
         val ids = classIds.filter { it > 0 }.distinct()
         if (ids.isEmpty()) return@query emptyMap()
@@ -1027,20 +900,7 @@ object PortalRepository {
         response.decodeAs<String>()
     }
 
-    // -----------------------------------------------------------------------------------------
-    // Coordinator & Mentee Queries
-    // -----------------------------------------------------------------------------------------
 
-    /**
-     * Classes the signed-in coordinator is responsible for.
-     *
-     * `v_my_coordinator_classes` is the authoritative source, but it resolves the caller
-     * server-side and can come back empty when that mapping is stale (for example when
-     * `faculty_master.firebase_uid` has not been linked yet, or the view is keyed on
-     * `auth.uid()`). In that case the assignment is rebuilt client-side from
-     * `my_portals.faculty_id` -> `course_coordinators` -> `branches` -> `classes`, so the portal
-     * keeps working without any database change.
-     */
     suspend fun getMyCoordinatorClasses(): Result<List<MyCoordinatorClassView>> = query {
         val client = SupabaseManager.requireClient()
         val fromView = runCatching {
@@ -1059,7 +919,6 @@ object PortalRepository {
         if (derived.isNotEmpty()) derived else fromView.getOrElse { throw it }
     }
 
-    /** Rebuilds the coordinator's class list from the underlying assignment tables. */
     private suspend fun deriveCoordinatorClasses(): List<MyCoordinatorClassView> {
         val client = SupabaseManager.requireClient()
         val facultyId = resolveFacultyId() ?: return emptyList()
@@ -1075,8 +934,6 @@ object PortalRepository {
             emptyList()
         }
 
-        // Retry through the coordinator view (faculty id, then email) when the table read is
-        // blocked or the assignment row was never linked to this faculty id.
         if (assignments.isEmpty()) {
             val email = FirebaseAuth.getInstance().currentUser?.email.orEmpty()
             assignments = runCatching {
@@ -1142,16 +999,10 @@ object PortalRepository {
         }.distinctBy { it.classId }
     }
 
-    /**
-     * Faculty row of the signed-in staff account. `my_portals.faculty_id` is preferred; when the
-     * RPC has no row (for example the account was only matched by email), `faculty_master` is
-     * looked up by firebase_uid and then by email.
-     */
     private suspend fun resolveFacultyId(): Int? {
         val portals = getMyPortals().getOrNull()
         portals?.facultyId?.let { return it }
 
-        // A pure student has no faculty row; skip the extra lookups on that path.
         if (portals != null &&
             !portals.isFaculty && !portals.isTeacher && !portals.isMentor &&
             !portals.isCoordinator && !portals.isHod && !portals.isTbIncharge
@@ -1171,14 +1022,6 @@ object PortalRepository {
             .decodeList<CoordinatorView>()
     }
 
-    /**
-     * Coordinator to name on the student's lock / PTM screen, resolved from the student's own
-     * class (class -> branch -> course) and matched against `v_coordinators`. Only rows with
-     * `have_rights = true` qualify; a semester-specific coordinator wins over a course-wide one.
-     *
-     * Best effort: if the view or the class mapping is not readable by a student account this
-     * returns null and the lock screen falls back to a generic "your class coordinator".
-     */
     suspend fun getStudentCoordinator(
         classId: Int?,
         courseName: String? = null,
@@ -1196,8 +1039,6 @@ object PortalRepository {
         if (coordinators.isEmpty()) return@query null
 
         val courseId = resolveCourseId(classId)
-        // Match on the id first; the course name is only a fallback for accounts that cannot read
-        // `classes`/`branches`.
         val scoped = coordinators.filter { row ->
             when {
                 courseId != null -> row.courseId == courseId
@@ -1216,7 +1057,6 @@ object PortalRepository {
         )
     }
 
-    /** `classes.branch_id` -> `branches.course_id`, used to scope coordinator lookups. */
     private suspend fun resolveCourseId(classId: Int?): Int? {
         val id = classId ?: return null
         if (id <= 0) return null
@@ -1256,21 +1096,6 @@ object PortalRepository {
             .decodeList<MyMenteeAttendanceView>()
     }
 
-    /**
-     * Query students across the coordinator's classes.
-     *
-     * Membership is resolved from several sources and unioned, so one restricted source cannot
-     * blank the list:
-     * - `v_student_directory` provides the class/semester/section mapping and the person's name;
-     * - `v_student_profiles` backs it up when the directory view is not readable by faculty;
-     * - `enrollments` provides the authoritative uid ↔ class_id mapping;
-     * - `students` is authoritative for identity fields (name, roll number, emails, phone
-     *   numbers, lab group, lock/PTM flags) and wins field-by-field when present.
-     *
-     * A student enrolled in one of [classes] but missing from the directory view still renders a
-     * complete card built from `students` + the class metadata. If every source is empty, the
-     * result is empty; a failure of `students` alone never hides directory rows.
-     */
     suspend fun getStudentsForClasses(
         classes: List<MyCoordinatorClassView>
     ): Result<List<StudentProfileView>> = query {
@@ -1288,8 +1113,6 @@ object PortalRepository {
             emptyList()
         }
 
-        // The directory view can be restricted for faculty accounts. v_student_profiles carries
-        // the same class mapping for a faculty-visible roster, so it backs up an empty directory.
         val profiles = if (directory.isEmpty()) {
             runCatching {
                 client.postgrest[SupabaseTableData.Views.V_STUDENT_PROFILES]
@@ -1367,9 +1190,6 @@ object PortalRepository {
         val groupMap = groupRows.associateBy { it.id }
         val enrollmentMap = enrollments.associateBy { it.studentUid }
 
-        // A student can still surface twice under two different uids (duplicate `students` rows,
-        // or a per-class key in a view). The roster is one card per person, so collapse rows that
-        // would render as the same card.
         val seen = HashSet<String>()
         rows.values
             .map { row ->
@@ -1387,12 +1207,6 @@ object PortalRepository {
             .filter { seen.add(it.rosterKey()) }
     }
 
-    /**
-     * Identity used to collapse the coordinator roster. The roll number is the authoritative key
-     * in a class list, so a non-blank `serial_no` + name identifies one student even when two rows
-     * carry different uids or class metadata. Without a roll number we fall back to the name plus
-     * class metadata, and finally to the uid (rows that cannot be told apart safely).
-     */
     private fun StudentProfileView.rosterKey(): String {
         fun String?.normalised(): String =
             this?.trim()?.replace(Regex("\\s+"), " ")?.lowercase().orEmpty()
@@ -1412,7 +1226,6 @@ object PortalRepository {
         }
     }
 
-    /** Reads `students` rows for [uids]. Best-effort: a blocked/failed read yields an empty map. */
     private suspend fun fetchStudentIdentities(uids: List<String>): Map<String, StudentRow> {
         val clean = uids.filter { it.isNotBlank() }.distinct()
         if (clean.isEmpty()) return emptyMap()
@@ -1427,10 +1240,6 @@ object PortalRepository {
         }
     }
 
-    /**
-     * Overlays the `students` row on a directory row, field by field. Blank strings in `students`
-     * are treated as missing so they never erase a real value coming from the directory.
-     */
     private fun overlayIdentity(
         row: StudentProfileView,
         identity: StudentRow?
@@ -1454,10 +1263,6 @@ object PortalRepository {
         )
     }
 
-    /**
-     * Locks or unlocks a profile. [reason] is stored in `students.lock_reason` and shown verbatim
-     * on the student's lock screen; it is cleared on unlock and whenever no reason is typed.
-     */
     suspend fun updateStudentLockStatus(
         studentUid: String,
         isLocked: Boolean,
@@ -1468,11 +1273,6 @@ object PortalRepository {
         if (isLocked && clean.isNotEmpty()) set("lock_reason", clean) else setToNull("lock_reason")
     }
 
-    /**
-     * Schedules or cancels a PTM. [scheduledAt] is an ISO-8601 instant written to
-     * `students.ptm_schedule`; [lockProfile] stores the lock flag and its reason in the same
-     * UPDATE so a PTM scheduled "with lock" can never half-apply.
-     */
     suspend fun updateStudentPtmStatus(
         studentUid: String,
         isPtm: Boolean,
@@ -1491,14 +1291,6 @@ object PortalRepository {
         }
     }
 
-    /**
-     * Applies one UPDATE to one `students` row.
-     *
-     * PostgREST answers an UPDATE with `204 No Content` even when zero rows matched, so the old
-     * version of these calls reported success while RLS (or a non-matching uid) silently dropped
-     * the write. Asking for the representation back with `select()` makes "nothing was updated"
-     * detectable, and that is surfaced as a failure instead of a fake success.
-     */
     private suspend fun updateStudentRow(
         studentUid: String,
         update: PostgrestUpdate.() -> Unit
@@ -1535,11 +1327,6 @@ object PortalRepository {
             .decodeList<TimetableRow>()
     }
 
-    /**
-     * Timetables belonging to the classes the signed-in coordinator rules. The coordinator editor
-     * must never list another course's classes, which is what an unfiltered `timetables` select
-     * returned.
-     */
     suspend fun getTimetablesForClasses(classIds: List<Int>): Result<List<TimetableRow>> = query {
         val ids = classIds.filter { it > 0 }.distinct()
         if (ids.isEmpty()) return@query emptyList()

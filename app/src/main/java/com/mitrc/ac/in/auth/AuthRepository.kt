@@ -52,8 +52,6 @@ object AuthRepository {
     }
 
     suspend fun signOut() {
-        // Drop this device's push token while the request still carries the
-        // signed-in JWT. Bounded so an offline logout stays instant.
         withTimeoutOrNull(3_000) {
             PushRepository.unregisterCurrentDevice()
         }

@@ -129,7 +129,6 @@ fun CoordinatorTimetableView(userUid: String) {
     var effectiveDateDraft by remember { mutableStateOf("") }
     var newDuplicateDate by remember { mutableStateOf(getTodayIstDate()) }
 
-    // Dialog states
     var showSlotDialog by remember { mutableStateOf(false) }
     var editingEntry by remember { mutableStateOf<TimetableEntryView?>(null) }
 
@@ -141,7 +140,6 @@ fun CoordinatorTimetableView(userUid: String) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showDuplicateDatePicker by remember { mutableStateOf(false) }
 
-    // Initial load: fetch classes & coordinator profile
     LaunchedEffect(userUid) {
         loading = true
         val profRes = PortalRepository.getTeacherProfile(userUid)
@@ -153,7 +151,6 @@ fun CoordinatorTimetableView(userUid: String) {
         if (ruledList.isNotEmpty()) {
             availableClasses = ruledList
         } else {
-            // Fallback via direct service role key
             val fallbackRes = CoordinatorAdminRepository.getAllClassesWithDetails()
             availableClasses = fallbackRes.getOrDefault(emptyList())
         }
@@ -164,7 +161,6 @@ fun CoordinatorTimetableView(userUid: String) {
         loading = false
     }
 
-    // Load timetables when selectedClass changes
     LaunchedEffect(selectedClass) {
         actionMsg = null
         errorMsg = null
@@ -179,7 +175,6 @@ fun CoordinatorTimetableView(userUid: String) {
         }
     }
 
-    // Load entries, subjects, groups when selectedTimetable changes
     LaunchedEffect(selectedTimetable) {
         actionMsg = null
         errorMsg = null
@@ -232,7 +227,6 @@ fun CoordinatorTimetableView(userUid: String) {
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
-            // Section Header: Class/Batch Selector
             Text(
                 text = "SELECT CLASS / BATCH",
                 fontSize = 11.sp,
@@ -290,7 +284,6 @@ fun CoordinatorTimetableView(userUid: String) {
 
             Spacer(Modifier.height(16.dp))
 
-            // Timetable Selector & Create New Draft
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -427,7 +420,6 @@ fun CoordinatorTimetableView(userUid: String) {
 
                             Spacer(Modifier.height(14.dp))
 
-                            // Action status notifications
                             AnimatedVisibility(visible = actionMsg != null) {
                                 Text(
                                     text = actionMsg.orEmpty(),
@@ -449,7 +441,6 @@ fun CoordinatorTimetableView(userUid: String) {
                                 Spacer(Modifier.height(10.dp))
                             }
 
-                            // Class Room Editor
                             Text(
                                 text = "CLASS ROOM",
                                 fontSize = 10.5.sp,
@@ -505,7 +496,6 @@ fun CoordinatorTimetableView(userUid: String) {
 
                             Spacer(Modifier.height(12.dp))
 
-                            // Effective Date Editor
                             Text(
                                 text = "EFFECTIVE DATE (YYYY-MM-DD)",
                                 fontSize = 10.5.sp,
@@ -559,7 +549,6 @@ fun CoordinatorTimetableView(userUid: String) {
 
                             Spacer(Modifier.height(14.dp))
 
-                            // Duplicate date picker: choose which effective date the new draft gets.
                             Text(
                                 text = "DUPLICATE AS DRAFT",
                                 fontSize = 10.5.sp,
@@ -586,7 +575,6 @@ fun CoordinatorTimetableView(userUid: String) {
 
                             Spacer(Modifier.height(8.dp))
 
-                            // Duplicate & Publish Controls
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -666,7 +654,6 @@ fun CoordinatorTimetableView(userUid: String) {
 
                             Spacer(Modifier.height(8.dp))
 
-                            // Delete Draft Button
                             Button(
                                 onClick = { showDeleteConfirm = true },
                                 enabled = !busy,
@@ -681,7 +668,6 @@ fun CoordinatorTimetableView(userUid: String) {
 
                             Spacer(Modifier.height(16.dp))
 
-                            // Slot Entries Section
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -745,7 +731,6 @@ fun CoordinatorTimetableView(userUid: String) {
                         }
                     }
 
-                    // Slot Add/Edit Dialog
                     if (showSlotDialog) {
                         TimetableSlotDialog(
                             timetableId = currentTT.id,
@@ -769,7 +754,6 @@ fun CoordinatorTimetableView(userUid: String) {
                         )
                     }
 
-                    // Delete Timetable Confirmation Dialog
                     if (showDeleteConfirm) {
                         AlertDialog(
                             onDismissRequest = { showDeleteConfirm = false },
@@ -816,7 +800,6 @@ fun CoordinatorTimetableView(userUid: String) {
                 }
             }
 
-            // Duplicate Date Picker
             if (showDuplicateDatePicker) {
                 val duplicatePickerState = rememberDatePickerState(
                     initialSelectedDateMillis = istDateToEpochMillis(newDuplicateDate)
@@ -850,8 +833,6 @@ fun CoordinatorTimetableView(userUid: String) {
                 }
             }
 
-            // New Timetable effective-date picker. Kept separate from the
-            // duplicate picker so each dialog writes to its own date variable.
             if (showNewTTDatePicker) {
                 val newTTPickerState = rememberDatePickerState(
                     initialSelectedDateMillis = istDateToEpochMillis(newTTEffectiveFrom)
@@ -885,7 +866,6 @@ fun CoordinatorTimetableView(userUid: String) {
                 }
             }
 
-            // Create New Timetable Dialog
             if (showNewTTDialog && selectedClass != null) {
                 val targetClass = selectedClass!!
                 AlertDialog(
@@ -978,7 +958,6 @@ fun CoordinatorTimetableView(userUid: String) {
 
             Spacer(Modifier.height(24.dp))
 
-            // Signatories Section
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
@@ -1081,10 +1060,6 @@ private fun SlotEntryRow(
     }
 }
 
-/**
- * Create/edit dialog for one timetable slot. The same form is used for both flows: a null [entry]
- * means the slot will be inserted, otherwise the existing row is updated in place.
- */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TimetableSlotDialog(
@@ -1098,8 +1073,6 @@ private fun TimetableSlotDialog(
 ) {
     val scope = rememberCoroutineScope()
 
-    // `v_timetable_entries` exposes the subject labels but not `class_subject_id`, so the
-    // enrolment row is matched back by its unique code/name pair when editing an existing slot.
     val initialSubjectId = remember(entry, subjects) {
         entry?.let { target ->
             subjects.firstOrNull {
@@ -1353,14 +1326,12 @@ private fun getTodayIstDate(): String {
     return sdf.format(Date())
 }
 
-/** Parses an ISO date for the Material date picker, which works in UTC civil days. */
 private fun istDateToEpochMillis(date: String): Long? = runCatching {
     SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
         timeZone = TimeZone.getTimeZone("UTC")
     }.parse(date)?.time
 }.getOrNull()
 
-/** Formats a picker selection back to the yyyy-MM-dd string Postgres expects. */
 private fun formatPickerDate(epochMillis: Long): String =
     SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
         timeZone = TimeZone.getTimeZone("UTC")

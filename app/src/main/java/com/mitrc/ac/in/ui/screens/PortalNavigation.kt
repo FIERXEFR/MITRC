@@ -32,16 +32,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mitrc.ac.`in`.ui.theme.Slate
 
-/** One item in the shared portal bottom navigation. */
 internal data class PortalNavItem(
     val label: String,
     val icon: ImageVector,
 )
 
-/**
- * The Student | Staff style segmented control used on the login screen. Shared so the admin
- * panel's sub-sections (Control Panel, Search) look identical to the rest of the app.
- */
 @Composable
 internal fun PortalSegmentedTabs(
     labels: List<String>,
@@ -80,11 +75,6 @@ internal fun PortalSegmentedTabs(
 }
 
 
-/**
- * The light track / navy pill navigation used by both the student and teacher portals.
- * Keeping one implementation means the teacher shell cannot drift visually from the
- * student shell when the nav treatment changes.
- */
 @Composable
 internal fun PortalBottomBar(
     items: List<PortalNavItem>,

@@ -262,11 +262,6 @@ internal fun TeacherClassSummaryCard(
     }
 }
 
-/**
- * The single class control used by Overview, Classroom and Notices. The card itself mirrors the
- * "Marking for" / "Materials for" summary, while the popup keeps the same white surface language
- * as the rest of the portal instead of inheriting a dark Material menu container.
- */
 @Composable
 internal fun TeacherClassPickerCard(
     subjects: List<ClassSubjectView>,

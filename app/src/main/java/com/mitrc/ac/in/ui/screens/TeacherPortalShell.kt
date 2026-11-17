@@ -115,9 +115,6 @@ fun TeacherPortalShell(
             return
         }
 
-        // Exactly one animation per tap. A second `LaunchedEffect(selectedTab)` used to start the
-        // same pager scroll again before the first one had reported `isScrollInProgress`, which
-        // made the two animations compete and produced a visible hitch when switching tabs.
         selectedTabName = tab.name
         scope.launch {
             pagerState.animateScrollToPage(
@@ -127,7 +124,6 @@ fun TeacherPortalShell(
         }
     }
 
-    // Back is staged: dismiss any focused text field first, then return to Overview, then exit.
     BackHandler {
         when {
             fieldFocusTracker.hasFocusedField -> {
@@ -139,9 +135,6 @@ fun TeacherPortalShell(
         }
     }
 
-    // The system consumes the first back press to close the keyboard. When that happens the
-    // field can still own focus, so release it here; the next back press is then free to move
-    // to Overview instead of requiring an extra press just to clear the focus again.
     LaunchedEffect(imeVisible) {
         if (!imeVisible && fieldFocusTracker.hasFocusedField) {
             focusManager.clearFocus(force = true)
@@ -174,8 +167,6 @@ fun TeacherPortalShell(
     var selectedClassSubjectId by rememberSaveable { mutableIntStateOf(0) }
 
     LaunchedEffect(userUid, reloadTick) {
-        // The skeleton is only for the first load. A refresh that fails (typically while offline)
-        // must keep the last good portal on screen instead of blanking every tab.
         if (teacher == null) loading = true
         loadError = null
 
@@ -192,7 +183,6 @@ fun TeacherPortalShell(
             val failure = primaryResult.exceptionOrNull() ?: fallbackResult?.exceptionOrNull()
             val keptTeacher = teacher
             if (keptTeacher != null && failure != null) {
-                // Offline or server error: the previous profile and tabs stay visible.
                 loadError = failure.message
                 loading = false
                 return@LaunchedEffect
@@ -237,8 +227,6 @@ fun TeacherPortalShell(
     val profile = teacher
     val greeting = remember { GreetingStore.greeting() }
 
-    // Same fold gesture as the student portal: the hero collapses through nested scroll instead
-    // of mirroring list offsets, so the content never double-hitches at the end of a scroll.
     val foldDistancePx = with(LocalDensity.current) { 96.dp.toPx() }
     val headerOffset = remember { mutableFloatStateOf(0f) }
     val headerNestedScroll = remember(foldDistancePx) {

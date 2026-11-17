@@ -39,8 +39,6 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         if (savedInstanceState == null &&
             intent.getBooleanExtra(EXTRA_OPEN_NOTIFICATIONS, false) &&
-            // A stale token can outlive a logout. Never queue a deep-link for a
-            // signed-out user: it would fire after the next login.
             AuthRepository.isLoggedIn
         ) {
             NotificationOpenRequest.request()
@@ -93,7 +91,6 @@ fun MitrcRoot(
         ) {
             composable(
                 route = MainActivity.ROUTE_ONBOARDING,
-                // Keep the navy backdrop fully visible while the next screen fades in over it.
                 exitTransition = { ExitTransition.None }
             ) {
                 OnboardingScreen(
@@ -106,7 +103,6 @@ fun MitrcRoot(
             }
             composable(
                 route = MainActivity.ROUTE_LOGIN,
-                // Long, eased cross-fade so signing out dissolves into the login screen.
                 enterTransition = {
                     fadeIn(tween(650, easing = FastOutSlowInEasing))
                 }
@@ -128,8 +124,6 @@ fun MitrcRoot(
                                 android.R.anim.fade_in,
                                 android.R.anim.fade_out
                             )
-                            // The panel becomes the task root, so an admin's back stack never
-                            // exposes the student/co-ordinator portal underneath it.
                             activity.finish()
                         }
                     }
@@ -151,16 +145,10 @@ fun MitrcRoot(
             }
         }
 
-        // Maintenance and release checks only apply inside the signed-in portal. Keeping the
-        // login/onboarding screens clear means a maintenance window can never lock an
-        // administrator out: Splash and Login route admins straight to AdminPanelActivity,
-        // which deliberately has no gate, so they can always turn maintenance off.
         if (currentRoute == MainActivity.ROUTE_HOME) {
             AppUpdateGate()
         }
 
-        // Splash and onboarding are branding/education screens with no server calls, so they
-        // stay usable offline. Everything else needs a live connection.
         if (currentRoute != null &&
             currentRoute != MainActivity.ROUTE_ONBOARDING &&
             !online

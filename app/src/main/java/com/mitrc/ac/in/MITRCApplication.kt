@@ -18,8 +18,6 @@ class MITRCApplication : Application() {
         PasswordResetStore.init(this)
         AppUpdateStore.init(this)
         SupabaseManager.init()
-        // Reads the Firebase Web API key out of the generated google-services resources so the
-        // admin panel can create accounts without hardcoding it.
         AdminRepository.init(this)
     }
 }

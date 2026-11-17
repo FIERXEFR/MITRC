@@ -9,13 +9,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.time.Instant
 
-/**
- * The student identity fields a coordinator can edit from the student sheet.
- *
- * Kept separate from [StudentProfileView] because that model also carries read-only view columns
- * (course, branch, class mapping). Passing only the editable fields to the repository makes it
- * impossible to accidentally write a joined view column into `students`.
- */
 data class StudentDetailsUpdate(
     val name: String,
     val serialNo: String? = null,
@@ -27,23 +20,8 @@ data class StudentDetailsUpdate(
     val groupName: String? = null,
 )
 
-/**
- * Coordinator-only writes backed by the native service-role key.
- *
- * The coordinator token is still subject to RLS, which silently rejects timetable and student
- * edits in production. These calls use [SupabaseManager.requireAdminClient] instead. The screen
- * must have checked `course_coordinators` (or admin rights) first; this object intentionally does
- * no authorization of its own because it cannot see the Firebase identity.
- *
- * Every write asks PostgREST to return the affected row (`select()`). An empty result means RLS,
- * a bad id, or a missing row silently swallowed the write, and that is surfaced as a failure
- * rather than a fake success.
- */
 object CoordinatorAdminRepository {
 
-    // -----------------------------------------------------------------------------------------
-    // Reads (used to refresh after a privileged write)
-    // -----------------------------------------------------------------------------------------
 
     suspend fun getTimetables(classIds: List<Int>): Result<List<TimetableRow>> = admin { client ->
         val ids = classIds.filter { it > 0 }.distinct()
@@ -91,11 +69,6 @@ object CoordinatorAdminRepository {
             .decodeList<ClassGroupRow>()
     }
 
-    /**
-     * Fallback for coordinator portal: returns all active classes mapped into
-     * [MyCoordinatorClassView] format using the service-role key so the coordinator can
-     * manage any class/batch timetable even if role assignment views are partially unpopulated.
-     */
     suspend fun getAllClassesWithDetails(): Result<List<MyCoordinatorClassView>> = admin { client ->
         val classes = client.postgrest[SupabaseTableData.Tables.CLASSES]
             .select()
@@ -128,11 +101,7 @@ object CoordinatorAdminRepository {
         }
     }
 
-    // -----------------------------------------------------------------------------------------
-    // Timetable writes
-    // -----------------------------------------------------------------------------------------
 
-    /** Creates a new timetable draft for a class directly via service-role key. */
     suspend fun createTimetable(
         classId: Int,
         effectiveFrom: String,
@@ -152,7 +121,6 @@ object CoordinatorAdminRepository {
         inserted.firstOrNull() ?: error("Database created no timetable row.")
     }
 
-    /** Updates the effective-from date of an existing timetable. */
     suspend fun updateEffectiveFrom(timetableId: Int, effectiveFrom: String): Result<Unit> = admin { client ->
         val clean = effectiveFrom.trim()
         require(clean.isNotEmpty()) { "Effective date cannot be empty." }
@@ -171,7 +139,6 @@ object CoordinatorAdminRepository {
         }
     }
 
-    /** Saves the class room shown on every published slot that has no slot-level room. */
     suspend fun updateRoom(timetableId: Int, room: String?): Result<Unit> = admin { client ->
         val clean = room?.trim()?.takeIf { it.isNotEmpty() }
 
@@ -189,7 +156,6 @@ object CoordinatorAdminRepository {
         }
     }
 
-    /** Deletes an entire timetable draft and its slots. */
     suspend fun deleteTimetable(timetableId: Int): Result<Unit> = admin { client ->
         client.postgrest[SupabaseTableData.Tables.TIMETABLE_ENTRIES]
             .delete { filter { eq("timetable_id", timetableId) } }
@@ -206,7 +172,6 @@ object CoordinatorAdminRepository {
         }
     }
 
-    /** Publishes or unpublishes a timetable and stamps `published_at` on publish. */
     suspend fun setPublished(timetableId: Int, published: Boolean): Result<Unit> = admin { client ->
         val updated = client.postgrest[SupabaseTableData.Tables.TIMETABLES]
             .update({
@@ -287,9 +252,6 @@ object CoordinatorAdminRepository {
         client.postgrest.rpc("duplicate_timetable", params).decodeAs<Int>()
     }
 
-    // -----------------------------------------------------------------------------------------
-    // Student writes
-    // -----------------------------------------------------------------------------------------
 
     suspend fun updateStudentDetails(
         studentUid: String,
@@ -320,7 +282,6 @@ object CoordinatorAdminRepository {
         }
     }
 
-    /** Moves a student between class groups by updating their `enrollments` row. */
     suspend fun updateStudentGroup(
         studentUid: String,
         classId: Int,
@@ -346,11 +307,7 @@ object CoordinatorAdminRepository {
         }
     }
 
-    // -----------------------------------------------------------------------------------------
-    // Notifications
-    // -----------------------------------------------------------------------------------------
 
-    /** Posts a new official notification into `notifications` via service-role key. */
     suspend fun createNotification(row: NewNotificationRow): Result<Unit> = admin { client ->
         val inserted = client.postgrest["notifications"]
             .insert(row) { select() }
@@ -361,7 +318,6 @@ object CoordinatorAdminRepository {
         }
     }
 
-    /** Marks a notification as read in `notification_reads`. */
     suspend fun markNotificationRead(userUid: String, notificationId: Long): Result<Unit> = admin { client ->
         val row = NotificationReadRow(userUid = userUid.trim(), notificationId = notificationId)
         client.postgrest["notification_reads"].upsert(row)
@@ -387,9 +343,6 @@ object CoordinatorAdminRepository {
         }
     }
 
-    // -----------------------------------------------------------------------------------------
-    // Internal
-    // -----------------------------------------------------------------------------------------
 
     private suspend fun <T> admin(block: suspend (SupabaseClient) -> T): Result<T> =
         runCatching { block(SupabaseManager.requireAdminClient()) }

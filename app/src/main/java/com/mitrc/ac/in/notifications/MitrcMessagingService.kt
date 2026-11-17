@@ -20,19 +20,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-/**
- * Receives data-only FCM messages from the `send-push` Edge Function and renders
- * them locally. Building the notification here (instead of letting FCM auto-show
- * a `notification` payload) keeps one code path and gives the tap a precise
- * target: the notifications sheet.
- */
 class MitrcMessagingService : FirebaseMessagingService() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onNewToken(token: String) {
-        // If nobody is signed in the token is registered after the next login by
-        // HomeScreen. Trying here would create a row with no owner.
         if (FirebaseAuth.getInstance().currentUser == null) return
         scope.launch {
             PushRepository.registerCurrentDevice(
@@ -73,8 +65,6 @@ class MitrcMessagingService : FirebaseMessagingService() {
         val intent = Intent(this, SplashActivity::class.java).apply {
             putExtra(SplashActivity.EXTRA_OPEN_NOTIFICATIONS, true)
             putExtra(SplashActivity.EXTRA_NOTIFICATION_ID, notificationId)
-            // Skip the 2.6s branding animation; SplashActivity still resolves the
-            // correct destination (admin / login / onboarding / portal).
             putExtra(SplashActivity.EXTRA_SKIP_SPLASH, true)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                 Intent.FLAG_ACTIVITY_CLEAR_TOP or

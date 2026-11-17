@@ -45,11 +45,6 @@ import com.mitrc.ac.`in`.ui.theme.Slate
 import com.mitrc.ac.`in`.ui.theme.SurfaceWhite
 import kotlinx.coroutines.launch
 
-/**
- * Shared pull-to-refresh wrapper for the teacher tabs. It mirrors the student and coordinator
- * portals: a light haptic tick on the gesture, then the tab's shimmer skeleton until the
- * refresh coroutine completes.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun TeacherRefreshBox(
@@ -67,7 +62,6 @@ internal fun TeacherRefreshBox(
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             scope.launch {
                 isRefreshing = true
-                // `finally` keeps a failed query from wedging the skeleton on screen.
                 try {
                     onRefresh()
                 } finally {
@@ -89,8 +83,6 @@ internal enum class TeacherTabSkeletonKind {
 
 @Composable
 internal fun TeacherTabSkeleton(kind: TeacherTabSkeletonKind) {
-    // One clock for the whole skeleton. Each block used to remember its own infinite transition,
-    // so a 20-block overview recomposed twenty times per frame on cold start and on every refresh.
     val shimmer = rememberInfiniteTransition(label = "teacherSkeletonShimmer")
     val shimmerProgress = shimmer.animateFloat(
         initialValue = -1f,

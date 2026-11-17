@@ -45,10 +45,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-/**
- * The admin panel's data-entry gate & system management repository.
- * Refactored for robust RLS handling and verbose debugging.
- */
 object AdminRepository {
 
     private const val TAG = "AdminRepository"
@@ -78,9 +74,6 @@ object AdminRepository {
         val mail = email?.trim().orEmpty().lowercase()
         if (id.isEmpty() && mail.isEmpty()) return false
 
-        // Admin routing only needs the admin_db row. Do not run the full staff-resolution
-        // chain (link RPC + my_portals + faculty + staff directory probes): none of those can
-        // turn a non-admin into an admin, and together they can keep the splash on screen.
         return try {
             SupabaseManager.withAuthRetry {
                 val client = SupabaseManager.requireClient()
@@ -137,7 +130,6 @@ object AdminRepository {
         val client = SupabaseManager.requireClient()
         Log.d(TAG, "Resolving staff gate for UID: '$id', Email: '$mail'")
 
-        // 1. Check Admin Table (admin_db)
         val adminRows = try {
             client.postgrest[SupabaseTableData.Tables.ADMIN_DB]
                 .select {
@@ -172,7 +164,6 @@ object AdminRepository {
             return StaffGate.Admin
         }
 
-        // 2. Link faculty account via RPC
         Log.d(TAG, "Linking faculty account via link_my_faculty_account RPC...")
         runCatching {
             PortalRepository.linkMyFacultyAccount()
@@ -180,7 +171,6 @@ object AdminRepository {
             Log.w(TAG, "link_my_faculty_account note: ${it.message}")
         }
 
-        // 3. Call my_portals RPC to verify faculty / teacher / coordinator / hod / mentor roles
         val portalsRes = PortalRepository.getMyPortals()
         if (portalsRes.isSuccess) {
             val portals = portalsRes.getOrThrow()
@@ -190,7 +180,6 @@ object AdminRepository {
             }
         }
 
-        // 4. Probing faculty table directly
         Log.d(TAG, "Probing faculty table for staff record...")
         val facultyRows = try {
             client.postgrest[SupabaseTableData.Tables.FACULTY]
@@ -226,7 +215,6 @@ object AdminRepository {
             return StaffGate.Staff
         }
 
-        // 5. Probing v_staff_directory view
         Log.d(TAG, "Probing v_staff_directory view...")
         val staffDirRows = try {
             client.postgrest[SupabaseTableData.Views.V_STAFF_DIRECTORY]
@@ -262,7 +250,6 @@ object AdminRepository {
             return StaffGate.Staff
         }
 
-        // 6. Probing faculty_master table as fallback
         Log.d(TAG, "Probing faculty_master table...")
         val facultyMasterRows = try {
             client.postgrest[SupabaseTableData.Tables.FACULTY_MASTER]
@@ -298,7 +285,6 @@ object AdminRepository {
             return StaffGate.Staff
         }
 
-        // 7. Probing staff_db table as fallback
         Log.d(TAG, "Probing staff_db table...")
         val staffDbRows = try {
             client.postgrest[SupabaseTableData.Tables.STAFF_DB]
@@ -339,7 +325,6 @@ object AdminRepository {
         data class Failed(val reason: String) : StaffGate
     }
 
-    // --- Creation Helpers ---
     suspend fun createStudentAccount(entry: StudentEntry): Result<String> {
         if (!SupabaseManager.isConfigured) return Result.failure(IllegalStateException("Supabase not configured"))
         val created = createActivatedAccount(entry.email, entry.password, entry.name).getOrElse { return Result.failure(it) }
@@ -396,12 +381,6 @@ object AdminRepository {
         return Result.success(created.uid)
     }
 
-    /**
-     * `accounts:signUp` reaches Firebase through the public API key, so it cannot set custom
-     * claims. Without `role: "authenticated"` Supabase treats the new user as `anon`, RLS hides
-     * their student/staff row, and login is blocked as "not linked". The Edge Function performs
-     * that one Admin SDK step with a service-account credential kept server-side.
-     */
     private suspend fun createActivatedAccount(email: String, password: String, name: String): Result<CreatedAccount> {
         val created = createAuthAccount(email, password, name).getOrElse { return Result.failure(it) }
         val activated = activateCreatedAccount(created.uid)
@@ -444,18 +423,7 @@ object AdminRepository {
     suspend fun getClassesForBranch(bid: Int): List<ClassRow> = runCatching { SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.CLASSES].select { filter { eq("branch_id", bid) } }.decodeList<ClassRow>() }.getOrDefault(emptyList())
     suspend fun getClassGroups(cid: Int): List<ClassGroupRow> = runCatching { SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.CLASS_GROUPS].select { filter { eq("class_id", cid) } }.decodeList<ClassGroupRow>() }.getOrDefault(emptyList())
 
-    // -----------------------------------------------------------------------------------------
-    // Notifications
-    // -----------------------------------------------------------------------------------------
 
-    /**
-     * Posts a notice through the normal authenticated client. RLS already allows any admin to
-     * insert for every audience, and the `trg_notifications_send_push` trigger asks the
-     * `send-push` Edge Function to fan it out to the registered devices.
-     *
-     * The inserted row is returned so the caller can poll [getNotificationDelivery] for the
-     * delivery counters.
-     */
     suspend fun sendNotification(row: NewNotificationRow): Result<NotificationRow> = runCatching {
         SupabaseManager.withAuthRetry {
             val inserted = SupabaseManager.requireClient().postgrest["notifications"]
@@ -470,7 +438,6 @@ object AdminRepository {
         Log.w(TAG, "Notification insert failed: ${it.message}")
     }
 
-    /** Reads the delivery counters the `send-push` function writes back to the row. */
     suspend fun getNotificationDelivery(id: Long): Result<NotificationRow> = runCatching {
         SupabaseManager.withAuthRetry {
             SupabaseManager.requireClient().postgrest["notifications"]
@@ -487,7 +454,6 @@ object AdminRepository {
         Log.w(TAG, "Notification delivery read failed: ${it.message}")
     }
 
-    /** Newest notices first, for the composer's recent-notices card. */
     suspend fun getRecentNotifications(max: Long = 8): Result<List<NotificationRow>> = runCatching {
         SupabaseManager.withAuthRetry {
             SupabaseManager.requireClient().postgrest["notifications"]
@@ -502,10 +468,6 @@ object AdminRepository {
         Log.w(TAG, "Recent notifications failed: ${it.message}")
     }
 
-    /**
-     * Cancels a notice. The audience columns are pinned by `notifications_before_write`, but
-     * `is_cancelled` is writable and the push function skips cancelled rows.
-     */
     suspend fun cancelNotification(id: Long): Result<Unit> = runCatching {
         SupabaseManager.withAuthRetry {
             SupabaseManager.requireClient().postgrest["notifications"]
@@ -519,11 +481,7 @@ object AdminRepository {
         Log.w(TAG, "Notification cancel failed: ${it.message}")
     }
 
-    // -----------------------------------------------------------------------------------------
-    // Dashboard
-    // -----------------------------------------------------------------------------------------
 
-    /** Head-counts shown on the admin dashboard. Null means the count could not be read. */
     suspend fun getDashboardStats(): Result<AdminDashboardStats> = runCatching {
         SupabaseManager.withAuthRetry {
             val client = SupabaseManager.requireClient()
@@ -560,14 +518,7 @@ object AdminRepository {
         Log.w(TAG, "Dashboard stats failed: ${it.message}")
     }
 
-    // -----------------------------------------------------------------------------------------
-    // Directory search
-    // -----------------------------------------------------------------------------------------
 
-    /**
-     * PostgREST's `or=(...)` expression uses commas and parentheses as syntax, so those characters
-     * must never reach the filter from user input.
-     */
     private fun searchPattern(rawQuery: String): String? {
         val term = rawQuery.trim()
             .replace(",", " ")
@@ -601,8 +552,6 @@ object AdminRepository {
             }
 
             directory.getOrElse {
-                // The directory view can be restricted; fall back to the base table. Class
-                // metadata is not joined here, so those fields stay empty in the result card.
                 client.postgrest[SupabaseTableData.Tables.STUDENTS]
                     .select {
                         filter {
@@ -640,10 +589,6 @@ object AdminRepository {
         Log.w(TAG, "Student search failed: ${it.message}")
     }
 
-    /**
-     * Newest students first, by `students.created_at`. This backs the Search tab's landing list so
-     * an administrator can see the accounts that were just created without typing a query.
-     */
     suspend fun getRecentStudents(max: Long = 15): Result<List<StudentProfileView>> = runCatching {
         SupabaseManager.withAuthRetry {
             val client = SupabaseManager.requireClient()
@@ -709,7 +654,6 @@ object AdminRepository {
                         limit(max)
                     }
                     .decodeList<StaffDirectoryView>()
-                    // v_staff_directory joins class_mentors, so a mentor of two classes can repeat.
                     .distinctBy { it.facultyId }
             }
 
@@ -754,10 +698,6 @@ object AdminRepository {
         Log.w(TAG, "Staff search failed: ${it.message}")
     }
 
-    /**
-     * Newest staff first, by `faculty_master.created_at` - the Staff tab's landing list, the
-     * counterpart of [getRecentStudents].
-     */
     suspend fun getRecentStaff(max: Long = 15): Result<List<StaffDirectoryView>> = runCatching {
         SupabaseManager.withAuthRetry {
             val client = SupabaseManager.requireClient()
@@ -850,7 +790,6 @@ object AdminRepository {
     @Serializable private data class FirebaseErrorBody(val message: String)
 }
 
-/** Head-counts rendered by the admin dashboard. */
 data class AdminDashboardStats(
     val students: Long? = null,
     val staff: Long? = null,

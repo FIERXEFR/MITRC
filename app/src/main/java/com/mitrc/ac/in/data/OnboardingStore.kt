@@ -3,13 +3,6 @@ package com.mitrc.ac.`in`.data
 import android.content.Context
 import android.content.SharedPreferences
 
-/**
- * Remembers whether the user has ever completed a login.
- *
- * Onboarding keeps showing on **every** app launch while this is false, so a student who only
- * taps Skip still gets the introduction next time. The first successful sign-in sets it, after
- * which onboarding is never shown again (even if the user signs out later).
- */
 object OnboardingStore {
 
     private const val FILE_NAME = "mitrc_prefs"

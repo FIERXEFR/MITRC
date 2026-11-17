@@ -10,27 +10,11 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/**
- * Snapshot of the two-row remote control document in `public.app_update`.
- *
- * A null field means the row does not exist on the server yet; callers must treat that as
- * "feature off" instead of guessing defaults.
- */
 data class AppUpdateConfig(
     val update: AppUpdateRow? = null,
     val maintenance: AppUpdateRow? = null,
 )
 
-/**
- * Reads and writes the two-row remote control document in `public.app_update`.
- *
- * Reads are public so the gate can run before login. Writes are protected by the
- * `app_update_admin_write` RLS policy and only succeed for an account in `admin_db`.
- *
- * The rows are addressed by [CONFIG_UPDATE] / [CONFIG_MAINTENANCE] and pinned to
- * [UPDATE_ROW_ID] / [MAINTENANCE_ROW_ID] by the `app_update_config_id_check` constraint, so the
- * admin screen can never create a third row or swap the two.
- */
 object AppUpdateRepository {
 
     private const val TAG = "AppUpdateRepository"
@@ -41,7 +25,6 @@ object AppUpdateRepository {
     const val UPDATE_ROW_ID = 1L
     const val MAINTENANCE_ROW_ID = 2L
 
-    /** Loads both rows in one round trip and separates them by `config_key`. */
     suspend fun fetchConfig(): Result<AppUpdateConfig> = runCatching {
         SupabaseManager.withAuthRetry {
             val rows = SupabaseManager.requireClient().postgrest[SupabaseTableData.Tables.APP_UPDATE]
@@ -56,22 +39,13 @@ object AppUpdateRepository {
             )
         }
     }.onFailure {
-        // runCatching also catches CancellationException; rethrow it so callers
-        // are not left with a silently swallowed cancellation.
         if (it is CancellationException) throw it
         Log.w(TAG, "Could not load app_update: ${it.message}")
     }
 
-    /** Convenience for callers that only care about the release row (e.g. "Check for update"). */
     suspend fun fetchLatest(): Result<AppUpdateRow?> = fetchConfig().map { it.update }
 
-    /** Saves only the release row (id 1). Maintenance columns are never touched. */
     suspend fun saveUpdate(row: AppUpdateRow): Result<Unit> {
-        // Encode the write explicitly instead of relying on the model's default-value
-        // elision. With `encodeDefaults = false`, a value equal to its Kotlin default
-        // is dropped from the body, and PostgREST's upsert then leaves the old column
-        // untouched. `updated_at` and `updated_by` are set by the
-        // `app_update_before_write` trigger, so they are omitted here.
         val payload = buildJsonObject {
             put("id", UPDATE_ROW_ID)
             put("config_key", CONFIG_UPDATE)
@@ -89,7 +63,6 @@ object AppUpdateRepository {
         return write(payload, "release row")
     }
 
-    /** Saves only the maintenance row (id 2). Release columns are never touched. */
     suspend fun saveMaintenance(row: AppUpdateRow): Result<Unit> {
         val payload = buildJsonObject {
             put("id", MAINTENANCE_ROW_ID)
@@ -117,10 +90,6 @@ object AppUpdateRepository {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName
     }.getOrNull().orEmpty().ifBlank { "0" }
 
-    /**
-     * Opens the admin-configured download page in the device browser. The app deliberately does
-     * not download or install the APK itself; the page handles the download and Android install.
-     */
     fun openDownloadPage(context: Context, url: String?): Boolean {
         val target = url?.trim().orEmpty()
         if (target.isEmpty()) return false
@@ -141,10 +110,6 @@ object AppUpdateRepository {
         }.getOrDefault(false)
     }
 
-    /**
-     * Compares dotted versions numerically, so `1.10` is newer than `1.9`. Text that is not
-     * numeric (for example `1.0-beta`) still works because the non-digit separators are ignored.
-     */
     fun isNewer(remote: String?, local: String?): Boolean {
         val remoteText = remote?.trim().orEmpty().removePrefix("v")
         val localText = local?.trim().orEmpty().removePrefix("v")

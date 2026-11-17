@@ -10,10 +10,6 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 
-/**
- * Tracks whether any teacher-portal text field is focused so the shell can consume the first
- * system-back press to dismiss the keyboard instead of leaving the portal.
- */
 internal class TeacherFieldFocusTracker {
     private var focusedKeys by mutableStateOf<Set<Any>>(emptySet())
 

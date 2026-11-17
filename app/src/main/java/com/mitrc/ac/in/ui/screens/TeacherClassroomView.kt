@@ -208,7 +208,6 @@ fun TeacherClassroomView(
                 attendanceMap[student.uid]?.let { status -> student.uid to status }
             }.toMap()
 
-            // Keep the roster skeleton on screen long enough to read as a real loading state.
             val remainingSkeletonMs = 1_000L - (System.currentTimeMillis() - loadStartedAt)
             if (remainingSkeletonMs > 0) delay(remainingSkeletonMs)
             loadingStudents = false
@@ -1226,7 +1225,6 @@ private fun TeacherMarksPanel(
             .getOrDefault(emptyList())
             .sortedBy { it.name?.lowercase() ?: "" }
 
-        // Keep the roster skeleton on screen long enough to read as a real loading state.
         val remainingSkeletonMs = 1_000L - (System.currentTimeMillis() - loadStartedAt)
         if (remainingSkeletonMs > 0) delay(remainingSkeletonMs)
         loadingStudents = false

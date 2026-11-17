@@ -4,10 +4,6 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 
-/**
- * Single source of truth for every Supabase (PostgREST) table, view, and row model.
- * Column names match exact database definitions (snake_case).
- */
 object SupabaseTableData {
 
     object Tables {
@@ -68,9 +64,6 @@ object SupabaseTableData {
 
 internal fun String?.blankToNull(): String? = this?.trim()?.takeIf { it.isNotEmpty() }
 
-// ---------------------------------------------------------------------------------------------
-// Row shapes - Table Models
-// ---------------------------------------------------------------------------------------------
 
 @Serializable
 data class AdminDbRow(
@@ -91,9 +84,7 @@ data class StudentRow(
     @SerialName("group_name") val groupName: String? = null,
     @SerialName("is_locked") val isLocked: Boolean? = null,
     @SerialName("is_ptm") val isPtm: Boolean? = null,
-    /** Shown verbatim on the student's lock screen; null when unlocked or no reason was typed. */
     @SerialName("lock_reason") val lockReason: String? = null,
-    /** Timestamptz of the scheduled PTM (ISO-8601), displayed on the student's lock screen. */
     @SerialName("ptm_schedule") val ptmSchedule: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
@@ -153,7 +144,7 @@ data class SubjectRow(
     @SerialName("id") val id: Int = 0,
     @SerialName("code") val code: String = "",
     @SerialName("name") val name: String = "",
-    @SerialName("kind") val kind: String = "theory", // 'theory' | 'lab'
+    @SerialName("kind") val kind: String = "theory",
 )
 
 @Serializable
@@ -224,7 +215,7 @@ data class ClassMentorRow(
 data class AssessmentRow(
     @SerialName("id") val id: Int = 0,
     @SerialName("class_subject_id") val classSubjectId: Int,
-    @SerialName("kind") val kind: String, // UT|EXP|ASSIGNMENT|MID|END
+    @SerialName("kind") val kind: String,
     @SerialName("number") val number: Int,
     @SerialName("max_marks") val maxMarks: Double? = null,
 )
@@ -243,7 +234,7 @@ data class AttendanceSessionRow(
     @SerialName("class_subject_id") val classSubjectId: Int,
     @SerialName("class_date") val classDate: String,
     @SerialName("period") val period: Int,
-    @SerialName("taken_by") val takenBy: String? = null, // Firebase UID of the teacher
+    @SerialName("taken_by") val takenBy: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
 )
@@ -252,13 +243,9 @@ data class AttendanceSessionRow(
 data class AttendanceRecordRow(
     @SerialName("session_id") val sessionId: String,
     @SerialName("student_uid") val studentUid: String,
-    @SerialName("status") val status: String, // 'P'|'A'|'L'|'OD'
+    @SerialName("status") val status: String,
 )
 
-/**
- * A student's mark joined with the session it belongs to. Backs the attendance calendar, which
- * needs the `class_date` per record rather than a session id.
- */
 @Serializable
 data class AttendanceRecordWithSessionRow(
     @SerialName("status") val status: String = "A",
@@ -283,9 +270,6 @@ data class TimetableRow(
     @SerialName("lunch_end") val lunchEnd: String? = null,
 )
 
-/**
- * Insert shape for `timetables`: omits `id` so PostgREST uses the identity sequence.
- */
 @Serializable
 data class NewTimetableRow(
     @SerialName("class_id") val classId: Int,
@@ -306,7 +290,7 @@ data class TimetablePeriodRow(
 data class TimetableEntryRow(
     @SerialName("id") val id: Int = 0,
     @SerialName("timetable_id") val timetableId: Int,
-    @SerialName("day_of_week") val dayOfWeek: Int, // 1=Mon..7=Sun
+    @SerialName("day_of_week") val dayOfWeek: Int,
     @SerialName("start_period") val startPeriod: Int,
     @SerialName("end_period") val endPeriod: Int,
     @SerialName("class_subject_id") val classSubjectId: Int? = null,
@@ -315,10 +299,6 @@ data class TimetableEntryRow(
     @SerialName("room") val room: String? = null,
 )
 
-/**
- * Insert shape for `timetable_entries`: it deliberately omits `id` so PostgREST lets the table's
- * identity column generate the next value instead of receiving a literal `0`.
- */
 @Serializable
 data class NewTimetableEntryRow(
     @SerialName("timetable_id") val timetableId: Int,
@@ -347,7 +327,6 @@ data class NoteRow(
     @SerialName("updated_at") val updatedAt: String? = null
 )
 
-/** Omit faculty_id and uploaded_by on note inserts; the database fills them. */
 @Serializable
 data class NoteInsertRow(
     @SerialName("class_subject_id") val classSubjectId: Int,
@@ -359,17 +338,6 @@ data class NoteInsertRow(
     @SerialName("is_visible") val isVisible: Boolean = true,
 )
 
-/**
- * One row of the two-row app control document in `public.app_update`.
- *
- * The table holds exactly two rows, told apart by [configKey] (and pinned to fixed ids by a
- * database check constraint):
- *
- *  - `id = 1`, `config_key = app_update`      -> APK release + small packet / remote config.
- *  - `id = 2`, `config_key = app_maintenance` -> maintenance window.
- *
- * Fields that belong to the other row are simply unused and stay at their defaults.
- */
 @Serializable
 data class AppUpdateRow(
     @SerialName("id") val id: Long = AppUpdateRepository.UPDATE_ROW_ID,
@@ -389,17 +357,9 @@ data class AppUpdateRow(
     @SerialName("maintenance_until") val maintenanceUntil: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
     @SerialName("updated_by") val updatedBy: String? = null,
-    /**
-     * Server-driven config for small packets. It is stored locally when a new small version is
-     * accepted. The app cannot change compiled code without a new APK; this payload is the
-     * supported way to change flags, copy, links and other wired-in behavior without a version bump.
-     */
     @SerialName("small_payload") val smallPayload: JsonObject = JsonObject(emptyMap()),
 )
 
-// ---------------------------------------------------------------------------------------------
-// Row shapes - Views & RPC Responses
-// ---------------------------------------------------------------------------------------------
 
 @Serializable
 data class MyPortalsResponse(
@@ -437,7 +397,6 @@ data class StudentProfileView(
     @SerialName("section") val section: String? = null,
     @SerialName("academic_year") val academicYear: String? = null,
     @SerialName("class_id") val classId: Int? = null,
-    /** Row timestamp from `students.created_at`; the admin console sorts the newest first. */
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("explicit_student_uid") private val _explicitStudentUid: String = "",
 ) {
@@ -520,10 +479,6 @@ data class AttendanceSummaryView(
     @SerialName("percentage") val percentage: Double,
 )
 
-/**
- * One calendar day of a student's attendance, folded together from every marked period that day.
- * Built client-side from `attendance_sessions` + `attendance_records`; `date` is ISO `yyyy-MM-dd`.
- */
 data class DailyAttendance(
     val date: String,
     val present: Int = 0,
@@ -531,13 +486,10 @@ data class DailyAttendance(
     val leave: Int = 0,
     val onDuty: Int = 0,
 ) {
-    /** Periods that count as attended (on-duty also counts as attended). */
     val attended: Int get() = present + onDuty
 
-    /** Periods that count against the student. */
     val missed: Int get() = absent + leave
 
-    /** True when the day is mostly attended, false when mostly missed, null when nothing marked. */
     val attendedDay: Boolean?
         get() = when {
             attended == 0 && missed == 0 -> null
@@ -704,7 +656,6 @@ data class StaffDirectoryView(
     @SerialName("mentor_group_id") val mentorGroupId: Int? = null,
     @SerialName("is_coordinator") val isCoordinator: Boolean = false,
     @SerialName("is_hod") val isHod: Boolean = false,
-    /** Row timestamp from `faculty_master.created_at`; the admin console sorts the newest first. */
     @SerialName("created_at") val createdAt: String? = null,
     @kotlinx.serialization.Transient val isAdmin: Boolean = false,
 )
@@ -798,23 +749,17 @@ data class MyMenteeAttendanceView(
     @SerialName("percentage") val percentage: Double,
 )
 
-// ---------------------------------------------------------------------------------------------
-// RPC Payloads
-// ---------------------------------------------------------------------------------------------
 
 @Serializable
 data class TakeAttendanceRecord(
     @SerialName("uid") val uid: String,
-    @SerialName("status") val status: String, // 'P'|'A'|'L'|'OD'
+    @SerialName("status") val status: String,
 )
 
 typealias StudentDirectoryView = StudentProfileView
 typealias StudentSubjectView = ClassSubjectView
 typealias SubjectTeacherView = StaffDirectoryView
 
-// ---------------------------------------------------------------------------------------------
-// Notifications
-// ---------------------------------------------------------------------------------------------
 
 @Serializable
 data class NotificationRow(
@@ -830,11 +775,10 @@ data class NotificationRow(
     @SerialName("class_id") val classId: Int? = null,
     @SerialName("group_id") val groupId: Int? = null,
     @SerialName("class_subject_id") val classSubjectId: Int? = null,
+    @SerialName("student_uid") val studentUid: String? = null,
     @SerialName("is_cancelled") val isCancelled: Boolean = false,
     @SerialName("expires_at") val expiresAt: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
-    // Delivery bookkeeping written by the `send-push` Edge Function. The admin composer polls
-    // these fields after posting so it can show how many devices actually received the push.
     @SerialName("push_sent_at") val pushSentAt: String? = null,
     @SerialName("push_sent_count") val pushSentCount: Int = 0,
     @SerialName("push_failed_count") val pushFailedCount: Int = 0,
@@ -849,14 +793,12 @@ data class NewNotificationRow(
     @SerialName("image_id") val imageId: String? = null,
     @SerialName("category") val category: String = "announcement",
     @SerialName("priority") val priority: String = "normal",
-    // No default: `audience` is NOT NULL with no database default, and the client serializes
-    // with `encodeDefaults = false`. A default of "everyone" would be omitted for the most
-    // common case and the insert would fail on the missing column.
     @SerialName("audience") val audience: String,
     @SerialName("course_id") val courseId: Int? = null,
     @SerialName("class_id") val classId: Int? = null,
     @SerialName("group_id") val groupId: Int? = null,
     @SerialName("class_subject_id") val classSubjectId: Int? = null,
+    @SerialName("student_uid") val studentUid: String? = null,
     @SerialName("expires_at") val expiresAt: String? = null,
 )
 

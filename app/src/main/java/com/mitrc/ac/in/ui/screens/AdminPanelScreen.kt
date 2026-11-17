@@ -142,7 +142,6 @@ enum class AdminEntryTab(val label: String) {
     STAFF("STAFF")
 }
 
-/** Top-level destinations of the admin console, rendered by the shared portal bottom bar. */
 internal enum class AdminTab(
     val label: String,
     val title: String,
@@ -154,13 +153,6 @@ internal enum class AdminTab(
     SETTINGS("Settings", "SETTINGS", Icons.Outlined.Settings),
 }
 
-/**
- * Admin console shell: the same bottom navigation treatment as the student and teacher portals,
- * with four destinations - Dashboard, Search, Control Panel and Settings.
- *
- * Account registration lives behind the dashboard's quick actions so the nav bar stays focused on
- * day-to-day monitoring and management.
- */
 @Composable
 fun AdminPanelScreen(onSignedOut: () -> Unit) {
     val user = AuthRepository.currentUser
@@ -202,7 +194,6 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
         }
     }
 
-    // Registration is a sub-flow opened from the dashboard; it hides the nav bar while open.
     var registerTabName by rememberSaveable { mutableStateOf<String?>(null) }
     val registerTab = registerTabName?.let { name ->
         AdminEntryTab.entries.firstOrNull { it.name == name }
@@ -224,10 +215,6 @@ fun AdminPanelScreen(onSignedOut: () -> Unit) {
             }.getOrNull()
             adminName = row?.name?.ifBlank { null }
 
-            // The admin panel is a separate activity from HomeScreen, so nothing else registers
-            // this device's FCM token for an admin account. Register best-effort (never prompts
-            // for the notification permission) so notices posted from the Control Panel can
-            // reach this device while testing pushes.
             PushRepository.registerCurrentDevice(PushRepository.appVersion(context))
         }
         initialLoading = false
@@ -780,9 +767,6 @@ internal fun censorEmail(email: String?): String {
     return "$visible$hidden@$domain"
 }
 
-// ---------------------------------------------------------------------------------------------
-// Forms
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 private fun StudentEntryForm(form: StudentFormState) {
@@ -920,7 +904,6 @@ private fun StudentEntryForm(form: StudentFormState) {
         Spacer(Modifier.height(8.dp))
         FormSectionLabel("ACADEMIC STRUCTURE & PLACEMENT")
 
-        // 1. Course Dropdown
         Text(text = "1. Select Course:", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
         Spacer(Modifier.height(4.dp))
         Box(
@@ -985,7 +968,6 @@ private fun StudentEntryForm(form: StudentFormState) {
 
         Spacer(Modifier.height(10.dp))
 
-        // 2. Branch Dropdown
         Text(text = "2. Select Branch:", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
         Spacer(Modifier.height(4.dp))
         Box(modifier = Modifier.fillMaxWidth()) {
@@ -1024,7 +1006,6 @@ private fun StudentEntryForm(form: StudentFormState) {
 
         Spacer(Modifier.height(10.dp))
 
-        // 3. Class Dropdown
         Text(text = "3. Select Semester & Section:", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
         Spacer(Modifier.height(4.dp))
         Box(modifier = Modifier.fillMaxWidth()) {
@@ -1070,7 +1051,6 @@ private fun StudentEntryForm(form: StudentFormState) {
             }
         }
 
-        // 4. Lab Group Selection
         if (groups.isNotEmpty()) {
             Spacer(Modifier.height(12.dp))
             Text(
@@ -1170,7 +1150,6 @@ private fun StaffEntryForm(form: StaffFormState) {
         )
         Spacer(Modifier.height(12.dp))
 
-        // Role Dropdown Selection
         Text(text = "Select Staff Role:", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
         Spacer(Modifier.height(4.dp))
         Box(modifier = Modifier.fillMaxWidth()) {
@@ -1219,7 +1198,6 @@ private fun StaffEntryForm(form: StaffFormState) {
         )
         Spacer(Modifier.height(12.dp))
 
-        // Gender Selection Chips
         Text(text = "Select Gender:", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
         Spacer(Modifier.height(6.dp))
         Row(
@@ -1331,7 +1309,7 @@ private fun AdminPasswordField(
             keyboardType = KeyboardType.Password,
             imeAction = imeAction
         ),
-        keyboardActions = KeyboardActions(onDone = { /* submission is driven by the button */ }),
+        keyboardActions = KeyboardActions(onDone = {  }),
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         colors = adminFieldColors()

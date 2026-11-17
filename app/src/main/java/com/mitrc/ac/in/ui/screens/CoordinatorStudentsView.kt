@@ -132,16 +132,12 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.launch
 
-// ---------------------------------------------------------------------------
-// Main screen composable
-// ---------------------------------------------------------------------------
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CoordinatorStudentsView(userUid: String) {
     val scope = rememberCoroutineScope()
 
-    // ---- state ----
     var allStudents by remember { mutableStateOf<List<StudentProfileView>>(emptyList()) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedStudent by remember { mutableStateOf<StudentProfileView?>(null) }
@@ -151,10 +147,6 @@ fun CoordinatorStudentsView(userUid: String) {
     var actionError by remember { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // Identity (name, roll, phone, email, group, lock/PTM flags) is read from the `students`
-    // table; the class mapping comes from v_student_directory (with v_student_profiles and
-    // enrollments as fallbacks). The repository merges them, with `students` winning on every
-    // identity field.
     suspend fun loadStudents() {
         errorMsg = null
         val classes = PortalRepository.getMyCoordinatorClasses().getOrElse {
@@ -168,21 +160,17 @@ fun CoordinatorStudentsView(userUid: String) {
             .onFailure { errorMsg = it.message }
     }
 
-    // Applies a saved change to both the roster and the open sheet, so the UI never shows an
-    // update the database rejected (failures surface through `actionError` instead).
     fun applyStudentChange(uid: String, transform: (StudentProfileView) -> StudentProfileView) {
         allStudents = allStudents.map { if (it.studentUid == uid) transform(it) else it }
         selectedStudent = selectedStudent?.let { if (it.studentUid == uid) transform(it) else it }
     }
 
-    // ---- load ----
     LaunchedEffect(userUid) {
         loading = true
         loadStudents()
         loading = false
     }
 
-    // ---- filtered list sorted A-Z alphabetically ----
     val filtered = remember(allStudents, searchQuery) {
         val q = searchQuery.trim().lowercase()
         val list = if (q.isEmpty()) allStudents
@@ -196,14 +184,10 @@ fun CoordinatorStudentsView(userUid: String) {
         list.sortedBy { it.name?.lowercase() ?: "" }
     }
 
-    // ---- UI ----
-    // The tab title lives in the portal hero now; this tab deliberately has no second header.
     CoordinatorRefreshBox(
         onRefresh = { loadStudents() },
         skeleton = { CoordinatorStudentListSkeleton() }
     ) {
-        // Initial load shows the same shimmer preview the pull-to-refresh uses instead of a
-        // centred spinner, so the tab never flashes a blank screen.
         if (loading) {
             CoordinatorStudentListSkeleton()
             return@CoordinatorRefreshBox
@@ -257,7 +241,6 @@ fun CoordinatorStudentsView(userUid: String) {
         }
     }
 
-    // Detail bottom sheet
     if (selectedStudent != null) {
         ModalBottomSheet(
             onDismissRequest = { selectedStudent = null },
@@ -311,9 +294,6 @@ fun CoordinatorStudentsView(userUid: String) {
                     }
                 },
                 onDetailsSaved = { uid, update ->
-                    // The edit dialog already wrote through the service-role client. Mirror the
-                    // saved values in the roster and the open sheet so the UI can't disagree
-                    // with the database.
                     applyStudentChange(uid) {
                         it.copy(
                             name = update.name,
@@ -346,9 +326,6 @@ fun CoordinatorStudentsView(userUid: String) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Count line (replaces the old second hero header)
-// ---------------------------------------------------------------------------
 
 @Composable
 private fun StudentsCountRow(count: Int, totalCount: Int) {
@@ -364,9 +341,6 @@ private fun StudentsCountRow(count: Int, totalCount: Int) {
     )
 }
 
-// ---------------------------------------------------------------------------
-// Search bar
-// ---------------------------------------------------------------------------
 
 @Composable
 private fun SearchBar(
@@ -401,8 +375,6 @@ private fun SearchBar(
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         keyboardActions = KeyboardActions(onSearch = {}),
         colors = OutlinedTextFieldDefaults.colors(
-            // The Material defaults inherit onSurface from the (dark-capable) app theme, which
-            // rendered white text on this white card. Pin every slot to the portal palette.
             focusedTextColor = TextPrimary,
             unfocusedTextColor = TextPrimary,
             disabledTextColor = TextPrimary.copy(alpha = 0.6f),
@@ -421,9 +393,6 @@ private fun SearchBar(
     )
 }
 
-// ---------------------------------------------------------------------------
-// Student list
-// ---------------------------------------------------------------------------
 
 @Composable
 private fun StudentList(
@@ -457,7 +426,6 @@ private fun StudentCard(student: StudentProfileView, onClick: () -> Unit) {
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Avatar circle
             Box(
                 modifier = Modifier
                     .size(46.dp)
@@ -526,9 +494,6 @@ private fun StudentChip(label: String, color: Color) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Student detail bottom sheet
-// ---------------------------------------------------------------------------
 
 @Composable
 private fun StudentDetailSheet(
@@ -543,7 +508,6 @@ private fun StudentDetailSheet(
     var marks by remember { mutableStateOf<List<MarkView>>(emptyList()) }
     var loadingDetails by remember { mutableStateOf(true) }
 
-    // confirmation dialogs
     var showLockDialog by remember { mutableStateOf(false) }
     var showPtmDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
@@ -561,7 +525,6 @@ private fun StudentDetailSheet(
             .verticalScroll(rememberScrollState())
             .padding(bottom = 32.dp)
     ) {
-        // drag handle
         Box(
             modifier = Modifier
                 .align(Alignment.CenterHorizontally)
@@ -571,7 +534,6 @@ private fun StudentDetailSheet(
                 .background(DividerSoft)
         )
 
-        // ---- Avatar + name ----
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -617,7 +579,6 @@ private fun StudentDetailSheet(
         Divider(color = DividerSoft, thickness = 1.dp)
         Spacer(Modifier.height(16.dp))
 
-        // ---- Class info chips ----
         DetailSectionLabel("Class Information", Icons.Outlined.Badge)
         Spacer(Modifier.height(8.dp))
         @OptIn(ExperimentalLayoutApi::class)
@@ -638,7 +599,6 @@ private fun StudentDetailSheet(
         Divider(color = DividerSoft, thickness = 1.dp)
         Spacer(Modifier.height(16.dp))
 
-        // ---- Contact ----
         DetailSectionLabel("Contact Details", Icons.Outlined.Call)
         Spacer(Modifier.height(12.dp))
 
@@ -653,7 +613,6 @@ private fun StudentDetailSheet(
         Divider(color = DividerSoft, thickness = 1.dp)
         Spacer(Modifier.height(16.dp))
 
-        // ---- Actions ----
         DetailSectionLabel("Coordinator Actions", Icons.Outlined.Star)
         Spacer(Modifier.height(12.dp))
 
@@ -690,7 +649,6 @@ private fun StudentDetailSheet(
         Divider(color = DividerSoft, thickness = 1.dp)
         Spacer(Modifier.height(16.dp))
 
-        // ---- Attendance ----
         DetailSectionLabel("Attendance Summary", Icons.Outlined.CheckCircle)
         Spacer(Modifier.height(12.dp))
 
@@ -712,7 +670,6 @@ private fun StudentDetailSheet(
         Divider(color = DividerSoft, thickness = 1.dp)
         Spacer(Modifier.height(16.dp))
 
-        // ---- Marks ----
         DetailSectionLabel("Assessment Marks", Icons.Outlined.Info)
         Spacer(Modifier.height(12.dp))
 
@@ -730,7 +687,6 @@ private fun StudentDetailSheet(
         Spacer(Modifier.height(32.dp))
     }
 
-    // ---- Lock dialog: reason on lock, plain confirm on unlock ----
     if (showLockDialog) {
         if (student.isLocked != true) {
             LockProfileDialog(
@@ -756,7 +712,6 @@ private fun StudentDetailSheet(
         }
     }
 
-    // ---- PTM dialog: pick date + time, optionally lock in the same step ----
     if (showPtmDialog) {
         if (student.isPtm == true) {
             ConfirmDialog(
@@ -791,7 +746,6 @@ private fun StudentDetailSheet(
         }
     }
 
-    // ---- Edit identity: name, roll, parent/contact details, class group ----
     if (showEditDialog) {
         EditStudentDetailsDialog(
             student = student,
@@ -804,15 +758,7 @@ private fun StudentDetailSheet(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Student details editor
-// ---------------------------------------------------------------------------
 
-/**
- * Edits the identity columns of `students` (and optionally the class group in `enrollments`)
- * through the coordinator service-role client. Groups are loaded lazily because a class can have
- * none, in which case the group picker is hidden.
- */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EditStudentDetailsDialog(
@@ -1013,11 +959,7 @@ private fun EditChoiceChip(label: String, selected: Boolean, onClick: () -> Unit
     }
 }
 
-// ---------------------------------------------------------------------------
-// PTM / lock dialogs
-// ---------------------------------------------------------------------------
 
-/** One PTM change, so the sheet can hand the whole intent to the repository in one update. */
 private data class PtmUpdate(
     val scheduled: Boolean,
     val scheduledAt: String? = null,
@@ -1036,10 +978,6 @@ private fun ActionNote(text: String) {
     )
 }
 
-/**
- * Locking always asks for the reason first - that text is what the student reads on the lock
- * screen. The reason is optional so a coordinator can still lock someone quickly.
- */
 @Composable
 private fun LockProfileDialog(
     studentName: String,
@@ -1126,11 +1064,6 @@ private fun LockProfileDialog(
     )
 }
 
-/**
- * Scheduling a PTM asks for the date, the time, and - because a PTM usually needs the student to
- * stop using the portal that day - whether to lock the profile in the same step. All of it is
- * written by one UPDATE so the PTM can never be saved without the lock it was paired with.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SchedulePtmDialog(
@@ -1415,9 +1348,6 @@ private fun PickerField(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Reusable sheet components
-// ---------------------------------------------------------------------------
 
 @Composable
 private fun DetailSectionLabel(title: String, icon: ImageVector) {
@@ -1664,9 +1594,6 @@ private fun ConfirmDialog(
     )
 }
 
-// ---------------------------------------------------------------------------
-// Generic states
-// ---------------------------------------------------------------------------
 
 @Composable
 private fun ErrorState(message: String, onRetry: () -> Unit) {

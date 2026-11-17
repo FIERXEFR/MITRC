@@ -152,8 +152,6 @@ fun CoordinatorPortalShell(
     var signingOut by remember { mutableStateOf(false) }
     var signOutComplete by remember { mutableStateOf(false) }
 
-    // A push tap that arrives while the portal is already open should land on
-    // the notifications sheet instead of only bringing the app forward.
     val openNotificationsRequest = NotificationOpenRequest.pending
     LaunchedEffect(openNotificationsRequest) {
         if (openNotificationsRequest) {
@@ -162,8 +160,6 @@ fun CoordinatorPortalShell(
         }
     }
 
-    // The coordinator's own faculty_master row and the classes they rule. Hoisted into the
-    // shell because the hero greeting, the profile sheet and the Settings tab all read it.
     var faculty by remember { mutableStateOf<FacultyMasterRow?>(null) }
     var coordinatorClasses by remember { mutableStateOf<List<MyCoordinatorClassView>>(emptyList()) }
 
@@ -171,8 +167,6 @@ fun CoordinatorPortalShell(
         val email = AuthRepository.currentUser?.email.orEmpty()
         val facultyResult = PortalRepository.getFacultyByUidOrEmail(userUid, email)
         val classesResult = PortalRepository.getMyCoordinatorClasses()
-        // A refresh that fails (typically while offline) keeps the last good profile and class
-        // list, so the tabs never blank out. The global offline gate explains the interruption.
         if (facultyResult.isSuccess) faculty = facultyResult.getOrNull()
         if (classesResult.isSuccess) coordinatorClasses = classesResult.getOrDefault(emptyList())
     }
@@ -185,16 +179,12 @@ fun CoordinatorPortalShell(
             ?: AuthRepository.currentUser?.email?.substringBefore('@')
     }
 
-    // Same rule as the student portal: "Welcome" on the first open of the day, "Hi !" after.
     val greeting = remember { GreetingStore.greeting() }
     val headerTitle = when (selectedTab) {
         CoordinatorTab.Overview -> "$greeting, ${firstNameOf(coordinatorName)}"
         else -> selectedTab.label
     }
 
-    // One accumulated offset for the hero, fed by the nested-scroll connection below. Works
-    // for LazyColumn and plain verticalScroll content alike, so every tab folds the same
-    // header the student portal folds.
     val foldDistancePx = with(LocalDensity.current) { 96.dp.toPx() }
     val headerOffset = remember { mutableFloatStateOf(0f) }
     val nestedScroll = remember(foldDistancePx) {
@@ -202,9 +192,6 @@ fun CoordinatorPortalShell(
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 val delta = available.y
                 if (delta == 0f) return Offset.Zero
-                // Dragging up (delta < 0) folds the hero; dragging down (delta > 0) unfolds it
-                // before the list starts moving. Once it is fully unfolded the drag passes
-                // through, which leaves pull-to-refresh free to take the over-pull.
                 val next = (headerOffset.floatValue - delta).coerceIn(0f, foldDistancePx)
                 val used = next - headerOffset.floatValue
                 if (used == 0f) return Offset.Zero
@@ -375,11 +362,6 @@ fun CoordinatorPortalShell(
     }
 }
 
-/**
- * Pull-to-refresh wrapper shared by every coordinator tab. Mirrors the student portal exactly:
- * the same gentle [HapticFeedbackType.LongPress] tap on the gesture, and the tab's shimmer
- * skeleton in place of its content for the duration of the refresh.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun CoordinatorRefreshBox(
@@ -397,7 +379,6 @@ internal fun CoordinatorRefreshBox(
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             scope.launch {
                 isRefreshing = true
-                // `finally` so a failed query still drops the skeleton instead of wedging it.
                 try {
                     onRefresh()
                 } finally {
@@ -411,9 +392,6 @@ internal fun CoordinatorRefreshBox(
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Coordinator's own profile sheet - the counterpart of the student profile sheet.
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 private fun CoordinatorProfileSheet(
@@ -578,9 +556,6 @@ private fun CoordinatorSheetRow(label: String, value: String, highlight: Boolean
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Bottom navigation - mirrors the student portal's light track / navy pill treatment.
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 private fun CoordinatorBottomBar(
@@ -675,7 +650,6 @@ fun CoordinatorOverviewView(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-        // --- 1. DAILY SUMMARY SNAPSHOT ---
         Text(
             text = "DAILY ACADEMIC SUMMARY",
             fontSize = 12.sp,
@@ -706,7 +680,6 @@ fun CoordinatorOverviewView(
             )
         }
 
-        // Summary Bar Card
         ElevatedCard(
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.elevatedCardColors(containerColor = SurfaceWhite),
@@ -737,7 +710,6 @@ fun CoordinatorOverviewView(
 
         Spacer(Modifier.height(8.dp))
 
-        // --- 2. RECENT ACTIVITIES & LEAVE APPLICATIONS ---
         Text(
             text = "RECENT ACTIVITIES & LEAVE REQUESTS",
             fontSize = 12.sp,
@@ -762,7 +734,6 @@ fun CoordinatorOverviewView(
 
         Spacer(Modifier.height(8.dp))
 
-        // --- 3. QUICK ACTIONS GRID ---
         Text(
             text = "QUICK MANAGEMENT ACTIONS",
             fontSize = 12.sp,

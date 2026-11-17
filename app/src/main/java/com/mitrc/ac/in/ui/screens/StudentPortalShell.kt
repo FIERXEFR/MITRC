@@ -121,46 +121,24 @@ import com.mitrc.ac.`in`.ui.theme.GoldLight
 import com.mitrc.ac.`in`.ui.theme.Navy
 import com.mitrc.ac.`in`.ui.theme.NavyDeep
 
-/** Everything the portal tabs need, loaded once in the shell and shared down. */
 data class StudentPortalData(
     val profile: StudentProfileView?,
     val subjects: List<ClassSubjectView>,
     val attendance: List<AttendanceSummaryView>,
     val marks: List<MarkView>,
     val timetable: List<MyTimetableEntryView>,
-    /** One entry per calendar day that had a marked period; empty until faculty mark attendance. */
     val dailyAttendance: List<DailyAttendance> = emptyList(),
     val error: String?,
-    /** `v_my_subject_cards` rows for this student - backs the "Contact Faculty" sheet. */
     val faculty: List<ClassSubjectView> = emptyList(),
-    /**
-     * Teacher-published PDFs from the `notes` table, already filtered down to the subjects this
-     * student is enrolled in - backs the Notes segment of the Academics tab.
-     */
     val pdfNotes: List<PortalPdfNote> = emptyList(),
-    /** Coordinator contact shown on the lock / PTM screen; null while the profile is active. */
     val coordinator: StudentCoordinatorContact? = null,
-    /**
-     * The student's real name resolved from the `students` row (never the email local part).
-     * Null only while the portal is still loading or when no name exists anywhere.
-     */
     val displayName: String? = null
 )
 
-/**
- * Fetches everything [StudentPortalShell] renders. Split out of the shell's [LaunchedEffect] so
- * the pull-to-refresh gestures can re-run it silently while the current data stays on screen.
- *
- * `getOrDefault` keeps one dead query (say a notes fetch that fails) from blanking the whole
- * portal; a failed profile still surfaces as [StudentPortalData.error] so the Retry screen shows.
- */
 private suspend fun loadPortalData(userUid: String): StudentPortalData {
     val profileResult = PortalRepository.getStudentProfile(userUid)
     val profile = profileResult.getOrNull()
 
-    // Greeting name: the `students` row is authoritative. Only when it has no name do we try a
-    // direct lookup (uid, then student_email) and finally the Firebase display name. The email's
-    // local part is never used - "Welcome, amit.yadav" is not this student's name.
     val displayName = profile?.name?.trim()?.takeIf { it.isNotEmpty() }
         ?: PortalRepository.getStudentName(
             uid = userUid,
@@ -171,9 +149,6 @@ private suspend fun loadPortalData(userUid: String): StudentPortalData {
     val classId = profile?.classId ?: 0
     val today = LocalDate.now()
 
-    // Everything below only needs the profile (for classId) and is independent of the other
-    // calls. Run them concurrently: before this change the shell fired eight or nine requests
-    // one after another, so the full-screen skeleton stayed up for the sum of every round trip.
     return coroutineScope {
         val subjectsDeferred = async {
             if (classId > 0) {
@@ -183,8 +158,6 @@ private suspend fun loadPortalData(userUid: String): StudentPortalData {
             }
         }
 
-        // Only needed for the lock / PTM screen; skipped for an active profile so the extra
-        // coordinator lookup never costs anything on the normal path.
         val coordinatorDeferred = async {
             if (profile?.isLocked == true || profile?.isPtm == true) {
                 PortalRepository.getStudentCoordinator(
@@ -201,9 +174,6 @@ private suspend fun loadPortalData(userUid: String): StudentPortalData {
             PortalRepository.getMyTimetable(classId.takeIf { it > 0 }).getOrDefault(emptyList())
         }
 
-        // Six months of day-by-day attendance powers the calendar's month navigation. The table
-        // pair is empty in fresh deployments, so this returns [] and the calendar falls back to
-        // holidays.
         val dailyAttendanceDeferred = async {
             PortalRepository.getStudentDailyAttendance(
                 uid = userUid,
@@ -219,7 +189,6 @@ private suspend fun loadPortalData(userUid: String): StudentPortalData {
             PortalRepository.getStudentMarks(userUid).getOrDefault(emptyList())
         }
         val notesDeferred = async {
-            // Notes live in their own table; the mapper drops rows outside this student's subjects.
             PortalRepository.getPublishedNotes(userUid, classId.takeIf { it > 0 })
                 .getOrDefault(emptyList())
         }
@@ -245,21 +214,12 @@ private suspend fun loadPortalData(userUid: String): StudentPortalData {
     }
 }
 
-/**
- * The student portal's own scaffold: a collapsible navy header, a fixed bottom navigation bar,
- * and one scrollable content slot that swaps between tabs.
- *
- * It is rendered by [HomeScreen] instead of HomeScreen's shared header/sign-out scaffolding, so
- * the teacher and co-ordinator paths are untouched.
- */
 @Composable
 fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
     var data by remember { mutableStateOf<StudentPortalData?>(null) }
     var showNotifications by remember { mutableStateOf(false) }
     var showProfile by remember { mutableStateOf(false) }
 
-    // A push tap that arrives while the portal is already open should land on
-    // the notifications sheet instead of only bringing the app forward.
     val openNotificationsRequest = NotificationOpenRequest.pending
     LaunchedEffect(openNotificationsRequest) {
         if (openNotificationsRequest) {
@@ -268,20 +228,14 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
         }
     }
 
-    // Session-local notebook for the student's own jottings (the `notes` table is for
-    // teacher-published PDFs instead). Hoisted here so switching tabs does not discard them.
     val notes = remember { mutableStateListOf<PortalNote>() }
 
-    // Portrait-locked in the manifest, but persisted anyway so a process death keeps the tab.
     var tabName by rememberSaveable { mutableStateOf(StudentTab.HOME.name) }
     val tab = StudentTab.fromName(tabName)
 
     var scheduleModeName by rememberSaveable { mutableStateOf(ScheduleMode.ATTENDANCE.name) }
     val scheduleMode = ScheduleMode.fromName(scheduleModeName)
 
-    // One scroll position per tab so switching tabs keeps each tab where the user left it.
-    // Academics gets one state per mode: the pager composes neighbouring pages at the same time,
-    // and two scrollables writing a single ScrollState fight over its value/maxValue.
     val homeScroll = rememberScrollState()
     val attendanceScroll = rememberScrollState()
     val timetableScroll = rememberScrollState()
@@ -290,10 +244,6 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
     val eventsScroll = rememberScrollState()
     val settingsScroll = rememberScrollState()
 
-    // The hero folds by consuming scroll deltas through nested scroll instead of mirroring the
-    // list offset. Mirroring scrolled the content and grew the viewport at the same time, so on
-    // the timetable the scroll range shrank under the current offset near the bottom and clamped
-    // back and forth - the double hitch. The coordinator portal already folds this way.
     val foldDistancePx = with(LocalDensity.current) { 96.dp.toPx() }
     val headerOffset = remember { mutableFloatStateOf(0f) }
     val headerNestedScroll = remember(foldDistancePx) {
@@ -301,8 +251,6 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 val delta = available.y
                 if (delta == 0f) return Offset.Zero
-                // Dragging up folds the hero; dragging down unfolds it before the list moves.
-                // Once it is fully unfolded the drag passes through to pull-to-refresh.
                 val next = (headerOffset.floatValue - delta).coerceIn(0f, foldDistancePx)
                 val used = next - headerOffset.floatValue
                 if (used == 0f) return Offset.Zero
@@ -314,8 +262,6 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
 
     LaunchedEffect(tab, scheduleMode) { headerOffset.floatValue = 0f }
 
-    // Reloadable: a transient failure (e.g. a token that expired mid-session) can be retried
-    // from the error screen instead of leaving the user stranded.
     var reloadKey by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
 
@@ -324,12 +270,6 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
         data = loadPortalData(userUid)
     }
 
-    // Silent re-fetch used by the pull-to-refresh gestures: the current data stays on screen
-    // instead of blanking out to the full-screen loading skeleton.
-    //
-    // A failed re-fetch (typically offline) must not replace a working portal with an empty
-    // one. Keep the last good snapshot and let the global offline gate explain the problem;
-    // the next successful refresh updates it as usual.
     val refreshData: suspend () -> Unit = {
         val latest = loadPortalData(userUid)
         val current = data
@@ -340,9 +280,6 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
         }
     }
 
-    // A locked profile, or a scheduled PTM, takes over the whole portal: no header, no tabs and
-    // no back out. The screen re-checks in the background and closes itself once the coordinator
-    // unlocks the profile.
     data?.profile?.takeIf { it.isLocked == true || it.isPtm == true }?.let { locked ->
         StudentLockScreen(
             profile = locked,
@@ -375,8 +312,6 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
             }
     }
 
-    // Back never exits the student portal: it closes any open overlay, otherwise returns to the
-    // Home tab; on Home itself the press is swallowed entirely.
     BackHandler {
         when {
             showNotifications -> showNotifications = false
@@ -409,16 +344,23 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
             ) {
                 val current = data
                 if (current == null) {
-                    // Load a skeleton that matches the tab the student is actually on, so the
-                    // Academics tab never shows the Home layout while attendance is loading.
-                    if (tab == StudentTab.ATTENDANCE && scheduleMode == ScheduleMode.ATTENDANCE) {
+                    val scheduleSkeletonScroll = when (scheduleMode) {
+                        ScheduleMode.ATTENDANCE -> attendanceScroll
+                        ScheduleMode.EXAMS -> examsScroll
+                        else -> null
+                    }
+                    if (tab == StudentTab.ATTENDANCE && scheduleSkeletonScroll != null) {
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .verticalScroll(attendanceScroll)
+                                .verticalScroll(scheduleSkeletonScroll)
                                 .padding(horizontal = 20.dp, vertical = 18.dp)
                         ) {
-                            AttendanceSkeleton()
+                            if (scheduleMode == ScheduleMode.EXAMS) {
+                                ResultsSkeleton()
+                            } else {
+                                AttendanceSkeleton()
+                            }
                         }
                     } else {
                         PortalLoading()
@@ -511,11 +453,6 @@ fun StudentPortalShell(userUid: String, onSignedOut: () -> Unit) {
 @Composable
 private fun rememberScrollState() = androidx.compose.foundation.rememberScrollState()
 
-// ---------------------------------------------------------------------------------------------
-// Header - navy gradient with the gold orb, matching the login and onboarding headers.
-// The hero text rolls up and fades as the tab's list scrolls; the bell and avatar stay pinned so
-// they remain reachable at any scroll position.
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 private fun PortalHeader(
@@ -527,13 +464,9 @@ private fun PortalHeader(
     onBellClick: () -> Unit,
     onAvatarClick: () -> Unit
 ) {
-    // "Welcome" the first open of the day, "HEY" for every later open - resolved once and
-    // held for the lifetime of the shell.
     val greeting = remember { GreetingStore.greeting() }
 
     val title = when {
-        // No placeholder text while loading: the hero shows a shimmer instead so a student is
-        // never greeted with a derived name that is about to be replaced.
         loading -> ""
 
         tab == StudentTab.HOME ->
@@ -548,21 +481,12 @@ private fun PortalHeader(
         title = title,
         name = name,
         scrolledPx = scrolledPx,
-        // The Settings tab already lists the profile in full, so the avatar duplicate is
-        // hidden there.
         showAvatar = tab != StudentTab.SETTINGS,
         onBellClick = onBellClick,
         onAvatarClick = onAvatarClick
     )
 }
 
-/**
- * The shared collapsible navy hero: identical logo, type scale, gold orb and fold distance in
- * both portals, so the coordinator header is not a lookalike but the same composable.
- *
- * [scrolledPx] is deliberately read *only* inside the layout / graphicsLayer lambdas - neither
- * is composition - so scrolling never recomposes the header.
- */
 @Composable
 internal fun PortalHeroHeader(
     overline: String,
@@ -578,20 +502,13 @@ internal fun PortalHeroHeader(
 
     val headerShape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
     val verticalPad = 6.dp
-    // Content budget: logo 16 + 4 + overline 12 + 3 + title 24 + 2 + date 13 = 74.
     val heroContentHeight = 74.dp
     val fullHeaderHeight = heroContentHeight + verticalPad * 2
 
     val density = LocalDensity.current
-    // The fold used to finish in 36.dp of scroll, which is why it snapped instead of rolling.
-    // It now takes ~96.dp, i.e. a little longer than the card is tall, so the whole collapse
-    // is one continuous gesture.
     val foldDistancePx = with(density) { 96.dp.toPx() }
     val fullHeaderHeightPx = with(density) { fullHeaderHeight.toPx() }
 
-    // The scroll offset is deliberately read *only* inside the offset / layer / measure
-    // lambdas: none of them are composition, so scrolling the list no longer recomposes the
-    // header on every frame. That per-frame recomposition was the source of the stutter.
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -624,8 +541,6 @@ internal fun PortalHeroHeader(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                // Draw-phase only: the roll-up and the fade happen on the graphics layer, so a
-                // scroll frame never re-lays out the hero column (nor recomposes the header).
                 .graphicsLayer {
                     val collapse = (scrolledPx() / foldDistancePx).coerceIn(0f, 1f)
                     translationY = -fullHeaderHeightPx * collapse
@@ -659,8 +574,6 @@ internal fun PortalHeroHeader(
 
                 AnimatedContent(
                     targetState = title,
-                    // Same rule as the tab switch: the old title leaves first (and slides clear),
-                    // then the new one rolls in, so two titles are never legible at the same time.
                     transitionSpec = {
                         (fadeIn(tween(340, delayMillis = 150)) +
                             slideInVertically(tween(400, delayMillis = 150)) { -it / 4 })
@@ -672,8 +585,6 @@ internal fun PortalHeroHeader(
                     label = "headerTitle"
                 ) { text ->
                     if (text.isBlank()) {
-                        // Placeholder sized like the headline so the hero never flashes a
-                        // derived name and doesn't jump when the real one arrives.
                         Box(
                             modifier = Modifier
                                 .padding(vertical = 3.dp)
@@ -709,8 +620,6 @@ internal fun PortalHeroHeader(
 
             Spacer(Modifier.width(8.dp))
 
-            // Pinned to the top with a fixed offset so their position relative to the hero
-            // column never shifts while the card folds.
             Box(modifier = Modifier.padding(top = 18.dp)) {
                 NotificationBell(unreadCount = unread, onClick = onBellClick)
             }
@@ -792,9 +701,6 @@ private fun StudentAvatar(name: String?, onClick: () -> Unit) {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Bottom navigation - the same light track / navy pill treatment as the login tab switcher.
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 private fun StudentBottomBar(
@@ -808,9 +714,6 @@ private fun StudentBottomBar(
     )
 }
 
-// ---------------------------------------------------------------------------------------------
-// Shared bottom sheet - scrim + slide-up, used by the profile and contact sheets.
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 internal fun PortalSheet(
@@ -838,15 +741,10 @@ internal fun PortalSheet(
         exit = slideOutVertically(tween(240)) { it },
         modifier = Modifier.fillMaxSize()
     ) {
-        // The drag state lives *inside* the visibility block, so it is thrown away together
-        // with the content: every time the sheet is reopened it starts back at offset 0.
         var dragOffset by remember { mutableStateOf(0f) }
         var dragging by remember { mutableStateOf(false) }
         val dragThresholdPx = with(LocalDensity.current) { 110.dp.toPx() }
 
-        // While the finger is down the value simply *is* the finger position (snap), so the
-        // card tracks the gesture with no lag. The moment the gesture ends the target becomes
-        // 0 and the same state object springs the card back to its resting position.
         val offsetY by animateFloatAsState(
             targetValue = if (dragging) dragOffset else 0f,
             animationSpec = if (dragging) {
@@ -860,8 +758,6 @@ internal fun PortalSheet(
             label = "sheetDragOffset"
         )
 
-        // If the sheet is dismissed mid-drag and reopened before the exit animation finishes,
-        // the content is still in composition - make sure it starts back at rest.
         LaunchedEffect(visible) {
             if (visible) {
                 dragging = false
@@ -880,24 +776,17 @@ internal fun PortalSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp)
-                    // Layout-phase read: the finger-tracking offset re-lays out only this card
-                    // and never recomposes the sheet.
                     .offset { IntOffset(0, offsetY.roundToInt()) }
                     .draggable(
                         state = rememberDraggableState { delta ->
-                            // Downward only - the sheet can never be pulled past its rest spot.
                             dragOffset = (dragOffset + delta).coerceAtLeast(0f)
                         },
                         orientation = Orientation.Vertical,
                         onDragStarted = { dragging = true },
                         onDragStopped = { velocity ->
                             if (dragOffset > dragThresholdPx || velocity > 2500f) {
-                                // Far enough down (or a confident flick): close the sheet and
-                                // leave the offset where the finger left it, so the card keeps
-                                // travelling down while the exit animation plays.
                                 onDismiss()
                             } else {
-                                // Not far enough: release the finger and spring back to rest.
                                 dragging = false
                                 dragOffset = 0f
                             }
@@ -909,10 +798,6 @@ internal fun PortalSheet(
                         onClick = {}
                     )
             ) {
-                // The inset is applied to the content, not the Surface: padding the Surface
-                // itself lifted the whole card above the nav bar and left a transparent gap
-                // underneath it. Now the card runs to the physical screen edge and only the
-                // content is kept clear of the system bars.
                 Box(modifier = Modifier.navigationBarsPadding()) {
                     SheetHandle()
                     content()
@@ -940,9 +825,6 @@ private fun SheetHandle() {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Profile sheet
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 private fun ProfileSheetContent(
@@ -1067,26 +949,17 @@ private fun SheetRow(label: String, value: String, highlight: Boolean = false) {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Loading / error
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 internal fun PortalLoading() {
     HomeTabSkeleton()
 }
 
-/**
- * Full-screen failure state. [message] is the raw exception text, so it is only shown when it
- * looks readable; auth failures in particular are mapped to something a student can act on.
- */
 @Composable
 internal fun PortalErrorState(message: String, onRetry: (() -> Unit)? = null) {
     val raw = message.lowercase()
     val isAuthProblem = listOf("jwt", "token", "unauthorized", "expired", "pgrst301")
         .any { marker -> raw.contains(marker) }
-    // PostgREST/Ktor surface connectivity failures as host/socket/timeout text. Map them to a
-    // readable offline message instead of showing the raw exception to the user.
     val isNetworkProblem = !isAuthProblem && listOf(
         "unable to resolve host",
         "unknownhost",
@@ -1158,7 +1031,6 @@ internal fun PortalErrorState(message: String, onRetry: (() -> Unit)? = null) {
     }
 }
 
-/** Signed in, but no `students` row is linked to this account yet. */
 @Composable
 internal fun PortalNoProfileState() {
     Box(
@@ -1199,9 +1071,6 @@ internal fun PortalNoProfileState() {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Notifications - opened from the bell, mocked for now.
-// ---------------------------------------------------------------------------------------------
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1248,9 +1117,6 @@ internal fun NotificationsScreen(onBack: () -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .background(PortalBackground)
-            // The overlay is drawn over the portal header, and a tap that lands on a non-clickable
-            // child (title text, the mark-all icon's padding) would otherwise fall through to the
-            // avatar underneath and pop the profile sheet. Consuming here stops that.
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1363,8 +1229,6 @@ private fun NotificationRow(item: PortalNotification) {
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 6.dp),
         modifier = Modifier
             .fillMaxWidth()
-            // The BOM's ElevatedCard has no border parameter, so the unread accent is drawn as a
-            // modifier border over the raised surface instead.
             .border(
                 width = 1.dp,
                 color = if (item.unread) accent.copy(alpha = 0.5f) else PortalStroke,
@@ -1447,7 +1311,6 @@ private fun NotificationRow(item: PortalNotification) {
     }
 }
 
-/** Small shared section label used by the portal tabs. */
 @Composable
 internal fun PortalSectionLabel(text: String, modifier: Modifier = Modifier) {
     Text(
@@ -1460,7 +1323,6 @@ internal fun PortalSectionLabel(text: String, modifier: Modifier = Modifier) {
     )
 }
 
-/** Small shared empty-state card used by the portal tabs. */
 @Composable
 internal fun PortalEmptyCard(message: String) {
     Surface(

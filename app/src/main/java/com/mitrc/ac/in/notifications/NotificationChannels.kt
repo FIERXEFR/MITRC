@@ -9,14 +9,6 @@ import android.net.Uri
 import android.os.Build
 import com.mitrc.ac.`in`.R
 
-/**
- * Two Android channels so urgent notices can vibrate and heads-up while routine
- * announcements stay quieter. Created once from [com.mitrc.ac.in.MITRCApplication].
- *
- * Both channels use the app's custom notification sound
- * (`res/raw/startnotifi.wav`). Android freezes a channel's sound when it is first
- * created, so this must be set before the channel is ever created on a device.
- */
 object NotificationChannels {
 
     const val ALERTS = "mitrc_alerts"
@@ -52,7 +44,6 @@ object NotificationChannels {
             NOTICES
         }
 
-    /** `android.resource://<package>/<resId>` is the form Android accepts for channel sounds. */
     private fun notificationSound(context: Context): Uri = Uri.parse(
         "${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/${R.raw.startnotifi}"
     )

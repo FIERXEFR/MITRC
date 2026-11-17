@@ -28,23 +28,11 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.util.concurrent.TimeUnit
 
-/**
- * Uploads files to the account-wide Google Drive bucket through the `drive-storage` Edge
- * Function. Google credentials live only in Supabase function secrets - the app authenticates
- * with its Firebase ID token and never handles the client secret or refresh token.
- *
- * Uploads are resumable: the function creates a Drive upload session and the bytes go straight
- * from the phone to Google, so large PDFs are not proxied or held in function memory.
- *
- * Drive is blob storage, not a database: persist the returned [StoredFile.url] in Supabase
- * (`notes.drive_url`, `notifications.image_url`, ...) and read it back from there.
- */
 object GoogleDriveStorage {
 
     private const val TAG = "GoogleDriveStorage"
     private const val FUNCTION_NAME = "drive-storage"
 
-    /** Hard ceiling for a single upload; keeps the resumable PUT's body out of OOM territory. */
     private const val MAX_UPLOAD_BYTES = 50L * 1024 * 1024
 
     data class StoredFile(
@@ -73,11 +61,6 @@ object GoogleDriveStorage {
         }
     }
 
-    /**
-     * Uploads [uri] into [folder] (a path under the bucket root, e.g. "Notes", "Events",
-     * "Profiles"). The function creates missing folders and shares the file as "anyone with
-     * the link" when [makePublic] is true.
-     */
     suspend fun upload(
         context: Context,
         uri: Uri,
@@ -95,8 +78,6 @@ object GoogleDriveStorage {
             fileName ?: resolver.displayName(uri) ?: "upload_${System.currentTimeMillis()}"
         )
 
-        // Read once into memory for the resumable PUT. Refuse absurdly large files instead of
-        // risking an OutOfMemoryError on a low-end phone.
         val declaredSize = withContext(Dispatchers.IO) {
             runCatching { resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } }
                 .getOrNull() ?: -1L
@@ -173,7 +154,6 @@ object GoogleDriveStorage {
     }
 
     suspend fun list(folder: String): Result<List<StoredFile>> = runCatching {
-        // `list` returns an array, which the shared flat response model does not cover.
         val token = firebaseToken()
         val response = client.post(endpoint()) {
             header(HttpHeaders.Authorization, "Bearer $token")
@@ -192,7 +172,6 @@ object GoogleDriveStorage {
         ).map { it.toStoredFile() }
     }
 
-    /** Verifies the Google credentials and returns the bucket's root folder id. */
     suspend fun health(): Result<String> = runCatching {
         val response = post(UploadRequest(action = "health"))
         val root = response.rootFolderId ?: error("Drive health check returned no root folder id.")
@@ -200,7 +179,6 @@ object GoogleDriveStorage {
         root
     }
 
-    // ---------------------------------------------------------------------------------------
 
     private suspend fun post(request: UploadRequest): FunctionResponse {
         val token = firebaseToken()
@@ -270,7 +248,6 @@ object GoogleDriveStorage {
         else -> "application/octet-stream"
     }
 
-    // ---------------------------------------------------------------------------------------
 
     @Serializable
     private data class UploadRequest(
@@ -314,7 +291,6 @@ object GoogleDriveStorage {
         }
     }
 
-    /** Same shape as [FunctionResponse], used when decoding the `files` array. */
     @Serializable
     private data class StoredFileDto(
         val fileId: String,

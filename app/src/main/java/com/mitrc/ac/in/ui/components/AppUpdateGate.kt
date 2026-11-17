@@ -96,12 +96,6 @@ private sealed interface GateState {
     data class SmallUpdate(val row: AppUpdateRow) : GateState
 }
 
-/**
- * Startup/resume gate for maintenance and release control.
- *
- * Add it once at the root of the normal app activity. The admin activity intentionally bypasses
- * it, so an administrator can still sign in and turn maintenance off if the app is blocked.
- */
 @Composable
 fun AppUpdateGate() {
     val context = LocalContext.current
@@ -139,8 +133,6 @@ fun AppUpdateGate() {
         resolveGateState(context, config, smallSeenVersion, dismissedBigVersion)
     }
 
-    // If maintenance has an end time, poll while it is showing so the app recovers without a
-    // force-stop once the administrator clears it.
     val maintenanceShowing = state is GateState.Maintenance
     LaunchedEffect(maintenanceShowing) {
         if (maintenanceShowing) {
@@ -188,8 +180,6 @@ private fun resolveGateState(
 ): GateState {
     if (config == null) return GateState.Clear
 
-    // Maintenance lives in its own row (id 2). It wins over any pending update so a
-    // half-published release can never be shown on top of a maintenance window.
     val maintenanceRow = config.maintenance
     if (maintenanceRow != null &&
         maintenanceRow.isMaintenance &&
@@ -198,7 +188,6 @@ private fun resolveGateState(
         return GateState.Maintenance(maintenanceRow)
     }
 
-    // Release lives in its own row (id 1).
     val row = config.update ?: return GateState.Clear
     val status = row.appStatus?.trim()?.lowercase().orEmpty()
     if (status in setOf("inactive", "disabled", "draft", "off", "false")) return GateState.Clear
@@ -226,9 +215,6 @@ private fun isMaintenanceExpired(until: String?): Boolean {
     }.getOrDefault(false)
 }
 
-// ---------------------------------------------------------------------------------------------
-// Maintenance
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 private fun MaintenanceDialog(row: AppUpdateRow, onRetry: () -> Unit) {
@@ -247,7 +233,6 @@ private fun MaintenanceDialog(row: AppUpdateRow, onRetry: () -> Unit) {
                 .fillMaxSize()
                 .background(Brush.verticalGradient(listOf(NavyDeep, Navy, Color(0xFF002E57))))
         ) {
-            // Soft light pools keep the full-screen gate from reading as a flat slab.
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -411,9 +396,6 @@ private fun MaintenanceDialog(row: AppUpdateRow, onRetry: () -> Unit) {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Update dialogs
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 private fun BigUpdateDialog(

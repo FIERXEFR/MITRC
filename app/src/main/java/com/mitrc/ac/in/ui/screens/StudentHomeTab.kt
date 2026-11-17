@@ -66,13 +66,7 @@ import com.mitrc.ac.`in`.ui.theme.GoldLight
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// ---------------------------------------------------------------------------------------------
-// Home tab
-// ---------------------------------------------------------------------------------------------
 
-// The stack-up entrance plays once per process; coming back to the Home tab shows the cards
-// in place rather than replaying the whole stagger (replaying it was the source of the
-// stutter on every tab switch).
 private var homeEntrancePlayed = false
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -92,7 +86,6 @@ fun StudentHomeTab(
         homeEntrancePlayed = true
         first
     }
-    // `attended` / `total` come back as Long from the view model; the UI works in Int.
     val totalAttended = remember(data.attendance) { data.attendance.sumOf { it.attended }.toInt() }
     val totalClasses = remember(data.attendance) { data.attendance.sumOf { it.total }.toInt() }
     val missed = (totalClasses - totalAttended).coerceAtLeast(0)
@@ -111,7 +104,6 @@ fun StudentHomeTab(
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             scope.launch {
                 isRefreshing = true
-                // `finally` so a failed query still drops the spinner instead of wedging it.
                 try {
                     onReload()
                 } finally {
@@ -163,21 +155,8 @@ fun StudentHomeTab(
     }
 }
 
-/**
- * Stack-up entrance for the home cards.
- *
- * The whole list is laid out on the very first frame and only the *draw* layer is animated
- * (alpha + a small Y translate). Nothing is added to or removed from the layout while the
- * animation runs, so the scroll column never re-measures mid-flight: no dropped frames, no
- * jitter when the user flips back to the Home tab.
- *
- * [animate] is false after the first reveal, so returning to the tab shows the cards already
- * in place instead of replaying the whole stagger.
- */
 @Composable
 private fun Stagger(index: Int, animate: Boolean, content: @Composable () -> Unit) {
-    // animateFloatAsState starts at whatever target the first composition reports, so the
-    // target must begin at 0 for the animation to run at all.
     var revealed by remember { mutableStateOf(!animate) }
     if (animate) {
         LaunchedEffect(Unit) { revealed = true }
@@ -203,9 +182,6 @@ private fun Stagger(index: Int, animate: Boolean, content: @Composable () -> Uni
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Stat row
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 private fun StatRow(todayPresent: Int, attended: Int, missed: Int) {
@@ -265,9 +241,6 @@ private fun StatCell(
 
 
 
-// ---------------------------------------------------------------------------------------------
-// Overall attendance - donut + weekly bars
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 private fun OverallAttendanceCard(percent: Double, attended: Int, total: Int) {
@@ -430,9 +403,6 @@ private fun WeekBars() {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// College events - auto-advancing carousel
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 private fun EventsSection(events: List<CollegeEvent>, onSeeAll: () -> Unit) {
@@ -603,17 +573,12 @@ private fun EventCard(event: CollegeEvent) {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Quick access
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 private fun QuickAccessGrid(
     actions: List<QuickAction>,
     onNavigate: (StudentTab, ScheduleMode?) -> Unit
 ) {
-    // A single root container: this sits inside Stagger's Box, where sibling composables would
-    // stack on top of each other and the grid would cover its own heading.
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = "Quick Access",
@@ -696,9 +661,6 @@ private fun QuickActionCard(
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Warning + quote
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 private fun LowAttendanceBanner(percent: Double, attended: Int, total: Int) {

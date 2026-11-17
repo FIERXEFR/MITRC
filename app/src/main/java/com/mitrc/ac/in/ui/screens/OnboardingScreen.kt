@@ -333,7 +333,6 @@ private fun PageIndicator(pagerState: PagerState, pageCount: Int) {
                     .height(8.dp)
                     .width(26.dp) 
                     .drawBehind {
-                        // Read scroll progress in DRAW phase to avoid Row recomposition jitter
                         val progress = pagerState.currentPage + pagerState.currentPageOffsetFraction
                         val active = (1f - abs(index - progress)).coerceIn(0f, 1f)
                         val pillWidth = 8.dp.toPx() + 18.dp.toPx() * active
@@ -358,9 +357,6 @@ private fun OnboardingPageView(
     pageIndex: Int,
     modifier: Modifier = Modifier
 ) {
-    // 1. PERFORMANCE: Manually manage entrance progress with Animatable.
-    // Reading pagerState.currentPage directly in composition body triggers 
-    // recomposition of the whole page content. We avoid this using snapshotFlow.
     val entranceAnim = remember { Animatable(0f) }
     
     LaunchedEffect(pagerState, pageIndex) {
@@ -374,7 +370,6 @@ private fun OnboardingPageView(
             }
     }
 
-    // 2. PERFORMANCE: Pre-calculate density-dependent constants to save CPU cycles in graphicsLayer
     val density = LocalDensity.current
     val parallaxDist = remember(density) { with(density) { (-45).dp.toPx() } }
     val drift10 = remember(density) { with(density) { 10.dp.toPx() } }
@@ -386,7 +381,6 @@ private fun OnboardingPageView(
 
     Card(
         modifier = modifier.graphicsLayer {
-            // All pager state reads are now isolated within draw-phase-only lambdas
             val pageOffset = (pageIndex - pagerState.currentPage) - pagerState.currentPageOffsetFraction
             val absOffset = abs(pageOffset)
             
@@ -446,7 +440,6 @@ private fun OnboardingPageView(
                     .fillMaxWidth()
                     .padding(start = 24.dp, end = 24.dp, top = 22.dp, bottom = 26.dp)
             ) {
-                // Rule line indicator
                 Box(
                     modifier = Modifier
                         .width(44.dp)
@@ -468,7 +461,6 @@ private fun OnboardingPageView(
                 )
                 Spacer(Modifier.height(14.dp))
 
-                // Eyebrow
                 Text(
                     text = page.eyebrow,
                     color = TextSecondary,
@@ -488,7 +480,6 @@ private fun OnboardingPageView(
                 )
                 Spacer(Modifier.height(6.dp))
 
-                // Title
                 Text(
                     text = page.title,
                     style = MaterialTheme.typography.headlineMedium,
@@ -506,7 +497,6 @@ private fun OnboardingPageView(
                 )
                 Spacer(Modifier.height(10.dp))
 
-                // Description
                 Text(
                     text = page.description,
                     style = MaterialTheme.typography.bodyLarge,

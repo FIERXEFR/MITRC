@@ -100,9 +100,6 @@ import kotlinx.coroutines.launch
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
-// ---------------------------------------------------------------------------------------------
-// Skeletons
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 private fun SkeletonBlock(
@@ -209,9 +206,6 @@ internal fun AdminSearchSkeleton() {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Dashboard
-// ---------------------------------------------------------------------------------------------
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -517,9 +511,6 @@ private fun AdminSectionLabel(text: String) {
     )
 }
 
-// ---------------------------------------------------------------------------------------------
-// Search
-// ---------------------------------------------------------------------------------------------
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -574,7 +565,7 @@ internal fun AdminSearchTab(
         }
 
         loading = true
-        delay(300) // debounce while the admin types
+        delay(300)
         if (isStaff) {
             AdminRepository.searchStaff(term).fold(
                 onSuccess = { staff = it },
@@ -845,7 +836,6 @@ private fun SearchEmptyState(title: String, detail: String) {
 @Composable
 private fun StudentResultCard(
     student: StudentProfileView,
-    /** The "recently added" list shows when the row was created. */
     showAddedAt: Boolean = false,
 ) {
     val classLine = listOfNotNull(
@@ -917,7 +907,6 @@ private fun StudentResultCard(
 @Composable
 private fun StaffResultCard(
     person: StaffDirectoryView,
-    /** The "recently added" list shows when the row was created. */
     showAddedAt: Boolean = false,
 ) {
     val displayName = person.displayName?.trim()?.takeIf { it.isNotEmpty() }
@@ -1019,9 +1008,6 @@ private fun ResultBadge(label: String, color: Color) {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Settings
-// ---------------------------------------------------------------------------------------------
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1215,9 +1201,6 @@ private fun SettingsRow(icon: ImageVector, title: String, value: String) {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------------------------
 
 internal fun initialsOf(name: String?): String {
     val parts = name?.trim()?.split(Regex("\\s+"))?.filter { it.isNotBlank() }.orEmpty()
@@ -1230,7 +1213,6 @@ internal fun initialsOf(name: String?): String {
 
 private val addedAtFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy")
 
-/** `2026-11-04T10:24:22.095229+00:00` -> `04 Nov 2026`; null when the timestamp is missing. */
 private fun formatAddedAt(raw: String?): String? {
     val text = raw?.trim().orEmpty()
     if (text.isEmpty()) return null

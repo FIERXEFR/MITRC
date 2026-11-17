@@ -6,10 +6,6 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import com.mitrc.ac.`in`.R
 
-/**
- * Bundled across all devices so glyphs, widths and line breaks never vary by OEM
- * (Pixel ships Roboto, Samsung One UI Sans, Xiaomi MiSans, etc.).
- */
 val MitrcFontFamily = FontFamily(
     Font(R.font.plus_jakarta_sans_extralight, FontWeight.ExtraLight, FontStyle.Normal),
     Font(R.font.plus_jakarta_sans_extralight_italic, FontWeight.ExtraLight, FontStyle.Italic),

@@ -24,11 +24,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
 
-/**
- * Shimmer skeletons for the coordinator portal. They mirror the real layouts (same card
- * heights, radii and paddings) so a pull-to-refresh swaps content for a preview of itself
- * instead of a spinner.
- */
 
 @Composable
 private fun SkeletonBlock(

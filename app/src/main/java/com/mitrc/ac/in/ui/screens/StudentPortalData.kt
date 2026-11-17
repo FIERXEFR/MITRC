@@ -66,13 +66,6 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-// ---------------------------------------------------------------------------------------------
-// Portal palette.
-//
-// Every value here is a straight reference to the existing MITRC theme (see ui/theme/Color.kt),
-// so the student portal renders in exactly the same Navy + Gold language as the onboarding and
-// login screens. Nothing here introduces a new colour.
-// ---------------------------------------------------------------------------------------------
 
 val PortalBackground = Slate
 val PortalCard = SurfaceWhite
@@ -82,30 +75,16 @@ val PortalTextPrimary = TextPrimary
 val PortalTextSecondary = TextSecondary
 val PortalTrack = DividerSoft
 
-/** Primary accent - matches the login chip / button navy. */
 val PortalBlue = Navy
-/** Secondary accent. */
 val PortalPurple = NavySoft
-/** Caution accent - gold is only ever used behind icons, borders or on navy, never as body text. */
 val PortalAmber = Gold
-/** Highlight accent for category chips. */
 val PortalCyan = GoldDeep
 val PortalRose = ErrorRed
 val PortalGreen = SuccessGreen
 
-/**
- * Skeleton fill - a mid grey so the block is actually visible against a white portal card.
- * (The old value was `Slate`, i.e. white-on-white in light theme.)
- */
 val PortalSkeletonBase = DividerSoft
-/** The darker grey band that sweeps across [PortalSkeletonBase] during a shimmer. */
 val PortalSkeletonShine = DarkTextMuted
 
-/**
- * Formats a `students.ptm_schedule` timestamp for display. PostgREST returns ISO-8601 with an
- * offset (`2026-10-22T10:30:00+00:00`) or a `Z`; anything unparsable is shown verbatim so the
- * scheduled time is never silently hidden.
- */
 internal fun formatPtmSchedule(raw: String?): String? {
     val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
     val instant = runCatching { OffsetDateTime.parse(value).toInstant() }
@@ -116,21 +95,12 @@ internal fun formatPtmSchedule(raw: String?): String? {
         .format(DateTimeFormatter.ofPattern("EEE, dd MMM yyyy â€¢ hh:mm a", Locale.getDefault()))
 }
 
-/**
- * Optional shared shimmer clock.
- *
- * A skeleton screen can provide one [State] here so every block on that screen shares a single
- * animation instead of starting its own infinite transition. That matters on launch/refresh where
- * 20+ blocks are on screen at once: separate transitions used to recompose every block on every
- * frame, which is exactly the kind of work that makes a cold start and a refresh feel janky.
- */
 internal val LocalShimmerProgress = staticCompositionLocalOf<State<Float>?> { null }
 
 @Composable
 private fun rememberShimmerProgress(): State<Float> {
     val transition = rememberInfiniteTransition(label = "shimmerTransition")
     return transition.animateFloat(
-        // -1f .. 2f puts the band fully off one edge at each end, so it never pops into view.
         initialValue = -1f,
         targetValue = 2f,
         animationSpec = infiniteRepeatable(
@@ -141,17 +111,6 @@ private fun rememberShimmerProgress(): State<Float> {
     )
 }
 
-/**
- * Reusable shimmer modifier for skeleton previews across all cards & screens.
- *
- * Draws a mid-grey block with a darker slate band travelling across it, left to right. The band
- * is deliberately darker than the base rather than lighter - a light highlight only shows up on a
- * dark surface, which is why the previous near-white pulse was invisible in light theme.
- *
- * The animation value is read inside `drawBehind` (the draw phase), not during composition, so a
- * moving band only invalidates drawing for that block. If a parent provided [LocalShimmerProgress]
- * all blocks share one clock; otherwise this block falls back to its own transition.
- */
 @Composable
 fun Modifier.shimmerEffect(): Modifier {
     val sharedProgress = LocalShimmerProgress.current
@@ -172,7 +131,6 @@ fun Modifier.shimmerEffect(): Modifier {
     }
 }
 
-/** The four fixed destinations in the bottom navigation bar. */
 enum class StudentTab(val label: String, val icon: ImageVector) {
     HOME("Home", Icons.Outlined.Home),
     ATTENDANCE("Academics", Icons.Outlined.Checklist),
@@ -185,7 +143,6 @@ enum class StudentTab(val label: String, val icon: ImageVector) {
     }
 }
 
-/** Attendance, weekly timetable, study notes and exam results share one navigation entry. */
 enum class ScheduleMode(val label: String) {
     ATTENDANCE("Attendance"),
     TIMETABLE("Timetable"),
@@ -198,9 +155,6 @@ enum class ScheduleMode(val label: String) {
     }
 }
 
-/**
- * One student note.
- */
 data class PortalNote(
     val id: Long,
     val title: String,
@@ -208,9 +162,6 @@ data class PortalNote(
     val createdAt: Long = System.currentTimeMillis()
 )
 
-/**
- * Teacher-published PDF note / study resource.
- */
 data class PortalPdfNote(
     val id: Int,
     val classSubjectId: Int = 0,
@@ -218,16 +169,12 @@ data class PortalPdfNote(
     val subjectCode: String,
     val title: String,
     val description: String?,
-    val category: String, // 'notes', 'assignment', 'question_paper', 'syllabus', 'lab_manual', 'other'
+    val category: String,
     val driveUrl: String,
     val teacherName: String,
     val createdAt: String
 )
 
-/**
- * One card in the Notes segment: the faculty member, the subject they teach this class and the
- * chapter-wise notes published for it.
- */
 data class FacultyNotesGroup(
     val subjectName: String,
     val subjectCode: String,
@@ -235,15 +182,9 @@ data class FacultyNotesGroup(
     val teacherEmail: String?,
     val chapters: List<PortalPdfNote>
 ) {
-    /** Stable identity for expand/collapse state, independent of list order. */
     val key: String get() = "$subjectCode|$subjectName|$teacherName"
 }
 
-/**
- * Groups published notes into one card per enrolled subject, in the student's enrolment order.
- * Anything that cannot be matched to an enrolled subject still gets its own card so notes never
- * silently disappear.
- */
 fun buildFacultyNoteGroups(
     subjects: List<ClassSubjectView>,
     notes: List<PortalPdfNote>
@@ -288,23 +229,10 @@ fun buildFacultyNoteGroups(
     return groups
 }
 
-/** Units first (Unit 1, Unit 2, ...), then assignments, papers and other material. */
 private fun List<PortalPdfNote>.sortedChapters(): List<PortalPdfNote> =
     sortedWith(compareBy({ !it.title.startsWith("Unit ", ignoreCase = true) }, { it.title }))
 
-// ---------------------------------------------------------------------------------------------
-// notes table -> card model
-// ---------------------------------------------------------------------------------------------
 
-/**
- * Turns raw `notes` rows into the card model the Notes segment renders.
- *
- * Only rows whose `class_subject_id` belongs to one of this student's enrolled subjects survive,
- * so nobody sees material for a subject they do not attend. Subject name / code come from the
- * enrolment row and the teacher's name from `v_subject_teachers`; a row that cannot be resolved
- * to a subject is dropped rather than rendered with a blank header. Newest first, which matches
- * the `notes_class_subject_id_created_at_idx` index the query is planned against.
- */
 fun List<NoteRow>.toPortalPdfNotes(
     subjects: List<ClassSubjectView>
 ): List<PortalPdfNote> {
@@ -312,7 +240,7 @@ fun List<NoteRow>.toPortalPdfNotes(
 
     val enrolledBySubjectId = subjects.associateBy { it.classSubjectId }
 
-    return sortedByDescending { it.createdAt.orEmpty() } // ISO-8601 sorts correctly as plain text
+    return sortedByDescending { it.createdAt.orEmpty() }
         .mapNotNull { row ->
             val subject = enrolledBySubjectId[row.classSubjectId]
             if (!row.isVisible) return@mapNotNull null
@@ -362,7 +290,6 @@ fun List<com.mitrc.ac.`in`.data.VNoteView>.toPortalPdfNotes(
         }
 }
 
-/** `2026-09-20T11:32:00+00:00` -> `20 Sep 2026`; anything unparseable is passed through. */
 private fun formatNoteDate(raw: String?): String {
     val iso = raw?.trim().orEmpty()
     if (iso.isEmpty()) return ""
@@ -377,9 +304,6 @@ private fun formatNoteDate(raw: String?): String {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// College events - the auto-advancing carousel on the Home tab.
-// ---------------------------------------------------------------------------------------------
 
 data class CollegeEvent(
     val id: Int,
@@ -390,10 +314,6 @@ data class CollegeEvent(
     val image: Any
 )
 
-/**
- * Event feed shared by the Home carousel and the Events tab, so both surfaces show the same
- * cards. The posters are the college's own event artwork.
- */
 fun sampleCollegeEvents(): List<CollegeEvent> = listOf(
     CollegeEvent(
         id = 1,
@@ -453,9 +373,6 @@ fun sampleCollegeEvents(): List<CollegeEvent> = listOf(
     )
 )
 
-// ---------------------------------------------------------------------------------------------
-// Notifications - opened from the bell in the header. Some carry an image, some do not.
-// ---------------------------------------------------------------------------------------------
 
 enum class NotificationTone { INFO, ALERT, SUCCESS }
 
@@ -524,9 +441,6 @@ fun sampleNotifications(): List<PortalNotification> = listOf(
     )
 )
 
-// ---------------------------------------------------------------------------------------------
-// Quick access tiles - each one is wired to a real tab, so they actually navigate.
-// ---------------------------------------------------------------------------------------------
 
 data class QuickAction(
     val title: String,
@@ -570,9 +484,6 @@ fun sampleQuickActions(): List<QuickAction> = listOf(
     )
 )
 
-// ---------------------------------------------------------------------------------------------
-// Small presentation helpers
-// ---------------------------------------------------------------------------------------------
 
 fun todayLabel(): String =
     SimpleDateFormat("EEE, dd MMM yyyy", Locale.getDefault()).format(Date())
@@ -583,41 +494,26 @@ fun firstNameOf(fullName: String?): String {
     return trimmed.split(Regex("\\s+")).first()
 }
 
-/**
- * Name shown on the portal header and avatar.
- *
- * The `students` row is the only authority: the app must never greet a student with the local
- * part of their email address. [StudentPortalShell] resolves the database name into
- * `StudentPortalData.displayName`, so this stays a last-resort label.
- */
 fun portalDisplayName(profile: StudentProfileView?): String {
     profile?.name?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
     return "Student"
 }
 
-/** 1 = Monday ... 7 = Sunday, matching `MyTimetableEntryView.dayOfWeek`. */
 fun currentDayOfWeek(): Int = Calendar.getInstance().get(Calendar.DAY_OF_WEEK).let {
     if (it == Calendar.SUNDAY) 7 else it - 1
 }
 
-/** Deterministic stub data behind the streak card. */
 val streakDays: List<Pair<String, Boolean>>
     get() = listOf(
         "Mon" to true, "Tue" to true, "Wed" to true,
         "Thu" to true, "Fri" to true, "Sat" to true, "Sun" to false
     )
 
-/** Attendance for each of the last 7 days, used by the small bar chart. */
 val weekBars: List<Pair<String, Int>>
     get() = listOf("Mon" to 7, "Tue" to 6, "Wed" to 6, "Thu" to 5, "Fri" to 6, "Sat" to 4, "Sun" to 0)
 
-/** Current and best consecutive-present runs shown on the attendance streak card. */
 data class AttendanceStreak(val current: Int, val best: Int)
 
-/**
- * Counts consecutive attended days over the days that actually had a marked period. Days with no
- * records (weekends, holidays, days faculty have not marked yet) neither extend nor break a run.
- */
 fun attendanceStreak(days: List<DailyAttendance>): AttendanceStreak {
     val states = days
         .mapNotNull { day ->
@@ -637,11 +533,9 @@ fun attendanceStreak(days: List<DailyAttendance>): AttendanceStreak {
         }
     }
 
-    // `run` after the loop is the streak ending at the most recently marked day.
     return AttendanceStreak(current = run, best = best)
 }
 
-/** Placeholder entries for the notebook's "Saved notes" list. */
 fun samplePersonalNotes(): List<PortalNote> = listOf(
     PortalNote(
         id = 9001,
@@ -660,9 +554,6 @@ fun samplePersonalNotes(): List<PortalNote> = listOf(
     )
 )
 
-// ---------------------------------------------------------------------------------------------
-// Skeleton Previews for Cards across Home, Events & Notifications
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 fun EventCardSkeleton() {
@@ -775,7 +666,6 @@ fun HomeTabSkeleton() {
             .fillMaxSize()
             .padding(horizontal = 20.dp, vertical = 18.dp)
     ) {
-        // Stat row skeleton
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -813,7 +703,6 @@ fun HomeTabSkeleton() {
         }
         Spacer(Modifier.height(14.dp))
 
-        // Streak card skeleton
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = PortalCard,
@@ -850,7 +739,6 @@ fun HomeTabSkeleton() {
         }
         Spacer(Modifier.height(14.dp))
 
-        // Overall attendance card skeleton
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = PortalCard,
@@ -893,7 +781,6 @@ fun HomeTabSkeleton() {
         }
         Spacer(Modifier.height(20.dp))
 
-        // Events carousel skeleton
         EventCardSkeleton()
     }
 }

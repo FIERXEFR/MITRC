@@ -81,7 +81,6 @@ import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -142,6 +141,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 @Composable
 private fun PortalTabScaffold(
@@ -232,9 +232,6 @@ fun StudentScheduleTab(
             )
             Spacer(Modifier.height(18.dp))
 
-            // Tapping the segmented control is the only way to change the segment: a swipe
-            // belongs to the portal's own tab pager, and nesting two horizontal pagers left the
-            // outer one stranded between Home and Academics.
             HorizontalPager(
                 state = schedulePagerState,
                 beyondViewportPageCount = 1,
@@ -259,7 +256,7 @@ fun StudentScheduleTab(
                             notes = notes,
                             loading = isRefreshing
                         )
-                        ScheduleMode.EXAMS -> ExamsResultsContent(data = data)
+                        ScheduleMode.EXAMS -> ExamsResultsContent(data = data, loading = isRefreshing)
                     }
                 }
             }
@@ -327,8 +324,6 @@ private fun AttendanceContent(
     val streak = remember(data.dailyAttendance) { attendanceStreak(data.dailyAttendance) }
     var visibleMonth by remember { mutableStateOf(YearMonth.from(today)) }
 
-    // Every assigned subject gets a card, even before any attendance is marked for it. The summary
-    // view only returns subjects that already have records, so it is merged onto the enrolment list.
     val attendanceBySubject = remember(data.attendance) {
         data.attendance.associateBy { it.classSubjectId }
     }
@@ -384,7 +379,6 @@ private fun AttendanceContent(
     }
 }
 
-/** Shimmer preview that mirrors the Attendance tab while it loads or refreshes. */
 @Composable
 internal fun AttendanceSkeleton() {
     Column {
@@ -617,7 +611,6 @@ internal fun AttendanceSkeleton() {
     }
 }
 
-/** Overall percentage: a ring instead of a flat badge, plus the classes needed to clear 75%. */
 @Composable
 private fun AttendanceSummaryCard(attended: Long, total: Long, pct: Double) {
     val onTrack = pct >= 75.0
@@ -634,7 +627,7 @@ private fun AttendanceSummaryCard(attended: Long, total: Long, pct: Double) {
             modifier = Modifier.padding(18.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AttendanceRing(
+            PortalProgressRing(
                 percent = pct,
                 color = accent,
                 diameter = 78.dp,
@@ -680,16 +673,14 @@ private fun AttendanceSummaryCard(attended: Long, total: Long, pct: Double) {
     }
 }
 
-/** Extra classes required before `attended / total` reaches 75%. */
 private fun classesNeededFor75(attended: Long, total: Long): Long {
     if (total <= 0L) return 0L
     if (attended * 100.0 / total >= 75.0) return 0L
     return ceil((0.75 * total - attended) / 0.25).toLong().coerceAtLeast(1L)
 }
 
-/** Rounded ring progress with the percentage centred inside. */
 @Composable
-private fun AttendanceRing(
+private fun PortalProgressRing(
     percent: Double,
     label: String = "${percent.toInt()}%",
     color: Color,
@@ -700,7 +691,7 @@ private fun AttendanceRing(
     val sweep by animateFloatAsState(
         targetValue = (percent / 100.0).toFloat().coerceIn(0f, 1f),
         animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing),
-        label = "attendanceRing"
+        label = "portalRing"
     )
 
     Box(modifier = Modifier.size(diameter), contentAlignment = Alignment.Center) {
@@ -738,14 +729,9 @@ private fun AttendanceRing(
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Attendance calendar - present days filled green, absent filled red, Sundays a red holiday dot
-// and other institute holidays a blue dot.
-// ---------------------------------------------------------------------------------------------
 
 private val weekdayShortLabels = listOf("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
 
-/** Fixed-date institute holidays (MM-DD); festival dates vary yearly and are not guessed here. */
 private val instituteHolidays = setOf("01-01", "01-26", "05-01", "08-15", "10-02", "12-25")
 
 private fun isInstituteHoliday(date: LocalDate): Boolean =
@@ -847,7 +833,7 @@ private fun CalendarMonthGrid(
     today: LocalDate,
     days: Map<LocalDate, DailyAttendance>
 ) {
-    val leadingBlanks = month.atDay(1).dayOfWeek.value - 1 // Monday-first grid
+    val leadingBlanks = month.atDay(1).dayOfWeek.value - 1
     val daysInMonth = month.lengthOfMonth()
     val rowCount = (leadingBlanks + daysInMonth + 6) / 7
 
@@ -956,9 +942,6 @@ private fun LegendEntry(label: String, color: Color, filled: Boolean) {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Attendance streak - a bit of fun on top of the numbers.
-// ---------------------------------------------------------------------------------------------
 
 @Composable
 private fun AttendanceStreakCard(
@@ -1161,7 +1144,7 @@ private fun SubjectAttendanceCard(row: SubjectAttendanceRow) {
 
             Spacer(Modifier.width(14.dp))
 
-            AttendanceRing(
+            PortalProgressRing(
                 percent = pct,
                 label = if (marked) "${pct.toInt()}%" else "\u2014",
                 color = accent,
@@ -1173,16 +1156,11 @@ private fun SubjectAttendanceCard(row: SubjectAttendanceRow) {
     }
 }
 
-/** One row of the subject-wise list: the enrolled subject plus its summary when one exists. */
 private data class SubjectAttendanceRow(
     val subject: ClassSubjectView?,
     val summary: AttendanceSummaryView?
 )
 
-// ---------------------------------------------------------------------------------------------
-// Timetable - a week strip plus a single-day timeline, so the student reads one day at a time
-// instead of scanning six stacked day cards.
-// -------------------------------------------------------------------------------------------
 
 private val scheduleDayNames =
     listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
@@ -1221,10 +1199,6 @@ private fun currentWeekLabel(): String {
     return "${monday.get(Calendar.DAY_OF_MONTH)} – ${format.format(saturday.time)}"
 }
 
-/**
- * The college's period clock, used whenever a timetable row has no explicit start/end time.
- * Lunch runs 1:15 PM - 1:45 PM, which is why the 5th lecture starts at 1:45 PM.
- */
 private val periodStartMinutes = mapOf(
     1 to 9 * 60 + 15,
     2 to 10 * 60 + 15,
@@ -1252,7 +1226,6 @@ private fun clockTimeOf(minutes: Int): ClockTime {
     return ClockTime(String.format(Locale.US, "%d:%02d", hour12, minute), suffix)
 }
 
-/** Parses a stored "HH:mm" / "H:mm:ss" value; null when the row carries no usable clock time. */
 private fun parseClock(raw: String?): ClockTime? {
     val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
     val hour = value.substringBefore(':').toIntOrNull() ?: return null
@@ -1261,11 +1234,9 @@ private fun parseClock(raw: String?): ClockTime? {
     return clockTimeOf(hour * 60 + minute)
 }
 
-/** Start of a class: the stored clock time when present, otherwise the period's fixed slot. */
 private fun entryStart(entry: MyTimetableEntryView): ClockTime? =
     parseClock(entry.startTime) ?: periodStartMinutes[entry.startPeriod]?.let(::clockTimeOf)
 
-/** End of a class: the stored clock time, otherwise the end of its last period. */
 private fun entryEnd(entry: MyTimetableEntryView): ClockTime? =
     parseClock(entry.endTime)
         ?: periodEndMinutes[entry.endPeriod]?.let(::clockTimeOf)
@@ -1300,8 +1271,6 @@ private fun TimetableContent(data: StudentPortalData, refreshing: Boolean) {
         return
     }
 
-    // Same overline treatment as "ATTENDANCE RECORD", so the tab reads as a titled screen
-    // instead of starting abruptly with the week strip.
     PortalSectionLabel(text = "CLASS TIMETABLE")
     Spacer(Modifier.height(12.dp))
 
@@ -1857,7 +1826,6 @@ private fun NotesContent(
         }
     }
 
-    // A search should reveal what matched instead of leaving every card collapsed.
     LaunchedEffect(query) {
         if (query.isNotEmpty()) {
             visibleGroups.forEach { expandedGroups[it.key] = true }
@@ -1913,7 +1881,6 @@ private fun NotesContent(
                         modifier = Modifier
                             .size(18.dp)
                             .clickable {
-                                // Clearing the query also folds every card the search expanded.
                                 searchQuery = ""
                                 expandedGroups.clear()
                             }
@@ -1963,7 +1930,6 @@ private fun NotesContent(
     }
 }
 
-/** Shimmer preview that mirrors the Notes tab while it reloads. */
 @Composable
 private fun NotesTabSkeleton() {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -2281,7 +2247,6 @@ private fun ChapterRow(index: Int, note: PortalPdfNote, onClick: () -> Unit) {
     }
 }
 
-/** "Dr. Meena Sharma" -> "MS", "Rahul Verma" -> "RV"; a single word falls back to its initial. */
 private fun facultyInitials(name: String): String {
     val stripped = name.replace(Regex("^(Dr|Mr|Mrs|Ms|Prof)\\.?\\s+", RegexOption.IGNORE_CASE), "")
     val words = stripped.split(' ').filter { it.isNotBlank() }
@@ -2302,305 +2267,490 @@ private fun noteCategoryLabel(category: String): String = when (category.lowerca
 }
 
 @Composable
-private fun ExamsResultsContent(data: StudentPortalData) {
-    val profile = data.profile
+private fun ExamsResultsContent(data: StudentPortalData, loading: Boolean = false) {
+    if (loading) {
+        ResultsSkeleton()
+        return
+    }
+
     val marks = data.marks
 
-    var selectedCategory by remember { mutableStateOf("All Exams") }
+    val exams = remember(marks) { marks.toExamResults() }
 
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        // --- 1. OVERALL RESULTS HEADER CARD (Matching Mockup Image Bottom Right) ---
-        ElevatedCard(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.elevatedCardColors(containerColor = PortalBlue),
-            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 6.dp),
+    val kinds = remember(exams) {
+        exams.map { it.kind }.distinct().sortedBy(::examKindOrder)
+    }
+    var selectedKind by remember { mutableStateOf<String?>(null) }
+    val activeKind = selectedKind?.takeIf { kind -> kinds.contains(kind) }
+    val visibleExams = if (activeKind == null) exams else exams.filter { it.kind == activeKind }
+
+    val gradedMarks = marks.filter { it.marks != null }
+    val totalObtained = gradedMarks.mapNotNull { it.marks }.sum()
+    val totalMaximum = gradedMarks.mapNotNull { it.maxMarks }.sum()
+    val overallPct = if (totalMaximum > 0) totalObtained / totalMaximum * 100.0 else 0.0
+    val failingSubjects = marks.count { it.isFailing() }
+
+    val accent = when {
+        gradedMarks.isEmpty() -> PortalTextSecondary
+        failingSubjects > 0 -> PortalRose
+        else -> PortalGreen
+    }
+    val summaryTitle = when {
+        marks.isEmpty() -> "No results published"
+        gradedMarks.isEmpty() -> "Marks awaited"
+        failingSubjects > 0 -> "Needs attention"
+        else -> "You are on track"
+    }
+    val summaryNote = when {
+        marks.isEmpty() -> "Your marks will appear here once faculty publish them"
+        gradedMarks.isEmpty() -> "Assessments are scheduled but nothing is graded yet"
+        failingSubjects > 0 ->
+            "$failingSubjects subject${if (failingSubjects == 1) "" else "s"} below the 40% pass mark"
+        else -> "All graded subjects are above the 40% pass mark"
+    }
+
+    Column {
+        PortalSectionLabel(text = "RESULT SUMMARY")
+        Spacer(Modifier.height(12.dp))
+
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = PortalCard,
+            border = BorderStroke(1.dp, PortalStroke),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
+            Row(
+                modifier = Modifier.padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                PortalProgressRing(
+                    percent = overallPct,
+                    label = if (gradedMarks.isEmpty()) "\u2014" else "${overallPct.roundToInt()}%",
+                    color = accent,
+                    diameter = 78.dp,
+                    strokeWidth = 7.dp,
+                    labelSize = 16.sp
+                )
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = summaryTitle,
+                        color = PortalTextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = if (totalMaximum > 0) {
+                            "${formatMark(totalObtained)} of ${formatMark(totalMaximum)} marks across " +
+                                "${exams.size} ${if (exams.size == 1) "exam" else "exams"}"
+                        } else {
+                            "No marks recorded yet"
+                        },
+                        color = PortalTextSecondary,
+                        fontSize = 12.5.sp
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
-                                .size(48.dp)
+                                .size(6.dp)
                                 .clip(CircleShape)
-                                .background(Gold.copy(alpha = 0.25f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Outlined.School,
-                                contentDescription = null,
-                                tint = GoldLight,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = data.displayName ?: profile?.name ?: "Student Profile",
-                                color = Color.White,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "${profile?.course ?: "B.Tech CSE"} · Sem ${profile?.semester ?: 3}",
-                                color = Color.White.copy(alpha = 0.75f),
-                                fontSize = 12.sp
-                            )
-                        }
-                    }
-
-                    // Promoted / Pass badge pill
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(PortalGreen.copy(alpha = 0.25f))
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
-                    ) {
+                                .background(accent)
+                        )
+                        Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "PROMOTED",
-                            color = GoldLight,
+                            text = summaryNote,
+                            color = accent,
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.ExtraBold
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
-
-                Spacer(Modifier.height(16.dp))
-
-                val totalMarksObtained = if (marks.isNotEmpty()) marks.mapNotNull { it.marks }.sum() else 248.0
-                val totalMaxMarks = if (marks.isNotEmpty()) marks.mapNotNull { it.maxMarks }.sum() else 300.0
-                val overallPct = if (totalMaxMarks > 0) (totalMarksObtained / totalMaxMarks * 100.0) else 82.0
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "${overallPct.toInt()}%",
-                        color = Color.White,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                    Text(
-                        text = "Overall percentage",
-                        color = Color.White.copy(alpha = 0.8f),
-                        fontSize = 12.sp
-                    )
-                }
-
-                Spacer(Modifier.height(8.dp))
-
-                LinearProgressIndicator(
-                    progress = { (overallPct / 100.0).toFloat().coerceIn(0f, 1f) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(CircleShape),
-                    color = Gold,
-                    trackColor = Color.White.copy(alpha = 0.2f)
-                )
             }
         }
 
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(20.dp))
+        PortalSectionLabel(text = "EXAM RESULTS")
+        Spacer(Modifier.height(12.dp))
 
-        // --- 2. EXAMS SUB-FILTER CHIPS ---
-        PortalSectionLabel(text = "RESULTS")
+        if (kinds.size > 1) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ResultFilterChip(
+                    label = "All",
+                    active = activeKind == null,
+                    onClick = { selectedKind = null }
+                )
+                kinds.forEach { kind ->
+                    ResultFilterChip(
+                        label = examKindLabel(kind),
+                        active = activeKind == kind,
+                        onClick = { selectedKind = kind }
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+        }
 
-        val filterCategories = listOf("All Exams", "Unit Tests", "Mid Terms", "End Sem")
-        Row(
+        if (visibleExams.isEmpty()) {
+            PortalEmptyCard(
+                message = if (marks.isEmpty()) {
+                    "No results published yet."
+                } else {
+                    "No marks recorded for this exam type."
+                }
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                visibleExams.forEach { exam ->
+                    ExamResultCard(exam = exam)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ResultsSkeleton() {
+    Column {
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                .width(132.dp)
+                .height(11.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .shimmerEffect()
+        )
+        Spacer(Modifier.height(12.dp))
+
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = PortalCard,
+            border = BorderStroke(1.dp, PortalStroke),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            filterCategories.forEach { category ->
-                val active = selectedCategory == category
+            Row(
+                modifier = Modifier.padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(if (active) PortalBlue else PortalCard)
-                        .border(1.dp, if (active) PortalBlue else PortalStroke, RoundedCornerShape(20.dp))
-                        .clickable { selectedCategory = category }
-                        .padding(horizontal = 14.dp, vertical = 7.dp)
-                ) {
-                    Text(
-                        text = category,
-                        color = if (active) Color.White else PortalTextPrimary,
-                        fontSize = 12.sp,
-                        fontWeight = if (active) FontWeight.Bold else FontWeight.Medium
+                        .size(78.dp)
+                        .clip(CircleShape)
+                        .shimmerEffect()
+                )
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.55f)
+                            .height(15.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .shimmerEffect()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.8f)
+                            .height(11.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .shimmerEffect()
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(118.dp)
+                            .height(10.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .shimmerEffect()
                     )
                 }
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(20.dp))
 
-        // --- 3. TIMELINE EXAM RESULTS CARDS (Matching Mockup Image Timeline) ---
-        val sampleList = listOf(
-            ExamAssessment(
-                title = "1st Midterm",
-                dateRange = "15 Sep to 18 Sep",
-                score = "85 / 100",
-                status = "Promoted",
-                isPass = true,
-                subjects = listOf(
-                    ExamSubjectResult("Mathematics", "56", true),
-                    ExamSubjectResult("Physics", "28", false)
-                )
-            ),
-            ExamAssessment(
-                title = "2nd Midterm",
-                dateRange = "15 Oct to 18 Oct",
-                score = "78 / 100",
-                status = "Promoted",
-                isPass = true,
-                subjects = listOf(
-                    ExamSubjectResult("Chemistry 1", "65", true),
-                    ExamSubjectResult("Data Structures", "56", true)
-                )
-            ),
-            ExamAssessment(
-                title = "3rd Midterm",
-                dateRange = "15 Nov to 18 Nov",
-                score = "82 / 100",
-                status = "Promoted",
-                isPass = true,
-                subjects = listOf(
-                    ExamSubjectResult("DBMS", "72", true),
-                    ExamSubjectResult("Operating Systems", "68", true)
-                )
-            )
+        Box(
+            modifier = Modifier
+                .width(108.dp)
+                .height(11.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .shimmerEffect()
         )
+        Spacer(Modifier.height(12.dp))
 
-        val filteredExams = when (selectedCategory) {
-            "Unit Tests" -> sampleList.filter { it.title.contains("UT", true) || it.title.contains("Unit", true) }
-            "Mid Terms" -> sampleList.filter { it.title.contains("Midterm", true) || it.title.contains("Mid", true) }
-            "End Sem" -> sampleList.filter { it.title.contains("End", true) }
-            else -> sampleList
-        }.ifEmpty { sampleList }
-
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            filteredExams.forEachIndexed { index, exam ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    // Timeline connector column
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.width(24.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(12.dp)
-                                .clip(CircleShape)
-                                .background(Gold)
-                        )
-                        if (index < filteredExams.lastIndex) {
+        repeat(2) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = PortalCard,
+                border = BorderStroke(1.dp, PortalStroke),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Box(
                                 modifier = Modifier
-                                    .width(2.dp)
-                                    .height(140.dp)
-                                    .background(Gold.copy(alpha = 0.4f))
+                                    .width(44.dp)
+                                    .height(19.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .shimmerEffect()
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.6f)
+                                    .height(13.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .shimmerEffect()
+                            )
+                            Spacer(Modifier.height(7.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.45f)
+                                    .height(10.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .shimmerEffect()
+                            )
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(58.dp)
+                                .clip(CircleShape)
+                                .shimmerEffect()
+                        )
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider(color = PortalStroke, thickness = 0.6.dp)
+
+                    repeat(2) { index ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.7f)
+                                        .height(12.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .shimmerEffect()
+                                )
+                                Spacer(Modifier.height(5.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .width(38.dp)
+                                        .height(9.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .shimmerEffect()
+                                )
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Box(
+                                modifier = Modifier
+                                    .width(54.dp)
+                                    .height(12.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .shimmerEffect()
+                            )
+                        }
+                        if (index == 0) {
+                            HorizontalDivider(
+                                color = PortalStroke.copy(alpha = 0.6f),
+                                thickness = 0.5.dp
                             )
                         }
                     }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+    }
+}
 
-                    Spacer(Modifier.width(10.dp))
+private data class ExamResult(
+    val kind: String,
+    val number: Int,
+    val subjects: List<MarkView>
+) {
+    val title: String
+        get() = if (number > 0) "${examKindLabel(kind)} $number" else examKindLabel(kind)
 
-                    // Exam card
-                    ElevatedCard(
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.elevatedCardColors(containerColor = PortalCard),
-                        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp),
-                        modifier = Modifier.weight(1f)
+    val shortCode: String
+        get() = if (number > 0) "${kind.trim().uppercase()} $number" else kind.trim().uppercase()
+
+    val obtained: Double get() = subjects.mapNotNull { it.marks }.sum()
+    val maximum: Double get() = subjects.mapNotNull { it.maxMarks }.sum()
+    val graded: Int get() = subjects.count { it.marks != null }
+    val percentage: Double get() = if (maximum > 0) obtained / maximum * 100.0 else 0.0
+    val failed: Int get() = subjects.count { it.isFailing() }
+}
+
+private fun List<MarkView>.toExamResults(): List<ExamResult> =
+    groupBy { it.kind.trim().uppercase() to it.number }
+        .map { (key, rows) ->
+            ExamResult(
+                kind = key.first,
+                number = key.second,
+                subjects = rows.sortedBy { it.subjectName.lowercase() }
+            )
+        }
+        .sortedWith(compareBy({ examKindOrder(it.kind) }, { it.number }))
+
+private fun examKindOrder(kind: String): Int = when (kind.trim().uppercase()) {
+    "UT", "UNIT", "UNIT_TEST", "UNIT TEST" -> 0
+    "MID", "MIDTERM", "MID_TERM", "MID TERM" -> 1
+    "END", "END_SEM", "END SEM", "ESE" -> 2
+    else -> 3
+}
+
+private fun examKindLabel(kind: String): String = when (kind.trim().uppercase()) {
+    "UT", "UNIT", "UNIT_TEST", "UNIT TEST" -> "Unit Test"
+    "MID", "MIDTERM", "MID_TERM", "MID TERM" -> "Mid Term"
+    "END", "END_SEM", "END SEM", "ESE" -> "End Sem"
+    "QUIZ" -> "Quiz"
+    "ASSIGNMENT", "ASSIGN" -> "Assignment"
+    "PRACTICAL", "LAB" -> "Practical"
+    else -> kind.trim().replace('_', ' ').lowercase()
+        .replaceFirstChar { it.titlecase() }
+        .ifEmpty { "Exam" }
+}
+
+private fun MarkView.isFailing(): Boolean {
+    val obtained = marks ?: return false
+    val maximum = maxMarks ?: return false
+    return maximum > 0 && obtained / maximum < 0.4
+}
+
+private fun formatMark(value: Double): String =
+    if (value % 1.0 == 0.0) "%.0f".format(value) else "%.1f".format(value)
+
+@Composable
+private fun ResultFilterChip(label: String, active: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (active) PortalBlue else PortalCard)
+            .border(1.dp, if (active) PortalBlue else PortalStroke, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 13.dp, vertical = 7.dp)
+    ) {
+        Text(
+            text = label,
+            color = if (active) Color.White else PortalTextSecondary,
+            fontSize = 12.sp,
+            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+private fun ExamResultCard(exam: ExamResult) {
+    val accent = when {
+        exam.graded == 0 -> PortalTextSecondary
+        exam.failed > 0 -> PortalRose
+        else -> PortalGreen
+    }
+    val note = when {
+        exam.graded == 0 -> "Awaiting marks"
+        exam.failed > 0 -> "Below the 40% pass mark"
+        else -> "Passed"
+    }
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = PortalCard,
+        border = BorderStroke(1.dp, PortalStroke),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(PortalBlue.copy(alpha = 0.12f))
+                            .padding(horizontal = 9.dp, vertical = 4.dp)
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text(
-                                        text = exam.title,
-                                        color = PortalTextPrimary,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Spacer(Modifier.height(2.dp))
-                                    Text(
-                                        text = exam.dateRange,
-                                        color = PortalTextSecondary,
-                                        fontSize = 11.5.sp
-                                    )
-                                }
+                        Text(
+                            text = exam.shortCode,
+                            color = PortalBlue,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = exam.title,
+                        color = PortalTextPrimary,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        lineHeight = 17.sp
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = when {
+                            exam.graded == 0 ->
+                                "${exam.subjects.size} subject${if (exam.subjects.size == 1) "" else "s"}, none graded"
+                            exam.maximum > 0 ->
+                                "${formatMark(exam.obtained)} of ${formatMark(exam.maximum)} marks"
+                            else -> "${exam.graded} of ${exam.subjects.size} subjects graded"
+                        },
+                        color = PortalTextSecondary,
+                        fontSize = 11.sp
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(5.dp)
+                                .clip(CircleShape)
+                                .background(accent)
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            text = note,
+                            color = accent,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
 
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(if (exam.isPass) PortalGreen.copy(alpha = 0.15f) else PortalRose.copy(alpha = 0.15f))
-                                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = exam.status.uppercase(),
-                                        color = if (exam.isPass) PortalGreen else PortalRose,
-                                        fontSize = 10.5.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
+                Spacer(Modifier.width(14.dp))
 
-                            Spacer(Modifier.height(12.dp))
+                PortalProgressRing(
+                    percent = exam.percentage,
+                    label = if (exam.graded == 0) "\u2014" else "${exam.percentage.roundToInt()}%",
+                    color = accent,
+                    diameter = 58.dp,
+                    strokeWidth = 5.5.dp,
+                    labelSize = 12.5.sp
+                )
+            }
 
-                            exam.subjects.forEach { sub ->
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = PortalTrack.copy(alpha = 0.4f),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = sub.subjectName,
-                                            color = PortalTextPrimary,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Text(
-                                                text = sub.score,
-                                                color = PortalTextPrimary,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            Text(
-                                                text = if (sub.isPass) "PASS" else "FAILED",
-                                                color = if (sub.isPass) PortalGreen else PortalRose,
-                                                fontSize = 10.5.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
+            if (exam.subjects.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                HorizontalDivider(color = PortalStroke, thickness = 0.6.dp)
+                exam.subjects.forEachIndexed { index, mark ->
+                    SubjectMarkRow(mark = mark)
+                    if (index < exam.subjects.lastIndex) {
+                        HorizontalDivider(
+                            color = PortalStroke.copy(alpha = 0.6f),
+                            thickness = 0.5.dp
+                        )
                     }
                 }
             }
@@ -2608,20 +2758,63 @@ private fun ExamsResultsContent(data: StudentPortalData) {
     }
 }
 
-private data class ExamAssessment(
-    val title: String,
-    val dateRange: String,
-    val score: String,
-    val status: String,
-    val isPass: Boolean,
-    val subjects: List<ExamSubjectResult>
-)
+@Composable
+private fun SubjectMarkRow(mark: MarkView) {
+    val obtained = mark.marks
+    val maximum = mark.maxMarks
+    val failed = mark.isFailing()
+    val statusColor = when {
+        obtained == null -> PortalTextSecondary
+        failed -> PortalRose
+        else -> PortalGreen
+    }
 
-private data class ExamSubjectResult(
-    val subjectName: String,
-    val score: String,
-    val isPass: Boolean
-)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = mark.subjectName,
+                color = PortalTextPrimary,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = mark.subjectCode,
+                color = PortalTextSecondary,
+                fontSize = 10.5.sp
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = if (obtained != null && maximum != null) {
+                    "${formatMark(obtained)} / ${formatMark(maximum)}"
+                } else {
+                    "\u2014"
+                },
+                color = PortalTextPrimary,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = when {
+                    obtained == null -> "Pending"
+                    failed -> "Fail"
+                    else -> "Pass"
+                },
+                color = statusColor,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
 
 @Composable
 internal fun PortalSectionLabel(text: String) {
@@ -2833,7 +3026,6 @@ fun StudentSettingsTab(data: StudentPortalData, scroll: ScrollState, onSignedOut
     }
 
     PortalTabScaffold(scroll = scroll) {
-        // --- 1. PROFILE HEADER CARD (Matching Image 2 in Prompt) ---
         ElevatedCard(
             shape = RoundedCornerShape(22.dp),
             colors = CardDefaults.elevatedCardColors(containerColor = PortalCard),
@@ -2919,7 +3111,6 @@ fun StudentSettingsTab(data: StudentPortalData, scroll: ScrollState, onSignedOut
 
         Spacer(Modifier.height(22.dp))
 
-        // --- 2. OPTIONS LIST ---
         PortalSectionLabel(text = "SETTINGS & SERVICES")
         Spacer(Modifier.height(12.dp))
 
@@ -2962,7 +3153,6 @@ fun StudentSettingsTab(data: StudentPortalData, scroll: ScrollState, onSignedOut
 
         Spacer(Modifier.height(24.dp))
 
-        // --- 3. SIGN OUT BUTTON ---
         Button(
             onClick = { showLogoutDialog = true },
             shape = RoundedCornerShape(14.dp),
@@ -2981,7 +3171,6 @@ fun StudentSettingsTab(data: StudentPortalData, scroll: ScrollState, onSignedOut
 
         Spacer(Modifier.height(20.dp))
 
-        // --- 4. COPYRIGHT FOOTER TEXT ---
         Text(
             text = "\u00a9 2026 MITRC Alwar. All rights reserved.",
             color = PortalTextSecondary,
@@ -3060,7 +3249,6 @@ internal fun LogoutConfirmDialog(
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { visible = true }
 
-    // Once sign-out is done, play the dialog's scale-down/fade exit before the screen swaps.
     LaunchedEffect(signOutComplete) {
         if (signOutComplete) {
             visible = false

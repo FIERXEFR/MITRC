@@ -2,10 +2,6 @@ package com.mitrc.ac.`in`.notifications
 
 import android.content.Context
 
-/**
- * Remembers whether the post-login notification prompt has been shown, so the
- * app asks once instead of nagging on every launch.
- */
 object PushPermissionStore {
 
     private const val PREFS = "mitrc_push"
